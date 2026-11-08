@@ -108,3 +108,23 @@ Recorded 2026-11-08 with the first uploaded record.
   Simulator, both with Metal API Validation enabled.
 - `swift build` cannot compile `.metal` files; build and test through Xcode.
 
+## Glass panel record (GW-05)
+
+Recorded 2026-11-08 with the second uploaded record.
+
+- `GWGlassUniforms` lives in the same header. It nests `GWBackgroundUniforms`
+  at offset 0 so the panel samples through the background's exact mapping,
+  then `targetSize` 40, `panelCenter` 48, `panelHalfSize` 56, `cornerRadius`
+  64, `bezelWidth` 68, `normalRadius` 72, `maxDisplacement` 76,
+  `edgeHighlight` 80, three explicit zeroed `float` padding fields (84, 88,
+  92), and `tint` (`simd_float4`, linear RGB plus strength) at 96. Size 112,
+  alignment 16, stride 112. Every value is in target pixels or normalized;
+  points never reach the GPU.
+- Binding: vertex and fragment buffer 0, fragment texture 0.
+- The same three checks apply: C `_Static_assert`s, MSL `static_assert`s in
+  `Glass.metal`, and Swift Testing `MemoryLayout` checks. The compute probe
+  `gw_test_glass_uniforms_probe` reads a record with distinctive values
+  (padding set to nonzero sentinels so a misplaced read shows) and writes back
+  every field, `sizeof`, `alignof`, and each offset. It passed on My Mac
+  (Apple M5) and on the iOS 27.2 Simulator with Metal API Validation.
+

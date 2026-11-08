@@ -3,10 +3,13 @@ import GlassWeave
 import MetalKit
 import UIKit
 
-/// Presents an explicit background source through an `MTKView`, on demand.
+/// Presents an explicit background source, with an optional rounded glass
+/// panel over it, through an `MTKView`, on demand.
 ///
-/// The view draws only when something changes: a new source, a new pixel
-/// size, or a display-scale change. No display loop runs in between. It
+/// The view draws only when something changes: a new source, a new panel, a
+/// new pixel size, or a display-scale change. No display loop runs in
+/// between. The panel is given in this view's points and converted with the
+/// same display scale as the drawable. The view
 /// sizes its drawable from its own bounds and `traitCollection.displayScale`,
 /// never from a screen or a global scene.
 ///
@@ -23,7 +26,7 @@ import UIKit
 /// not take touches, so native content placed above it keeps its behavior.
 @MainActor
 public final class GlassSurfaceView: UIView {
-    public let renderer: BackgroundRenderer
+    public let renderer: GlassRenderer
 
     /// The result of the most recent draw request, for diagnostics.
     public private(set) var lastRenderOutcome: BackgroundRenderOutcome?
@@ -38,12 +41,12 @@ public final class GlassSurfaceView: UIView {
     private let metalView: MTKView
     private let drawDelegate = DrawDelegate()
 
-    public init(renderer: BackgroundRenderer) {
+    public init(renderer: GlassRenderer) {
         self.renderer = renderer
         self.metalView = MTKView(frame: .zero, device: renderer.device)
         super.init(frame: .zero)
 
-        metalView.colorPixelFormat = BackgroundRenderer.outputPixelFormat
+        metalView.colorPixelFormat = GlassRenderer.outputPixelFormat
         metalView.framebufferOnly = true
         // Event-driven drawing: no display loop runs while nothing changes.
         metalView.isPaused = true
@@ -78,6 +81,23 @@ public final class GlassSurfaceView: UIView {
         try renderer.setSource(lease)
         metalView.isHidden = false
         metalView.setNeedsDisplay()
+    }
+
+    /// The panel drawn over the source, in this view's points, after the
+    /// ``GlassParameters`` normalization rule; `nil` for none.
+    public var panel: GlassPanel? {
+        renderer.panel
+    }
+
+    /// Sets the panel, in this view's coordinate space and points, and
+    /// redraws if it changed. A non-finite value throws and leaves the
+    /// current panel in place.
+    public func setPanel(_ panel: GlassPanel?) throws(GlassParameterError) {
+        let previous = renderer.panel
+        try renderer.setPanel(panel)
+        if renderer.panel != previous {
+            metalView.setNeedsDisplay()
+        }
     }
 
     /// Removes the source and shows the opaque fallback.
@@ -117,7 +137,7 @@ public final class GlassSurfaceView: UIView {
 
     /// Draws through the same path the `MTKView` delegate uses.
     func render(in view: MTKView) {
-        let outcome = renderer.draw(targetPixelSize: pixelSize) {
+        let outcome = renderer.draw(targetPixelSize: pixelSize, displayScale: traitCollection.displayScale) {
             // Acquire the drawable as late as possible.
             guard let descriptor = view.currentRenderPassDescriptor else { return nil }
             return BackgroundDrawTarget(renderPassDescriptor: descriptor, drawable: view.currentDrawable)

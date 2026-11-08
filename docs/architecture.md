@@ -132,6 +132,30 @@ Expose only parameters that have a demonstrated use. Avoid a full material graph
 
 Errors should identify an actionable condition such as unsupported source format, incompatible device, pipeline creation failure, or unavailable capability. A missing drawable or zero-size view is a transient skip, not a fatal library error. A requested custom mode must never silently masquerade as a successful custom render when it actually fell back; expose the effective mode/reason in diagnostics.
 
+### Implemented optical model (GW-05)
+
+`GlassRenderer` draws the background pass and then one rounded panel in the
+same render pass. The panel's quad covers the panel rectangle grown by one
+pixel; its fragment shader (`Shaders/Glass.metal`) samples the same frame
+through the same destination-to-source mapping and valid-rectangle clamp as
+the background, so the refraction cannot show a different frame or read
+outside the valid rectangle. `GlassPanelGeometry` mirrors the shader math on
+the CPU; the GPU tests compare the two pixel by pixel.
+
+| Element | Definition |
+| --- | --- |
+| Units | `GlassPanel.frame`, `cornerRadius`, and `bezelWidth` are points in the host surface's coordinate space (origin top-left, y down). The renderer multiplies by the host's display scale at draw time; nothing in points reaches the GPU. `refraction`, `edgeHighlight`, and the tint are normalized to 0...1. |
+| Shape field | Rounded-rectangle signed distance in pixels. Rim normals come from the same rectangle with corner radius `max(cornerRadius, bezelWidth)`, so the refraction direction turns smoothly around a corner tighter than the rim. |
+| Refraction | Inside the rim (depth `d` below the outline, `d < bezelWidth`) the sample moves toward the interior by `refraction × bezelWidth / 2 × (1 − d / bezelWidth)²` pixels. The bound is `refraction × bezelWidth / 2`, and the depth mapping never folds over for refraction in 0...1. The interior is flat and samples in place. |
+| Tint | Mixed in linear light: `mix(refracted, tint, strength)`. Components are sRGB-encoded at the API and decoded on the CPU. |
+| Edge illumination | `edgeHighlight × 0.25 × rim³ × (0.4 + 0.6 × facing)` of the way to white, with `rim` 1 at the outline and 0 at the rim's inner edge and `facing` the normal's alignment with light from the upper left. At most a quarter of the way to white. |
+| Edge and alpha | One-pixel antialiased coverage mixes the glass with the undisplaced background in linear light. Every pixel is written opaque (alpha 1); the source alpha is ignored as in GW-04. |
+| Normalization | Non-finite values are rejected with `GlassParameterError.nonFinite(field)` and leave the current panel in place. Finite values are clamped: negative lengths to 0, lengths to half the panel's shorter side, coefficients and tint to 0...1, negative frame sizes to 0. An empty panel draws nothing. `GlassRenderer.panel` reports the values drawn. |
+| Tolerance | Output is `bgra8Unorm` holding sRGB-encoded values. Zero refraction reproduces the source, and smooth or uniform fixtures match the CPU model, within one 8-bit step per channel (Metal fast math). Hard high-contrast edges are checked by properties (range, gray stays gray, unchanged where nothing is displaced) because GPU filter weights are quantized. |
+
+The parameters are a first lab-tuned set, not a frozen public API; which of
+them stay public is decided after the coexistence proof (plan decision 3).
+
 ## Scheduling and resources
 
 - Render static surfaces on demand; use continuous drawing only while a source or effect is changing.

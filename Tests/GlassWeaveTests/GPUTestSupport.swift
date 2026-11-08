@@ -67,8 +67,31 @@ struct GPUContext {
         return BackgroundFrameLease(frame: frame, onRelease: onRelease)
     }
 
-    /// An offscreen target in the renderer's output format.
-    func makeTarget(width: Int, height: Int) throws -> BackgroundDrawTarget {
+    /// Uploaded BGRA bytes wrapped in a lease.
+    func makeLease(
+        bgra: [UInt8], width: Int, height: Int,
+        frameID: UInt64 = 1,
+        timestamp: Duration = .zero,
+        validRect: PixelRect? = nil,
+        onRelease: @escaping @Sendable (BackgroundFrameRelease) -> Void = { _ in }
+    ) throws -> BackgroundFrameLease {
+        precondition(bgra.count == width * height * 4)
+        let texture = try makeTexture(width: width, height: height)
+        try upload(bgra, to: texture)
+        let frame = BackgroundFrame(
+            texture: texture, frameID: frameID, timestamp: timestamp,
+            validRect: validRect, colorConvention: .sRGBOpaque, readiness: .committed(on: queue)
+        )
+        return BackgroundFrameLease(frame: frame, onRelease: onRelease)
+    }
+
+    /// An offscreen target in the renderer's output format, cleared to
+    /// `clear`. The default is transparent black: every pixel a renderer
+    /// writes is opaque, so a pixel left with alpha 0 was never written.
+    func makeTarget(
+        width: Int, height: Int,
+        clear: MTLClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+    ) throws -> BackgroundDrawTarget {
         let texture = try makeTexture(
             width: width, height: height,
             pixelFormat: BackgroundRenderer.outputPixelFormat,
@@ -77,7 +100,7 @@ struct GPUContext {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = texture
         pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pass.colorAttachments[0].clearColor = clear
         pass.colorAttachments[0].storeAction = .store
         return BackgroundDrawTarget(renderPassDescriptor: pass)
     }
@@ -127,6 +150,11 @@ struct RenderedImage {
     func color(x: Int, y: Int) -> OrientationPattern.Color {
         let index = (y * width + x) * 4
         return OrientationPattern.Color(red: bgra[index + 2], green: bgra[index + 1], blue: bgra[index], alpha: bgra[index + 3])
+    }
+
+    /// Whether every pixel has alpha 255, so none was left unwritten.
+    var isFullyOpaque: Bool {
+        stride(from: 3, to: bgra.count, by: 4).allSatisfy { bgra[$0] == 255 }
     }
 
     /// The pixel at a destination UV (pixel centers at (i + 0.5) / width).

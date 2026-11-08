@@ -32,3 +32,53 @@ kernel void gw_test_background_uniforms_probe(
     layout[5] = __builtin_offsetof(GWBackgroundUniforms, sampleClampMin);
     layout[6] = __builtin_offsetof(GWBackgroundUniforms, sampleClampMax);
 }
+
+/// Writes the shader's view of a GWGlassUniforms record, field by field
+/// (including the nested background record), plus its size, alignment, and
+/// field offsets.
+kernel void gw_test_glass_uniforms_probe(
+    constant GWGlassUniforms &record [[buffer(0)]],
+    device float *values [[buffer(1)]],
+    device uint *layout [[buffer(2)]],
+    uint tid [[thread_position_in_grid]])
+{
+    if (tid != 0) { return; }
+    values[0] = record.background.uvFromDestinationX.x;
+    values[1] = record.background.uvFromDestinationX.y;
+    values[2] = record.background.uvFromDestinationY.x;
+    values[3] = record.background.uvFromDestinationY.y;
+    values[4] = record.background.uvOrigin.x;
+    values[5] = record.background.uvOrigin.y;
+    values[6] = record.background.sampleClampMin.x;
+    values[7] = record.background.sampleClampMin.y;
+    values[8] = record.background.sampleClampMax.x;
+    values[9] = record.background.sampleClampMax.y;
+    values[10] = record.targetSize.x;
+    values[11] = record.targetSize.y;
+    values[12] = record.panelCenter.x;
+    values[13] = record.panelCenter.y;
+    values[14] = record.panelHalfSize.x;
+    values[15] = record.panelHalfSize.y;
+    values[16] = record.cornerRadius;
+    values[17] = record.bezelWidth;
+    values[18] = record.normalRadius;
+    values[19] = record.maxDisplacement;
+    values[20] = record.edgeHighlight;
+    values[21] = record.tint.x;
+    values[22] = record.tint.y;
+    values[23] = record.tint.z;
+    values[24] = record.tint.w;
+
+    layout[0] = sizeof(GWGlassUniforms);
+    layout[1] = alignof(GWGlassUniforms);
+    layout[2] = __builtin_offsetof(GWGlassUniforms, background);
+    layout[3] = __builtin_offsetof(GWGlassUniforms, targetSize);
+    layout[4] = __builtin_offsetof(GWGlassUniforms, panelCenter);
+    layout[5] = __builtin_offsetof(GWGlassUniforms, panelHalfSize);
+    layout[6] = __builtin_offsetof(GWGlassUniforms, cornerRadius);
+    layout[7] = __builtin_offsetof(GWGlassUniforms, bezelWidth);
+    layout[8] = __builtin_offsetof(GWGlassUniforms, normalRadius);
+    layout[9] = __builtin_offsetof(GWGlassUniforms, maxDisplacement);
+    layout[10] = __builtin_offsetof(GWGlassUniforms, edgeHighlight);
+    layout[11] = __builtin_offsetof(GWGlassUniforms, tint);
+}

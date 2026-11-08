@@ -83,6 +83,11 @@ final class LabViewController: UIViewController {
         }
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateCustomPanel()
+    }
+
     /// Returns every laboratory control to its initial state.
     func reset() {
         resetCount += 1
@@ -207,7 +212,7 @@ final class LabViewController: UIViewController {
     private func setUpCustomRegion() {
         do {
             let source = try PatternSource()
-            let surface = GlassSurfaceView(renderer: try BackgroundRenderer(commandQueue: source.queue))
+            let surface = GlassSurfaceView(renderer: try GlassRenderer(commandQueue: source.queue))
             surface.accessibilityIdentifier = "lab.customSurface"
             surface.renderObserver = { [weak self] _ in self?.updateDiagnostics() }
             customRegion.setBody(surface)
@@ -219,6 +224,27 @@ final class LabViewController: UIViewController {
             label.adjustsFontForContentSizeCategory = true
             label.numberOfLines = 0
             customRegion.setBody(label)
+            custom = .failure(error)
+        }
+    }
+
+    /// The custom panel's optics, in points and normalized coefficients.
+    static let panelParameters = GlassParameters(
+        cornerRadius: 28, bezelWidth: 22, refraction: 0.85, edgeHighlight: 0.6,
+        tint: GlassTint(red: 0.85, green: 0.92, blue: 1, strength: 0.08)
+    )
+
+    /// Centers one panel in the custom surface, in the surface's own points,
+    /// leaving the pattern's corners visible around it.
+    private func updateCustomPanel() {
+        guard case let .success((_, surface)) = custom else { return }
+        // Lay out the region first so the surface's bounds are current.
+        customRegion.layoutIfNeeded()
+        let bounds = surface.bounds
+        let frame = bounds.insetBy(dx: bounds.width * 0.22, dy: bounds.height * 0.24)
+        do {
+            try surface.setPanel(GlassPanel(frame: frame, parameters: Self.panelParameters))
+        } catch {
             custom = .failure(error)
         }
     }

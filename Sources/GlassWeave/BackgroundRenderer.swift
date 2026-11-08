@@ -54,7 +54,7 @@ public enum BackgroundRendererError: Error, CustomStringConvertible {
         case let .missingShaderFunction(name):
             "GlassWeave's shader library has no function named \(name). Rebuild the package."
         case let .pipelineCreationFailed(reason):
-            "The background render pipeline could not be created: \(reason)."
+            "A GlassWeave render pipeline could not be created: \(reason)."
         }
     }
 }
@@ -85,33 +85,51 @@ public final class BackgroundRenderer {
 
     /// Creates a renderer that submits to `commandQueue` on its device.
     /// Loads the package shader library and builds the pipeline now.
-    public init(commandQueue: any MTLCommandQueue) throws {
-        let device = commandQueue.device
-        let library: any MTLLibrary
+    public convenience init(commandQueue: any MTLCommandQueue) throws {
+        try self.init(commandQueue: commandQueue, library: Self.makeLibrary(device: commandQueue.device))
+    }
+
+    /// Creates a renderer from an already loaded package shader library.
+    init(commandQueue: any MTLCommandQueue, library: any MTLLibrary) throws {
+        pipeline = try Self.makePipeline(
+            device: commandQueue.device, library: library, label: "GlassWeave background",
+            vertex: "gw_background_vertex", fragment: "gw_background_fragment"
+        )
+        self.device = commandQueue.device
+        self.commandQueue = commandQueue
+        RendererCensus.recordCreation()
+    }
+
+    /// Loads the package's compiled shader library.
+    static func makeLibrary(device: any MTLDevice) throws -> any MTLLibrary {
         do {
-            library = try device.makeDefaultLibrary(bundle: .module)
+            return try device.makeDefaultLibrary(bundle: .module)
         } catch {
             throw BackgroundRendererError.shaderLibraryUnavailable(String(describing: error))
         }
-        guard let vertexFunction = library.makeFunction(name: "gw_background_vertex") else {
-            throw BackgroundRendererError.missingShaderFunction("gw_background_vertex")
+    }
+
+    /// Builds a render pipeline that writes ``outputPixelFormat``.
+    static func makePipeline(
+        device: any MTLDevice, library: any MTLLibrary, label: String,
+        vertex: String, fragment: String
+    ) throws -> any MTLRenderPipelineState {
+        guard let vertexFunction = library.makeFunction(name: vertex) else {
+            throw BackgroundRendererError.missingShaderFunction(vertex)
         }
-        guard let fragmentFunction = library.makeFunction(name: "gw_background_fragment") else {
-            throw BackgroundRendererError.missingShaderFunction("gw_background_fragment")
+        guard let fragmentFunction = library.makeFunction(name: fragment) else {
+            throw BackgroundRendererError.missingShaderFunction(fragment)
         }
         let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.label = "GlassWeave background"
+        descriptor.label = label
         descriptor.vertexFunction = vertexFunction
         descriptor.fragmentFunction = fragmentFunction
-        descriptor.colorAttachments[0].pixelFormat = Self.outputPixelFormat
+        descriptor.colorAttachments[0].pixelFormat = outputPixelFormat
         do {
-            pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+            return try device.makeRenderPipelineState(descriptor: descriptor)
         } catch {
-            throw BackgroundRendererError.pipelineCreationFailed(String(describing: error))
+            throw BackgroundRendererError.pipelineCreationFailed("\(label): \(error)")
         }
-        self.device = device
-        self.commandQueue = commandQueue
-        RendererCensus.recordCreation()
     }
 
     deinit {
@@ -174,6 +192,24 @@ public final class BackgroundRenderer {
         targetPixelSize: (width: Int, height: Int),
         acquireTarget: () -> BackgroundDrawTarget?
     ) -> BackgroundRenderOutcome {
+        draw(targetPixelSize: targetPixelSize, acquireTarget: acquireTarget, overlay: nil)
+    }
+
+    /// Work a composing renderer encodes after the background, in the same
+    /// render pass, reading the same frame through the same mapping.
+    typealias Overlay = (
+        _ encoder: any MTLRenderCommandEncoder,
+        _ frame: BackgroundFrame,
+        _ background: GWBackgroundUniforms,
+        _ targetSize: (width: Int, height: Int)
+    ) -> Void
+
+    /// Draws the background, then `overlay`, into one render pass.
+    func draw(
+        targetPixelSize: (width: Int, height: Int),
+        acquireTarget: () -> BackgroundDrawTarget?,
+        overlay: Overlay?
+    ) -> BackgroundRenderOutcome {
         guard let source else { return .skipped(.missingSource) }
         guard targetPixelSize.width > 0, targetPixelSize.height > 0 else {
             return .skipped(.zeroSizeTarget)
@@ -217,6 +253,7 @@ public final class BackgroundRenderer {
         )
         encoder.setFragmentTexture(frame.texture, index: Int(GWBackgroundBindingIndexSourceTexture.rawValue))
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        overlay?(encoder, frame, uniforms, (colorTexture.width, colorTexture.height))
         encoder.endEncoding()
         if let drawable = target.drawable {
             commandBuffer.present(drawable)
@@ -234,9 +271,12 @@ public final class BackgroundRenderer {
 ///
 /// A renderer is the only GlassWeave object that builds a pipeline or
 /// submits GPU work, and the only `MTKView` host (`GlassSurfaceView`) needs
-/// one. GlassWeave never creates a Metal device or command queue itself; the
-/// app passes its queue to a renderer. So a code path that creates no
-/// renderer creates no GlassWeave GPU objects and runs no render loop.
+/// one. Every renderer is a `BackgroundRenderer` or contains exactly one
+/// (a `GlassRenderer` builds its panel pipeline in the same initializer), so
+/// counting `BackgroundRenderer` creations counts renderers. GlassWeave
+/// never creates a Metal device or command queue itself; the app passes its
+/// queue to a renderer. So a code path that creates no renderer creates no
+/// GlassWeave GPU objects and runs no render loop.
 ///
 /// Each creation and destruction also emits an `os_signpost` event in the
 /// "dev.glassweave" subsystem, "Renderer" category, visible in Instruments'

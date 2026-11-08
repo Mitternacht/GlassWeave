@@ -19,7 +19,7 @@ struct GlassSurfaceViewTests {
     }
 
     private func makeSurface(scale: CGFloat, size: CGSize) throws -> GlassSurfaceView {
-        let surface = GlassSurfaceView(renderer: try BackgroundRenderer(commandQueue: queue))
+        let surface = GlassSurfaceView(renderer: try GlassRenderer(commandQueue: queue))
         surface.traitOverrides.displayScale = scale
         surface.frame = CGRect(origin: .zero, size: size)
         surface.updateTraitsIfNeeded()
@@ -142,6 +142,23 @@ struct GlassSurfaceViewTests {
         }
         #expect(surface.renderer.currentFrame?.frameID == 5)
         #expect(!surface.hostedMetalView.isHidden)
+    }
+
+    @Test func `The panel stays in points and follows the normalization rule`() throws {
+        let surface = try makeSurface(scale: 3, size: CGSize(width: 100, height: 60))
+        let frame = CGRect(x: 10, y: 10, width: 80, height: 40)
+        try surface.setPanel(GlassPanel(frame: frame, parameters: GlassParameters(cornerRadius: 50, bezelWidth: 12)))
+        // Points, not pixels: the display scale applies only when drawing.
+        #expect(surface.panel?.frame == frame)
+        #expect(surface.panel?.parameters.cornerRadius == 20)
+        var invalid = try #require(surface.panel)
+        invalid.parameters.bezelWidth = .infinity
+        #expect(throws: GlassParameterError.nonFinite(.bezelWidth)) {
+            try surface.setPanel(invalid)
+        }
+        #expect(surface.panel?.parameters.bezelWidth == 12)
+        try surface.setPanel(nil)
+        #expect(surface.panel == nil)
     }
 
     @Test func `The surface is decorative and passes touches through`() throws {
