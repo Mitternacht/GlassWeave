@@ -62,3 +62,27 @@ RealityKit's new low-level renderer is worth a bounded Frostfield comparison if 
 ## Integration into the task list
 
 The existing task checklist remains authoritative. Package-baseline tasks pin the toolchain. The first real buffer/material tasks add CPU/GPU layout evidence. Device qualification records allocation/copy behavior as well as timing. The Satin experiment checks consumer interop and copies. Any new language requires the gate above; no separate rewrite milestone is presumed.
+
+## Recorded toolchain (GW-01)
+
+Recorded 2026-11-08 while creating the package. These are the values the first
+slices were built with, kept separate as the policy above requires.
+
+| Item | Value |
+| --- | --- |
+| Xcode | 27.2 (27B52) |
+| Swift compiler | Apple Swift 6.4.2 (swiftlang-6.4.2.1.9) |
+| SDKs | iOS 27.2, iOS Simulator 27.2, macOS 27.2 |
+| Manifest tools version | 6.2 (`// swift-tools-version: 6.2`) |
+| Swift language mode | Swift 6 (`swiftLanguageModes: [.v6]`) |
+| Deployment floors | iOS/iPadOS 26.0, macOS 26.0 |
+| Package default actor isolation | Nonisolated (no `defaultIsolation` setting). UI types are `@MainActor` explicitly. |
+| Lab app default actor isolation | `MainActor` (`SWIFT_DEFAULT_ACTOR_ISOLATION`), Swift 6 mode |
+| MSL dialect | Compiler default for the 26.0 deployment target. No `-std` flag is passed. A shader probe on this toolchain reported `__METAL_VERSION__ == 400` (MSL 4.0). Shaders use only long-established MSL features. |
+| Metal math mode | Xcode default fast math (`-fmetal-math-mode=fast`). GPU reference tolerances account for it. |
+
+The lab app project is a classic `project.pbxproj` (object version 77, folder-
+synchronized groups). Xcode 27's template writes a new `project.xcproj` format,
+but the native Xcode tools offer no operation to add a local package reference
+to it, and earlier Xcode releases cannot open it. The classic format was written
+once as a bootstrap and is edited through Xcode afterwards.

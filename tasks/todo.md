@@ -13,9 +13,11 @@ Use the native Xcode MCP tools for project edits, builds, tests, diagnostics, an
 **Dependencies:** None. **Scope:** Medium, four files.
 
 **Acceptance criteria:**
-- [ ] A package using Swift tools 6.2 and Swift 6 language mode exposes the `GlassWeave` product with planned iOS/iPadOS 26 and macOS 26 minimums; core compilation does not import UIKit or SwiftUI.
+- [x] A package using Swift tools 6.2 and Swift 6 language mode exposes the `GlassWeave` product with planned iOS/iPadOS 26 and macOS 26 minimums; core compilation does not import UIKit or SwiftUI.
 - [ ] Xcode builds the package for macOS and an iOS simulator destination, and CI repeats the package build without account credentials.
-- [ ] The support note distinguishes OS availability from Metal GPU capabilities and macOS core compilation from a promised macOS UI adapter.
+- [x] The support note distinguishes OS availability from Metal GPU capabilities and macOS core compilation from a promised macOS UI adapter.
+
+**Evidence (2026-11-08):** Xcode MCP `BuildProject` succeeded for "My Mac" and "Any iOS Simulator Device" (Xcode 27.2, iOS/macOS 27.2 SDKs). Documentation search confirmed `MTLDevice.supportsFamily(_:)` and `MTLGPUFamily.metal4`; the iOS Simulator SDK does not declare `.metal4`, recorded in [support](../docs/support.md). Toolchain, isolation, and MSL dialect are recorded in [the language strategy](../docs/language-strategy.md#recorded-toolchain-gw-01). The workflow `.github/workflows/build.yml` is written but has not run on GitHub yet, so the CI half of the second item stays open until it passes there.
 
 **Verification:** Use Xcode documentation search to confirm the available SDK and capability APIs; build through Xcode MCP and inspect diagnostics. Record compiler, SDK, language mode, default actor isolation, and MSL dialect separately under `docs/language-strategy.md`. Do not add an always-passing test for an empty module; add tests when testable behavior first exists.
 
@@ -29,8 +31,10 @@ Use the native Xcode MCP tools for project edits, builds, tests, diagnostics, an
 
 **Acceptance criteria:**
 - [ ] The app builds and launches on an iOS 26 simulator without a signing-account requirement.
-- [ ] One screen has a labeled reference region, a custom region, and a repeatable reset action.
-- [ ] The app uses a local package reference; the library has no dependency on the app.
+- [x] One screen has a labeled reference region, a custom region, and a repeatable reset action.
+- [x] The app uses a local package reference; the library has no dependency on the app.
+
+**Evidence (2026-11-08):** Xcode MCP `BuildProject`, `RunProject`, and `RunAllTests` on the iPhone 18 Pro simulator (iOS 27.2): `GlassWeaveLabUITests.testLaunchShowsBothRegionsAndResetIsRepeatable` passed. [Launch capture](../docs/evidence/captures/gw-02-launch-iphone18pro-sim.png). The deployment target is iOS 26.0, but only the iOS 27.2 simulator runtime is installed on the development Mac, so the iOS 26 runtime launch in the first item is still outstanding. A fresh clone resolves the local package (`Resolved source packages: GlassWeave @ local`).
 
 **Verification:** Xcode `BuildProject` and `RunProject`; record a launch screenshot and confirm a fresh checkout resolves the local package.
 
