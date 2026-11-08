@@ -161,6 +161,47 @@ struct GlassSurfaceViewTests {
         #expect(surface.panel == nil)
     }
 
+    @Test func `A frame producer runs inside each draw and a rejected frame is reported`() throws {
+        let surface = try makeSurface(scale: 2, size: CGSize(width: 0, height: 30))
+        var calls = 0
+        surface.setFrameProducer { _, _ in
+            calls += 1
+            return nil
+        }
+        // Producing keeps the Metal view visible before the first frame.
+        #expect(!surface.hostedMetalView.isHidden)
+        surface.renderNow()
+        #expect(calls == 0, "A zero-size target skips before producing")
+        #expect(surface.lastRenderOutcome == .skipped(.zeroSizeTarget))
+
+        surface.frame.size = CGSize(width: 40, height: 30)
+        surface.layoutIfNeeded()
+        let otherQueue = try #require(device.makeCommandQueue())
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb, width: 80, height: 60, mipmapped: false
+        )
+        descriptor.storageMode = .private
+        descriptor.usage = [.shaderRead]
+        let texture = try #require(device.makeTexture(descriptor: descriptor))
+        surface.setFrameProducer { _, size in
+            calls += 1
+            #expect(size == (80, 60))
+            // Claims writes on another queue: nothing orders them.
+            let frame = BackgroundFrame(
+                texture: texture, frameID: 1, timestamp: .zero,
+                colorConvention: .sRGBOpaque, readiness: .committed(on: otherQueue)
+            )
+            return BackgroundFrameLease(frame: frame) { _ in }
+        }
+        surface.renderNow()
+        #expect(calls == 1)
+        #expect(surface.lastProducedFrameError == .queueMismatch)
+        #expect(surface.renderer.currentFrame == nil)
+
+        surface.setFrameProducer(nil)
+        #expect(surface.hostedMetalView.isHidden, "Without a producer or a source the fallback shows")
+    }
+
     @Test func `The surface is decorative and passes touches through`() throws {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
         let surface = try makeSurface(scale: 2, size: CGSize(width: 200, height: 200))

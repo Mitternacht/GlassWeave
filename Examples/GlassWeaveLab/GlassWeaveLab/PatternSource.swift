@@ -10,12 +10,10 @@ import Metal
 /// handler only reports what happened to the frame.
 struct PatternSource {
     enum Failure: Error, CustomStringConvertible {
-        case noMetalDevice
         case resourceCreation(String)
 
         var description: String {
             switch self {
-            case .noMetalDevice: "No Metal device is available."
             case let .resourceCreation(what): "Could not create \(what)."
             }
         }
@@ -31,11 +29,10 @@ struct PatternSource {
     private let clock = ContinuousClock()
     private let start: ContinuousClock.Instant
 
-    init() throws {
-        guard let device = MTLCreateSystemDefaultDevice() else { throw Failure.noMetalDevice }
-        guard let queue = device.makeCommandQueue() else { throw Failure.resourceCreation("a command queue") }
-        queue.label = "GlassWeaveLab background"
-        self.device = device
+    /// - Parameter queue: The queue the renderer submits to; uploads are
+    ///   committed to it so same-queue readiness holds.
+    init(queue: any MTLCommandQueue) {
+        self.device = queue.device
         self.queue = queue
         self.start = clock.now
     }

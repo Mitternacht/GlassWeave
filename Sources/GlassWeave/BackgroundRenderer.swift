@@ -148,6 +148,16 @@ public final class BackgroundRenderer {
     /// Attaching the lease already current is a no-op. On error, the
     /// previous source stays current.
     public func setSource(_ lease: BackgroundFrameLease) throws(BackgroundSourceError) {
+        try setSource(lease, drawCommandBuffer: nil)
+    }
+
+    /// Validates and attaches a source. `drawCommandBuffer` is the command
+    /// buffer of the draw in progress: a frame whose writes were encoded in
+    /// it is ordered by being sampled later in the same command buffer.
+    func setSource(
+        _ lease: BackgroundFrameLease,
+        drawCommandBuffer: (any MTLCommandBuffer)?
+    ) throws(BackgroundSourceError) {
         if let source, source.lease === lease { return }
         let frame = lease.frame
         try SourceFrameValidation.validate(
@@ -159,6 +169,10 @@ public final class BackgroundRenderer {
             rendererDeviceName: device.name,
             rendererQueue: ObjectIdentifier(commandQueue)
         )
+        if let writes = frame.readiness.encodingCommandBuffer,
+           writes !== drawCommandBuffer, writes.status == .notEnqueued {
+            throw .commandBufferNotEnqueued
+        }
         try SourceFrameValidation.validateOrder(
             frameID: frame.frameID, timestamp: frame.timestamp, after: lastAccepted
         )
@@ -205,8 +219,15 @@ public final class BackgroundRenderer {
     ) -> Void
 
     /// Draws the background, then `overlay`, into one render pass.
+    ///
+    /// - Parameter provided: A command buffer that already carries the
+    ///   current frame's writes (a produced frame). It is committed on every
+    ///   path that gets past the source checks, so the writes always run,
+    ///   and a skipped use ends only when it completes, so the producer
+    ///   never hears "reusable" while its writes are in flight.
     func draw(
         targetPixelSize: (width: Int, height: Int),
+        commandBuffer provided: (any MTLCommandBuffer)? = nil,
         acquireTarget: () -> BackgroundDrawTarget?,
         overlay: Overlay?
     ) -> BackgroundRenderOutcome {
@@ -217,12 +238,19 @@ public final class BackgroundRenderer {
         guard let submission = source.lease.core.acquire(.submission) else {
             return .skipped(.sourceReleased)
         }
-        guard let target = acquireTarget() else {
-            submission.end(.skipped)
-            return .skipped(.drawableUnavailable)
+        /// Ends a use that drew nothing, after any provided writes finish.
+        func endWithoutDrawing(_ outcome: LeaseHold.SubmissionEnd) {
+            guard let provided else {
+                submission.end(outcome)
+                return
+            }
+            provided.addCompletedHandler { _ in submission.end(outcome) }
+            provided.commit()
         }
-        guard let colorTexture = target.renderPassDescriptor.colorAttachments[0].texture else {
-            submission.end(.skipped)
+        guard let target = acquireTarget(),
+              let colorTexture = target.renderPassDescriptor.colorAttachments[0].texture
+        else {
+            endWithoutDrawing(.skipped)
             return .skipped(.drawableUnavailable)
         }
         precondition(
@@ -231,14 +259,18 @@ public final class BackgroundRenderer {
         )
         // Retained references keep the source texture alive until this
         // command buffer completes, independent of the lease object.
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: target.renderPassDescriptor)
-        else {
-            submission.end(.cancelled)
+        guard let commandBuffer = provided ?? commandQueue.makeCommandBuffer() else {
+            endWithoutDrawing(.cancelled)
+            return .skipped(.encoderUnavailable)
+        }
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: target.renderPassDescriptor) else {
+            endWithoutDrawing(.cancelled)
             return .skipped(.encoderUnavailable)
         }
         let frame = source.lease.frame
-        commandBuffer.label = "GlassWeave background frame \(frame.frameID)"
+        if provided == nil {
+            commandBuffer.label = "GlassWeave background frame \(frame.frameID)"
+        }
         var uniforms = SourceUVTransform(
             destinationWidth: colorTexture.width,
             destinationHeight: colorTexture.height,

@@ -2,11 +2,21 @@ import CoreGraphics
 import UIKit
 import XCTest
 
-/// The custom region presents the app-owned four-corner pattern through
+/// The custom surface presents the app-owned four-corner pattern through
 /// GlassWeave's `MTKView` host. These tests read the rendered pixels back from
 /// element screenshots, so they check what reaches the screen rather than
-/// what the code intends.
+/// what the code intends. The laboratory shows the still pattern instead of
+/// its moving background when launched with `-lab.source pattern`.
 final class CustomSurfaceUITests: XCTestCase {
+    /// The laboratory with the still orientation pattern as its source.
+    @MainActor
+    private func launchWithPattern() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments += ["-lab.source", "pattern"]
+        app.launch()
+        return app
+    }
+
     private enum Swatch: String {
         case red, green, blue, yellow, gray, other
     }
@@ -18,8 +28,7 @@ final class CustomSurfaceUITests: XCTestCase {
     @MainActor
     func testPatternStaysUprightThroughRotation() throws {
         XCUIDevice.shared.orientation = .portrait
-        let app = XCUIApplication()
-        app.launch()
+        let app = launchWithPattern()
         let surface = app.otherElements["lab.customSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
         let diagnostics = app.staticTexts["lab.diagnostics"]
@@ -36,8 +45,7 @@ final class CustomSurfaceUITests: XCTestCase {
     @MainActor
     func testResetPresentsANewFrameAndReleasesThePreviousOne() throws {
         XCUIDevice.shared.orientation = .portrait
-        let app = XCUIApplication()
-        app.launch()
+        let app = launchWithPattern()
         let diagnostics = app.staticTexts["lab.diagnostics"]
         XCTAssertTrue(diagnostics.waitForExistence(timeout: 10))
         XCTAssertTrue(wait(for: diagnostics, toContain: "submitted frame 1"), diagnostics.label)
@@ -103,45 +111,5 @@ final class CustomSurfaceUITests: XCTestCase {
         let predicate = NSPredicate(format: "label CONTAINS %@", text)
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: 10) == .completed
-    }
-}
-
-/// An image redrawn upright into 8-bit sRGB RGBA memory, row 0 on top.
-private struct SRGBPixels {
-    struct Failure: Error {}
-
-    let width: Int
-    let height: Int
-    private let bytes: [UInt8]
-
-    init(_ image: UIImage) throws {
-        let width = Int(image.size.width * image.scale)
-        let height = Int(image.size.height * image.scale)
-        guard width > 0, height > 0, let space = CGColorSpace(name: CGColorSpace.sRGB) else { throw Failure() }
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(
-                data: buffer.baseAddress, width: width, height: height,
-                bitsPerComponent: 8, bytesPerRow: width * 4, space: space,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            ) else { return false }
-            // Flip so UIKit drawing (origin top-left) lands with row 0 on top,
-            // and let UIImage apply its orientation.
-            context.translateBy(x: 0, y: CGFloat(height))
-            context.scaleBy(x: 1, y: -1)
-            UIGraphicsPushContext(context)
-            image.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
-            UIGraphicsPopContext()
-            return true
-        }
-        guard drawn else { throw Failure() }
-        self.width = width
-        self.height = height
-        self.bytes = pixels
-    }
-
-    func color(x: Int, y: Int) -> (Int, Int, Int) {
-        let index = (min(max(y, 0), height - 1) * width + min(max(x, 0), width - 1)) * 4
-        return (Int(bytes[index]), Int(bytes[index + 1]), Int(bytes[index + 2]))
     }
 }

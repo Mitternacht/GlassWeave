@@ -3,42 +3,249 @@ import GlassWeaveUIKit
 import Metal
 import UIKit
 
-/// The single comparison screen. It hosts a labeled native-reference region,
-/// a labeled custom region, and a reset action that returns the laboratory
-/// to a repeatable starting state.
+/// The single comparison screen.
+///
+/// A stage shows one app-owned background through a `GlassSurfaceView`, with
+/// one custom GlassWeave panel drawn over it. Native UIKit content sits above
+/// the surface: the custom panel's text and button, and beside the panel a
+/// genuine native-glass reference control. Below (portrait) or beside
+/// (landscape) the stage are the comparison controls and diagnostics.
+///
+/// The background is the moving procedural source (``ProceduralBackground``)
+/// driven by one ``DeterministicClock``. Launching with
+/// `-lab.source pattern` presents the still four-corner orientation pattern
+/// instead, for orientation checks.
 final class LabViewController: UIViewController {
+    enum SourceMode {
+        case moving
+        case pattern
+
+        /// From the `lab.source` launch argument (`-lab.source pattern`).
+        static var fromLaunchArguments: SourceMode {
+            UserDefaults.standard.string(forKey: "lab.source") == "pattern" ? .pattern : .moving
+        }
+    }
+
     /// Counts reset presses so UI tests can confirm the action ran.
     private(set) var resetCount = 0
+    private let mode = SourceMode.fromLaunchArguments
 
-    private let referenceRegion = LabRegionView(
-        title: String(localized: "Native reference"),
-        identifier: "lab.referenceRegion"
-    )
-    private let customRegion = LabRegionView(
-        title: String(localized: "Custom GlassWeave"),
-        identifier: "lab.customRegion"
-    )
-    private let regions = UIStackView()
-    private let diagnosticsLabel = UILabel()
-    private let resetButton = UIButton(configuration: .bordered())
+    // MARK: Stage
 
-    /// Native mode: genuine Apple glass around a real button, over a simple
-    /// moving backdrop. Nothing in this region creates a GlassWeave renderer.
+    private let stage = StageView()
+    private let content = UIStackView()
+    /// Holds the custom panel's native content. Its frame, converted into
+    /// the surface's points, is the glass panel's frame.
+    private let customPanel = UIView()
+    private let customTitle = UILabel()
+    private let customButton = UIButton(configuration: .borderedProminent())
+    private var customTapCount = 0
+
+    /// Native mode: genuine Apple glass around a real button. Nothing here
+    /// creates a GlassWeave renderer; the glass samples whatever the system
+    /// composites behind it, which here is the same stage.
     private let nativeGlass = NativeGlassView()
     private let nativeButton = UIButton(configuration: .plain())
-    private let tintControl = UISegmentedControl(items: NativeTint.allCases.map(\.title))
-    private let enabledSwitch = UISwitch()
+    private let referenceCaption = UILabel()
     private var nativeTapCount = 0
 
-    /// The app-owned background producer and the surface presenting it, or
-    /// the reason the custom region could not be set up.
-    private var custom: Result<(source: PatternSource, surface: GlassSurfaceView), any Error>?
+    // MARK: Controls
+
+    private let controls = UIScrollView()
+    private let tintControl = UISegmentedControl(items: NativeTint.allCases.map(\.title))
+    private let enabledSwitch = UISwitch()
+    private let pauseButton = UIButton(configuration: .bordered())
+    private let overlaySwitch = UISwitch()
+    private let diagnosticsLabel = UILabel()
+    private let resetButton = UIButton(configuration: .bordered())
+    private var portraitConstraints: [NSLayoutConstraint] = []
+    private var landscapeConstraints: [NSLayoutConstraint] = []
+
+    // MARK: Rendering state
+
+    private struct CustomStage {
+        let surface: GlassSurfaceView
+        let background: ProceduralBackground
+        let pattern: PatternSource
+    }
+
+    private var custom: Result<CustomStage, any Error>?
+    private var clock = DeterministicClock()
+    /// Whether the user wants motion; Reduce Motion also stops it.
+    private var wantsMotion = true
+    private var showsFrameID = true
+    private var updateLink: UIUpdateLink?
     private var nextFrameID: UInt64 = 1
     private var lastRelease: BackgroundFrameRelease?
+    /// The frame-ID strip's center, in the surface's points.
+    private var stripCenterY: CGFloat = 0
+
+    // MARK: Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
+        setUpStage()
+        setUpControls()
+        setUpLayout()
+        setUpCustomRendering()
+        setUpClock()
+        reset()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+            self.updateCustomPanel()
+        }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(reduceMotionChanged),
+            name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil
+        )
+    }
+
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        // Controls below the stage when taller than wide, beside it otherwise,
+        // decided from local bounds.
+        let landscape = view.bounds.width > view.bounds.height
+        if landscape, landscapeConstraints.first?.isActive != true {
+            NSLayoutConstraint.deactivate(portraitConstraints)
+            NSLayoutConstraint.activate(landscapeConstraints)
+        } else if !landscape, portraitConstraints.first?.isActive != true {
+            NSLayoutConstraint.deactivate(landscapeConstraints)
+            NSLayoutConstraint.activate(portraitConstraints)
+        }
+    }
+
+    /// Returns every laboratory control to its initial state.
+    func reset() {
+        resetCount += 1
+        resetNativeReference()
+        customTapCount = 0
+        clock.reset()
+        wantsMotion = true
+        showsFrameID = true
+        overlaySwitch.isOn = true
+        applyMotionState()
+        if mode == .pattern {
+            presentNextPatternFrame()
+        } else if case let .success(stage) = custom {
+            stage.surface.requestFrame()
+        }
+        updateDiagnostics()
+    }
+
+    // MARK: Stage setup
+
+    private func setUpStage() {
+        stage.accessibilityIdentifier = "lab.stage"
+        stage.clipsToBounds = true
+        stage.backgroundColor = .secondarySystemBackground
+        stage.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stage)
+
+        customTitle.text = String(localized: "Custom GlassWeave")
+        customTitle.font = .preferredFont(forTextStyle: .headline)
+        customTitle.adjustsFontForContentSizeCategory = true
+        customTitle.textAlignment = .center
+        customTitle.numberOfLines = 0
+
+        customButton.configuration?.title = String(localized: "Custom action")
+        customButton.accessibilityIdentifier = "lab.customButton"
+        customButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            customTapCount += 1
+            updateDiagnostics()
+        }, for: .primaryActionTriggered)
+
+        let panelContent = UIStackView(arrangedSubviews: [customTitle, customButton])
+        panelContent.axis = .vertical
+        panelContent.alignment = .center
+        panelContent.spacing = 10
+        panelContent.translatesAutoresizingMaskIntoConstraints = false
+        customPanel.addSubview(panelContent)
+        customPanel.accessibilityIdentifier = "lab.customPanel"
+        customPanel.translatesAutoresizingMaskIntoConstraints = false
+
+        nativeButton.configuration?.title = String(localized: "Native action")
+        nativeButton.configuration?.baseForegroundColor = .label
+        nativeButton.accessibilityIdentifier = "lab.nativeButton"
+        nativeButton.translatesAutoresizingMaskIntoConstraints = false
+        nativeButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            nativeTapCount += 1
+            updateDiagnostics()
+        }, for: .primaryActionTriggered)
+        nativeGlass.cornerConfiguration = .capsule()
+        nativeGlass.accessibilityIdentifier = "lab.nativeGlass"
+        nativeGlass.contentView.addSubview(nativeButton)
+
+        referenceCaption.text = String(localized: "Native reference")
+        referenceCaption.font = .preferredFont(forTextStyle: .footnote)
+        referenceCaption.adjustsFontForContentSizeCategory = true
+        referenceCaption.textColor = .label
+        referenceCaption.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.75)
+        referenceCaption.layer.cornerRadius = 6
+        referenceCaption.layer.masksToBounds = true
+
+        let reference = UIStackView(arrangedSubviews: [referenceCaption, nativeGlass])
+        reference.axis = .vertical
+        reference.alignment = .center
+        reference.spacing = 6
+
+        content.addArrangedSubview(customPanel)
+        content.addArrangedSubview(reference)
+        content.axis = .vertical
+        content.alignment = .center
+        content.spacing = 20
+        content.translatesAutoresizingMaskIntoConstraints = false
+        stage.addSubview(content)
+
+        let safe = stage.safeAreaLayoutGuide
+        // Nominal 320 x 180 points, narrower when the stage is.
+        let preferredWidth = customPanel.widthAnchor.constraint(equalToConstant: 320)
+        preferredWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            content.centerXAnchor.constraint(equalTo: safe.centerXAnchor),
+            content.centerYAnchor.constraint(equalTo: safe.centerYAnchor),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: safe.leadingAnchor, constant: 16),
+            content.topAnchor.constraint(greaterThanOrEqualTo: safe.topAnchor, constant: 8),
+            preferredWidth,
+            customPanel.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
+            panelContent.centerXAnchor.constraint(equalTo: customPanel.centerXAnchor),
+            panelContent.centerYAnchor.constraint(equalTo: customPanel.centerYAnchor, constant: -14),
+            panelContent.leadingAnchor.constraint(greaterThanOrEqualTo: customPanel.leadingAnchor, constant: 24),
+            panelContent.topAnchor.constraint(greaterThanOrEqualTo: customPanel.topAnchor, constant: 20),
+            panelContent.bottomAnchor.constraint(lessThanOrEqualTo: customPanel.bottomAnchor, constant: -48),
+            nativeButton.leadingAnchor.constraint(equalTo: nativeGlass.contentView.leadingAnchor, constant: 20),
+            nativeButton.trailingAnchor.constraint(equalTo: nativeGlass.contentView.trailingAnchor, constant: -20),
+            nativeButton.topAnchor.constraint(equalTo: nativeGlass.contentView.topAnchor, constant: 8),
+            nativeButton.bottomAnchor.constraint(equalTo: nativeGlass.contentView.bottomAnchor, constant: -8),
+        ])
+        stage.onLayout = { [weak self] in self?.updateCustomPanel() }
+    }
+
+    // MARK: Controls setup
+
+    private func setUpControls() {
+        tintControl.accessibilityIdentifier = "lab.nativeTint"
+        tintControl.addAction(UIAction { [weak self] _ in self?.applyNativeState() }, for: .valueChanged)
+        enabledSwitch.accessibilityIdentifier = "lab.nativeEnabled"
+        enabledSwitch.accessibilityLabel = String(localized: "Native action enabled")
+        enabledSwitch.addAction(UIAction { [weak self] _ in self?.applyNativeState() }, for: .valueChanged)
+
+        pauseButton.accessibilityIdentifier = "lab.pause"
+        pauseButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            wantsMotion.toggle()
+            applyMotionState()
+            updateDiagnostics()
+        }, for: .primaryActionTriggered)
+        overlaySwitch.accessibilityIdentifier = "lab.frameIDOverlay"
+        overlaySwitch.accessibilityLabel = String(localized: "Frame ID overlay")
+        overlaySwitch.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            showsFrameID = overlaySwitch.isOn
+            if case let .success(stage) = custom { stage.surface.requestFrame() }
+            updateDiagnostics()
+        }, for: .valueChanged)
 
         diagnosticsLabel.font = .preferredFont(forTextStyle: .footnote)
         diagnosticsLabel.adjustsFontForContentSizeCategory = true
@@ -50,53 +257,241 @@ final class LabViewController: UIViewController {
         resetButton.accessibilityIdentifier = "lab.reset"
         resetButton.addAction(UIAction { [weak self] _ in self?.reset() }, for: .primaryActionTriggered)
 
-        regions.addArrangedSubview(referenceRegion)
-        regions.addArrangedSubview(customRegion)
-        regions.axis = .vertical
-        regions.spacing = 16
-        regions.distribution = .fillEqually
-
-        let stack = UIStackView(arrangedSubviews: [regions, diagnosticsLabel, resetButton])
+        let tintRow = Self.row([tintControl, UIView(), Self.caption(String(localized: "Enabled")), enabledSwitch])
+        let motionRow = Self.row([pauseButton, UIView(), Self.caption(String(localized: "Frame ID")), overlaySwitch])
+        // The still pattern has no clock and no frame-ID strip.
+        motionRow.isHidden = mode == .pattern
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, diagnosticsLabel, resetButton])
         stack.axis = .vertical
-        stack.spacing = 16
+        stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
-        let guide = view.safeAreaLayoutGuide
+        controls.addSubview(stack)
+        controls.translatesAutoresizingMaskIntoConstraints = false
+        controls.alwaysBounceVertical = false
+        view.addSubview(controls)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: guide.topAnchor, constant: 16),
-            stack.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -16),
+            stack.leadingAnchor.constraint(equalTo: controls.contentLayoutGuide.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: controls.contentLayoutGuide.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: controls.contentLayoutGuide.topAnchor, constant: 12),
+            stack.bottomAnchor.constraint(equalTo: controls.contentLayoutGuide.bottomAnchor, constant: -12),
+            stack.widthAnchor.constraint(equalTo: controls.frameLayoutGuide.widthAnchor),
         ])
-
-        setUpReferenceRegion()
-        setUpCustomRegion()
-        reset()
     }
 
-    override func viewWillLayoutSubviews() {
-        super.viewWillLayoutSubviews()
-        // Side by side when the scene is wider than tall, from local bounds.
-        let axis: NSLayoutConstraint.Axis = view.bounds.width > view.bounds.height ? .horizontal : .vertical
-        if regions.axis != axis {
-            regions.axis = axis
+    private static func row(_ views: [UIView]) -> UIStackView {
+        let row = UIStackView(arrangedSubviews: views)
+        row.axis = .horizontal
+        row.spacing = 8
+        row.alignment = .center
+        return row
+    }
+
+    /// A label that describes the switch after it; the switch carries the
+    /// accessibility label, so this one is hidden from VoiceOver.
+    private static func caption(_ text: String) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.adjustsFontForContentSizeCategory = true
+        label.isAccessibilityElement = false
+        return label
+    }
+
+    /// The stage keeps a fixed share of the screen, so text changes in the
+    /// controls never resize the rendered surface.
+    private func setUpLayout() {
+        let safe = view.safeAreaLayoutGuide
+        let shared = [
+            stage.topAnchor.constraint(equalTo: view.topAnchor),
+            stage.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+        ]
+        NSLayoutConstraint.activate(shared)
+        portraitConstraints = [
+            stage.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stage.bottomAnchor.constraint(equalTo: controls.topAnchor),
+            controls.leadingAnchor.constraint(equalTo: safe.leadingAnchor, constant: 16),
+            controls.trailingAnchor.constraint(equalTo: safe.trailingAnchor, constant: -16),
+            controls.bottomAnchor.constraint(equalTo: safe.bottomAnchor),
+            controls.heightAnchor.constraint(equalTo: view.heightAnchor, multiplier: 0.38),
+        ]
+        landscapeConstraints = [
+            stage.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            stage.trailingAnchor.constraint(equalTo: controls.leadingAnchor, constant: -16),
+            controls.topAnchor.constraint(equalTo: safe.topAnchor),
+            controls.bottomAnchor.constraint(equalTo: safe.bottomAnchor),
+            controls.trailingAnchor.constraint(equalTo: safe.trailingAnchor, constant: -16),
+            controls.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.34),
+        ]
+    }
+
+    // MARK: Custom rendering
+
+    private func setUpCustomRendering() {
+        do {
+            guard let device = MTLCreateSystemDefaultDevice() else { throw LabFailure.noMetalDevice }
+            guard let queue = device.makeCommandQueue() else { throw LabFailure.noCommandQueue }
+            queue.label = "GlassWeaveLab"
+            let surface = GlassSurfaceView(renderer: try GlassRenderer(commandQueue: queue))
+            surface.accessibilityIdentifier = "lab.customSurface"
+            surface.translatesAutoresizingMaskIntoConstraints = false
+            surface.renderObserver = { [weak self] _ in self?.renderDidFinish() }
+            stage.insertSubview(surface, at: 0)
+            NSLayoutConstraint.activate([
+                surface.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+                surface.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
+                surface.topAnchor.constraint(equalTo: stage.topAnchor),
+                surface.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+            ])
+            let stageRendering = CustomStage(
+                surface: surface,
+                background: try ProceduralBackground(device: device),
+                pattern: PatternSource(queue: queue)
+            )
+            custom = .success(stageRendering)
+            if mode == .moving {
+                surface.setFrameProducer { [weak self] commandBuffer, pixelSize in
+                    self?.produceFrame(into: commandBuffer, pixelSize: pixelSize)
+                }
+            }
+        } catch {
+            let label = UILabel()
+            label.text = String(describing: error)
+            label.font = .preferredFont(forTextStyle: .body)
+            label.adjustsFontForContentSizeCategory = true
+            label.numberOfLines = 0
+            label.translatesAutoresizingMaskIntoConstraints = false
+            stage.insertSubview(label, at: 0)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: stage.layoutMarginsGuide.leadingAnchor),
+                label.trailingAnchor.constraint(equalTo: stage.layoutMarginsGuide.trailingAnchor),
+                label.topAnchor.constraint(equalTo: stage.safeAreaLayoutGuide.topAnchor, constant: 8),
+            ])
+            custom = .failure(error)
         }
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        updateCustomPanel()
+    private enum LabFailure: Error, CustomStringConvertible {
+        case noMetalDevice
+        case noCommandQueue
+
+        var description: String {
+            switch self {
+            case .noMetalDevice: "No Metal device is available."
+            case .noCommandQueue: "Could not create a command queue."
+            }
+        }
     }
 
-    /// Returns every laboratory control to its initial state.
-    func reset() {
-        resetCount += 1
-        resetNativeReference()
-        presentNextPatternFrame()
+    /// The panel's optics. Lengths are points; coefficients are normalized.
+    /// The tint follows the appearance so the native text on the panel stays
+    /// readable over the moving background.
+    private func panelParameters() -> GlassParameters {
+        let dark = traitCollection.userInterfaceStyle == .dark
+        let tint = dark
+            ? GlassTint(red: 0.08, green: 0.09, blue: 0.12, strength: 0.45)
+            : GlassTint(red: 0.97, green: 0.98, blue: 1.0, strength: 0.45)
+        return GlassParameters(cornerRadius: 30, bezelWidth: 22, refraction: 0.85, edgeHighlight: 0.6, tint: tint)
+    }
+
+    /// Makes the glass panel follow the native panel content's frame, in the
+    /// surface's points. Called from the stage's layout pass, after its
+    /// subviews have their frames.
+    private func updateCustomPanel() {
+        guard case let .success(stageRendering) = custom else { return }
+        let surface = stageRendering.surface
+        let frame = customPanel.convert(customPanel.bounds, to: surface)
+        stripCenterY = frame.maxY - 34
+        do {
+            try surface.setPanel(GlassPanel(frame: frame, parameters: panelParameters()))
+        } catch {
+            custom = .failure(error)
+        }
+    }
+
+    // MARK: Moving source
+
+    private func setUpClock() {
+        guard mode == .moving else { return }
+        let link = UIUpdateLink(view: stage) { [weak self] _, _ in
+            self?.tick()
+        }
+        link.requiresContinuousUpdates = true
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        updateLink = link
+    }
+
+    /// One clock step: advance content time and draw one produced frame.
+    private func tick() {
+        clock.advance()
+        guard case let .success(stageRendering) = custom else { return }
+        stageRendering.surface.requestFrame()
+    }
+
+    @objc private func reduceMotionChanged() {
+        applyMotionState()
         updateDiagnostics()
     }
 
-    // MARK: Native reference region
+    /// Runs the clock while the user wants motion and Reduce Motion is off.
+    private func applyMotionState() {
+        let running = mode == .moving && wantsMotion && !UIAccessibility.isReduceMotionEnabled
+        updateLink?.isEnabled = running
+        pauseButton.configuration?.title = wantsMotion ? String(localized: "Pause") : String(localized: "Resume")
+    }
+
+    /// Produces the frame for the current clock time inside the draw's
+    /// command buffer. The frame-ID strip runs through the panel interior.
+    private func produceFrame(into commandBuffer: any MTLCommandBuffer, pixelSize: (width: Int, height: Int)) -> BackgroundFrameLease? {
+        guard case let .success(stageRendering) = custom else { return nil }
+        let scale = Double(stageRendering.surface.traitCollection.displayScale)
+        let frameID = nextFrameID
+        let lease = stageRendering.background.encodeFrame(
+            into: commandBuffer,
+            pixelSize: pixelSize,
+            frameID: frameID,
+            contentSeconds: clock.seconds,
+            displayScale: scale,
+            stripCenterY: showsFrameID ? Double(stripCenterY) * scale : nil
+        ) { [weak self] release in
+            Task { @MainActor in self?.lastRelease = release }
+        }
+        if lease != nil { nextFrameID += 1 }
+        return lease
+    }
+
+    /// Diagnostics follow the frames, at most ten times a second while the
+    /// clock runs, so the label does not churn at the display rate.
+    private func renderDidFinish() {
+        if mode == .pattern || clock.ticks % 6 == 0 || updateLink?.isEnabled != true {
+            updateDiagnostics()
+        }
+    }
+
+    // MARK: Still pattern
+
+    /// Hands the surface a newly uploaded pattern frame. The previous frame's
+    /// lease is released once the surface lets go of it and every draw that
+    /// sampled it has completed.
+    private func presentNextPatternFrame() {
+        guard case let .success(stageRendering) = custom else { return }
+        let frameID = nextFrameID
+        nextFrameID += 1
+        do {
+            let lease = try stageRendering.pattern.makeFrame(frameID: frameID) { [weak self] release in
+                Task { @MainActor in
+                    self?.lastRelease = release
+                    self?.updateDiagnostics()
+                }
+            }
+            try stageRendering.surface.setSource(lease)
+            // The laboratory hands each frame to one surface only.
+            lease.retire()
+        } catch {
+            custom = .failure(error)
+        }
+    }
+
+    // MARK: Native reference
 
     /// The glass tints the laboratory compares.
     enum NativeTint: Int, CaseIterable {
@@ -127,68 +522,6 @@ final class LabViewController: UIViewController {
         }
     }
 
-    private func setUpReferenceRegion() {
-        let stage = UIView()
-        stage.clipsToBounds = true
-        stage.layer.cornerRadius = 12
-        let stripes = MovingStripesView()
-        stripes.translatesAutoresizingMaskIntoConstraints = false
-        stage.addSubview(stripes)
-
-        nativeButton.configuration?.title = String(localized: "Native action")
-        nativeButton.configuration?.baseForegroundColor = .label
-        nativeButton.accessibilityIdentifier = "lab.nativeButton"
-        nativeButton.translatesAutoresizingMaskIntoConstraints = false
-        nativeButton.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            nativeTapCount += 1
-            updateDiagnostics()
-        }, for: .primaryActionTriggered)
-
-        nativeGlass.cornerConfiguration = .capsule()
-        nativeGlass.accessibilityIdentifier = "lab.nativeGlass"
-        nativeGlass.translatesAutoresizingMaskIntoConstraints = false
-        nativeGlass.contentView.addSubview(nativeButton)
-        stage.addSubview(nativeGlass)
-
-        NSLayoutConstraint.activate([
-            stripes.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
-            stripes.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
-            stripes.topAnchor.constraint(equalTo: stage.topAnchor),
-            stripes.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
-            nativeButton.leadingAnchor.constraint(equalTo: nativeGlass.contentView.leadingAnchor, constant: 20),
-            nativeButton.trailingAnchor.constraint(equalTo: nativeGlass.contentView.trailingAnchor, constant: -20),
-            nativeButton.topAnchor.constraint(equalTo: nativeGlass.contentView.topAnchor, constant: 8),
-            nativeButton.bottomAnchor.constraint(equalTo: nativeGlass.contentView.bottomAnchor, constant: -8),
-            nativeGlass.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
-            nativeGlass.centerYAnchor.constraint(equalTo: stage.centerYAnchor),
-            nativeGlass.leadingAnchor.constraint(greaterThanOrEqualTo: stage.leadingAnchor, constant: 16),
-            nativeGlass.topAnchor.constraint(greaterThanOrEqualTo: stage.topAnchor, constant: 8),
-        ])
-
-        tintControl.accessibilityIdentifier = "lab.nativeTint"
-        tintControl.addAction(UIAction { [weak self] _ in self?.applyNativeState() }, for: .valueChanged)
-        enabledSwitch.accessibilityIdentifier = "lab.nativeEnabled"
-        enabledSwitch.accessibilityLabel = String(localized: "Native action enabled")
-        enabledSwitch.addAction(UIAction { [weak self] _ in self?.applyNativeState() }, for: .valueChanged)
-        let enabledLabel = UILabel()
-        enabledLabel.text = String(localized: "Enabled")
-        enabledLabel.font = .preferredFont(forTextStyle: .subheadline)
-        enabledLabel.adjustsFontForContentSizeCategory = true
-        // The switch carries the label for VoiceOver.
-        enabledLabel.isAccessibilityElement = false
-
-        let controls = UIStackView(arrangedSubviews: [tintControl, UIView(), enabledLabel, enabledSwitch])
-        controls.axis = .horizontal
-        controls.spacing = 8
-        controls.alignment = .center
-
-        let body = UIStackView(arrangedSubviews: [stage, controls])
-        body.axis = .vertical
-        body.spacing = 8
-        referenceRegion.setBody(body)
-    }
-
     /// Applies the tint and enabled state the controls show. A disabled
     /// control also gets non-interactive glass.
     private func applyNativeState() {
@@ -207,82 +540,37 @@ final class LabViewController: UIViewController {
         applyNativeState()
     }
 
-    // MARK: Custom region
-
-    private func setUpCustomRegion() {
-        do {
-            let source = try PatternSource()
-            let surface = GlassSurfaceView(renderer: try GlassRenderer(commandQueue: source.queue))
-            surface.accessibilityIdentifier = "lab.customSurface"
-            surface.renderObserver = { [weak self] _ in self?.updateDiagnostics() }
-            customRegion.setBody(surface)
-            custom = .success((source, surface))
-        } catch {
-            let label = UILabel()
-            label.text = String(describing: error)
-            label.font = .preferredFont(forTextStyle: .body)
-            label.adjustsFontForContentSizeCategory = true
-            label.numberOfLines = 0
-            customRegion.setBody(label)
-            custom = .failure(error)
-        }
-    }
-
-    /// The custom panel's optics, in points and normalized coefficients.
-    static let panelParameters = GlassParameters(
-        cornerRadius: 28, bezelWidth: 22, refraction: 0.85, edgeHighlight: 0.6,
-        tint: GlassTint(red: 0.85, green: 0.92, blue: 1, strength: 0.08)
-    )
-
-    /// Centers one panel in the custom surface, in the surface's own points,
-    /// leaving the pattern's corners visible around it.
-    private func updateCustomPanel() {
-        guard case let .success((_, surface)) = custom else { return }
-        // Lay out the region first so the surface's bounds are current.
-        customRegion.layoutIfNeeded()
-        let bounds = surface.bounds
-        let frame = bounds.insetBy(dx: bounds.width * 0.22, dy: bounds.height * 0.24)
-        do {
-            try surface.setPanel(GlassPanel(frame: frame, parameters: Self.panelParameters))
-        } catch {
-            custom = .failure(error)
-        }
-    }
-
-    /// Hands the surface a newly produced frame. The previous frame's lease
-    /// is released once the surface lets go of it and every draw that
-    /// sampled it has completed.
-    private func presentNextPatternFrame() {
-        guard case let .success((source, surface)) = custom else { return }
-        let frameID = nextFrameID
-        nextFrameID += 1
-        do {
-            let lease = try source.makeFrame(frameID: frameID) { [weak self] release in
-                Task { @MainActor in
-                    self?.lastRelease = release
-                    self?.updateDiagnostics()
-                }
-            }
-            try surface.setSource(lease)
-            // The laboratory hands each frame to one surface only.
-            lease.retire()
-        } catch {
-            custom = .failure(error)
-        }
-    }
-
     // MARK: Diagnostics
 
     private func updateDiagnostics() {
-        var lines = [Self.gpuDescription(), "Resets: \(resetCount)"]
         let tint = NativeTint(rawValue: tintControl.selectedSegmentIndex) ?? .none
-        lines.append("Native taps: \(nativeTapCount) · tint \(tint.diagnosticName) · \(nativeButton.isEnabled ? "enabled" : "disabled")")
+        let motion: String = switch (mode, updateLink?.isEnabled == true) {
+        case (.pattern, _): "still pattern"
+        case (.moving, true): "running"
+        case (.moving, false): UIAccessibility.isReduceMotionEnabled && wantsMotion ? "paused (Reduce Motion)" : "paused"
+        }
+        var lines = [
+            Self.gpuDescription(),
+            "Resets: \(resetCount)",
+            "Clock: \(motion) · t \(String(format: "%.2f", clock.seconds)) s · frame ID overlay \(showsFrameID ? "on" : "off")",
+            "Native taps: \(nativeTapCount) · tint \(tint.diagnosticName) · \(nativeButton.isEnabled ? "enabled" : "disabled")",
+            "Custom taps: \(customTapCount)",
+        ]
         switch custom {
-        case let .success((_, surface)):
+        case let .success(stageRendering):
+            let surface = stageRendering.surface
             let frame = surface.renderer.currentFrame.map { "frame \($0.frameID)" } ?? "no frame"
             let size = "\(surface.pixelSize.width)×\(surface.pixelSize.height) px"
             let outcome = surface.lastRenderOutcome.map(Self.describe) ?? "not drawn"
             lines.append("Custom: \(frame) · \(size) · \(outcome)")
+            if mode == .moving {
+                let background = stageRendering.background
+                let produced = background.lastProduced.map { "produced frame \($0.frameID) at t \(String(format: "%.2f", $0.contentSeconds)) s" } ?? "nothing produced"
+                lines.append("Source: \(produced) · \(background.textureCount) textures · \(background.coalescedCount) coalesced")
+            }
+            if let error = surface.lastProducedFrameError {
+                lines.append("Rejected frame: \(error)")
+            }
         case let .failure(error):
             lines.append("Custom unavailable: \(error)")
         case nil:
@@ -309,52 +597,16 @@ final class LabViewController: UIViewController {
     }
 }
 
-/// A titled, outlined container for one comparison mode.
-final class LabRegionView: UIView {
-    private let body = UIView()
+/// The stage reports each layout pass after its subviews have frames, so the
+/// glass panel can follow the native panel content exactly.
+final class StageView: UIView {
+    var onLayout: (() -> Void)?
 
-    init(title: String, identifier: String) {
-        super.init(frame: .zero)
-        layer.cornerRadius = 16
-        layer.borderWidth = 1
-        layer.borderColor = UIColor.separator.cgColor
-        accessibilityIdentifier = identifier
-
-        let label = UILabel()
-        label.text = title
-        label.font = .preferredFont(forTextStyle: .headline)
-        label.adjustsFontForContentSizeCategory = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        body.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(body)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
-            body.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            body.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            body.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 8),
-            body.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
-        ])
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
-            self.layer.borderColor = UIColor.separator.cgColor
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// Places `content` in the region below its title, filling the space.
-    func setBody(_ content: UIView) {
-        body.subviews.forEach { $0.removeFromSuperview() }
-        content.translatesAutoresizingMaskIntoConstraints = false
-        body.addSubview(content)
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: body.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-            content.topAnchor.constraint(equalTo: body.topAnchor),
-            content.bottomAnchor.constraint(equalTo: body.bottomAnchor),
-        ])
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Lay out the stack holding the panel content first, so its frame is
+        // current when the glass panel copies it.
+        subviews.forEach { $0.layoutIfNeeded() }
+        onLayout?()
     }
 }

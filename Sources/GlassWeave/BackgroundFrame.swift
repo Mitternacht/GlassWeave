@@ -75,13 +75,27 @@ public enum BackgroundColorConvention: Hashable, Sendable {
 /// How the consumer knows the producer's writes are visible before it samples.
 ///
 /// A Swift actor hop or CPU lock does not order GPU work. GlassWeave v0.1
-/// accepts one mechanism: same-queue encode order.
-public enum BackgroundFrameReadiness: Sendable {
+/// accepts one mechanism, same-queue encode order, in two forms.
+///
+/// Not `Sendable`: `.encoded(in:)` carries a command buffer, which belongs to
+/// the code encoding it. Like the frame it describes, a readiness value stays
+/// in the producer's and renderer's isolation domain.
+public enum BackgroundFrameReadiness {
     /// Every command that writes the texture was encoded into command buffers
     /// that the producer committed to `queue` *before* handing over the frame.
     /// The consumer must commit its sampling work to the same queue, which
     /// Metal executes after those writes.
     case committed(on: any MTLCommandQueue)
+    /// Every command that writes the texture was encoded earlier in
+    /// `commandBuffer`, which belongs to the renderer's queue.
+    ///
+    /// Produced inside ``GlassRenderer/drawProducing(targetPixelSize:displayScale:produce:acquireTarget:)``,
+    /// the command buffer is the draw's own: the renderer encodes its
+    /// sampling later in the same command buffer and commits it. Handed to
+    /// `setSource` directly, the command buffer must already be enqueued or
+    /// committed, which fixes its place in the queue before the renderer's
+    /// later work.
+    case encoded(in: any MTLCommandBuffer)
 }
 
 /// One produced background image and its metadata, immutable for a submission.
@@ -147,6 +161,9 @@ public enum BackgroundSourceError: Error, Hashable, Sendable, CustomStringConver
     case deviceMismatch(sourceDevice: String, rendererDevice: String)
     /// The producer committed its writes to a different command queue.
     case queueMismatch
+    /// The frame's writes are in a command buffer that has not been enqueued
+    /// or committed, so nothing orders them before the renderer's sampling.
+    case commandBufferNotEnqueued
     /// The valid rectangle is empty or extends outside the texture.
     case invalidValidRect(PixelRect, textureWidth: Int, textureHeight: Int)
     /// The frame ID is not greater than the last accepted frame's ID.
@@ -170,6 +187,8 @@ public enum BackgroundSourceError: Error, Hashable, Sendable, CustomStringConver
             "The source texture belongs to \(sourceDevice) but the renderer uses \(rendererDevice). Produce the texture on the renderer's device."
         case .queueMismatch:
             "The frame's writes were committed to a different command queue than the renderer's. GlassWeave v0.1 orders producer and consumer by same-queue encode order; encode the producer's writes on the renderer's commandQueue."
+        case .commandBufferNotEnqueued:
+            "The frame's writes are in a command buffer that is not yet enqueued or committed. Commit (or enqueue) it before handing over the frame, or produce the frame inside GlassRenderer.drawProducing, which commits it."
         case let .invalidValidRect(rect, width, height):
             "The valid rectangle (x \(rect.x), y \(rect.y), \(rect.width) x \(rect.height)) must be non-empty and lie inside the \(width) x \(height) texture."
         case let .outOfOrderFrame(previousID, receivedID):
@@ -310,6 +329,15 @@ extension BackgroundFrameReadiness {
     var queueIdentity: ObjectIdentifier {
         switch self {
         case let .committed(queue): ObjectIdentifier(queue)
+        case let .encoded(commandBuffer): ObjectIdentifier(commandBuffer.commandQueue)
+        }
+    }
+
+    /// The command buffer holding the writes, for `.encoded(in:)`.
+    var encodingCommandBuffer: (any MTLCommandBuffer)? {
+        switch self {
+        case .committed: nil
+        case let .encoded(commandBuffer): commandBuffer
         }
     }
 }

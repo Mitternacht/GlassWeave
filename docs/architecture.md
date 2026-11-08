@@ -64,6 +64,16 @@ flowchart LR
 
 For the first prototype, encode source production before sampling on the same device and command queue. Use separate producer and output textures; do not sample from a render target while writing to it without an explicit, supported algorithm. Introduce crop/region optimizations only after the full-resolution reference is correct.
 
+Implemented (GW-06): `GlassRenderer.drawProducing` makes one command buffer per draw, lets the app's producer encode the new frame into its own texture in that command buffer (readiness `.encoded(in:)`), then encodes the background and the panel later in the same command buffer and commits it once. `GlassSurfaceView.setFrameProducer` runs that path for every draw (an app request through `requestFrame()`, a resize, a scale or panel change), so the visible background and the refraction always show the frame produced for that draw, including after a resize while paused. The laboratory's producer (`ProceduralBackground`) renders a pure function of a deterministic clock (one 1/60 s step per `UIUpdateLink` tick of the stage's own window) into a pool of at most three textures; a texture returns to the pool only when its lease is released, and a tick with no free texture skips production rather than allocating. The surface draws through `MTKView`'s own `draw` cycle; the app never touches the drawable.
+
+| Path | Ordering and lifetime |
+| --- | --- |
+| Produced and drawn | Writes and sampling share one command buffer, in encode order. The submission hold ends when it completes. |
+| Produced, no drawable | The command buffer is still committed so the writes run; the frame stays current and the skipped use ends only when the writes complete, so the producer never hears "reusable" while they are in flight. |
+| Produced frame rejected | The command buffer is committed, the producer hold is retired when it completes, the error is thrown (`GlassSurfaceView.lastProducedFrameError`), and the previous source stays. |
+| Producer returns nothing | The current source is redrawn in a fresh command buffer. |
+| `.encoded(in:)` handed to `setSource` directly | Accepted only once that command buffer is enqueued or committed (its queue position is then fixed); otherwise `.commandBufferNotEnqueued`. |
+
 `MTKView` already owns drawable-related presentation behavior. A custom `CAMetalLayer` host is a later alternative only if measurement identifies a requirement. Acquire the drawable late, handle an unavailable drawable by skipping the frame, and present only after encoding its rendering work. [MTKView](https://developer.apple.com/documentation/metalkit/mtkview), [currentDrawable](https://developer.apple.com/documentation/metalkit/mtkview/currentdrawable).
 
 ## Source-frame contract
@@ -99,7 +109,7 @@ by the laboratory and tests; it is not yet a frozen public API.
 | Coordinate mapping | Destination UV → upright UV (aspect fill, centered crop) → stored UV (undo `SourceOrientation.rotation`, a clockwise quarter-turn count, then `verticalOrigin`) → texture UV (place `validRect`). Samples are clamped half a texel inside `validRect`. Display scale changes pixel count, not the mapping. |
 | Texture usage | Single-sample `.type2D` with `.shaderRead`; anything else is rejected. |
 | Color and alpha | `.sRGBOpaque` only: `bgra8Unorm_srgb`, decoded to linear light on read, alpha ignored. The output is `bgra8Unorm` holding sRGB-encoded values written by the shader, because the iOS Simulator cannot render to sRGB targets. |
-| Readiness | `.committed(on: queue)`: the producer committed its writes to the renderer's own queue before handing over the frame. Another queue is rejected (`.queueMismatch`). |
+| Readiness | `.committed(on: queue)`: the producer committed its writes to the renderer's own queue before handing over the frame. Another queue is rejected (`.queueMismatch`). GW-06 adds `.encoded(in: commandBuffer)` for writes encoded earlier in the draw's own command buffer (see the first rendering composition above). |
 | Lifetime | `BackgroundFrameLease` keeps the frame. The renderer holds a presentation hold while the frame is current and one submission hold per draw, ended in the command buffer's completed handler. Command buffers retain the texture until they complete. |
 | Completion | The lease's `onRelease` runs exactly once, after the producer called `retire()` and every hold ended. It reports completed, failed, skipped (for example, no drawable), and cancelled uses. |
 

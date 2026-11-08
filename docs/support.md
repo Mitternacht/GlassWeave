@@ -1,6 +1,6 @@
 # Support policy
 
-Status: updated for GW-03, GW-04, and GW-05, 2026-11-08. This page states what the package
+Status: updated for GW-03 through GW-06, 2026-11-08. This page states what the package
 declares and what it checks at runtime. It is not a list of qualified devices.
 No physical-device measurement has been made yet; see
 [the validation protocol](validation.md).
@@ -57,4 +57,7 @@ custom rendering passes its own command queue to `BackgroundRenderer` or
 declared `.sRGBOpaque`. It samples in linear light and ignores source alpha.
 Every other format, a texture from another device, or writes committed to
 another queue is rejected with a `BackgroundSourceError` that names the fix.
+Writes are ordered before sampling in one of two ways: committed earlier to the
+renderer's queue, or encoded earlier in the draw's own command buffer through
+`GlassRenderer.drawProducing` (or `GlassSurfaceView.setFrameProducer`).
 Wide color, HDR, transparent sources, and video formats are not supported.

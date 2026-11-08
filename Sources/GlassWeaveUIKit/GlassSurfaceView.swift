@@ -7,11 +7,13 @@ import UIKit
 /// panel over it, through an `MTKView`, on demand.
 ///
 /// The view draws only when something changes: a new source, a new panel, a
-/// new pixel size, or a display-scale change. No display loop runs in
-/// between. The panel is given in this view's points and converted with the
-/// same display scale as the drawable. The view
-/// sizes its drawable from its own bounds and `traitCollection.displayScale`,
-/// never from a screen or a global scene.
+/// new pixel size, a display-scale change, or an app request through
+/// ``requestFrame()``. No display loop runs in between; an app animating its
+/// source drives redraws from its own clock and can produce each frame
+/// inside the draw with ``setFrameProducer(_:)``. The panel is given in this
+/// view's points and converted with the same display scale as the drawable.
+/// The view sizes its drawable from its own bounds and
+/// `traitCollection.displayScale`, never from a screen or a global scene.
 ///
 /// Defined skips, none of which waits on the GPU or the main thread:
 /// - No source: the Metal view is hidden and the opaque `backgroundColor`
@@ -33,6 +35,20 @@ public final class GlassSurfaceView: UIView {
 
     /// Called after every draw request with its outcome.
     public var renderObserver: ((BackgroundRenderOutcome) -> Void)?
+
+    /// Encodes a new source frame into the draw's command buffer and returns
+    /// its lease, or `nil` to produce nothing this time. See
+    /// ``GlassRenderer/drawProducing(targetPixelSize:displayScale:produce:acquireTarget:)``.
+    public typealias FrameProducer = (
+        _ commandBuffer: any MTLCommandBuffer,
+        _ pixelSize: (width: Int, height: Int)
+    ) -> BackgroundFrameLease?
+
+    /// The source-contract error of the last produced frame the renderer
+    /// rejected, or `nil` once a produced frame is accepted.
+    public private(set) var lastProducedFrameError: BackgroundSourceError?
+
+    private var frameProducer: FrameProducer?
 
     /// The render target size in pixels: bounds times display scale, rounded
     /// to whole pixels. Zero in a dimension when the view has no area.
@@ -100,10 +116,37 @@ public final class GlassSurfaceView: UIView {
         }
     }
 
-    /// Removes the source and shows the opaque fallback.
+    /// Makes every draw produce its own frame first.
+    ///
+    /// With a producer set, each draw (from ``requestFrame()``, a resize, a
+    /// display-scale change, or a panel change) asks it for a frame at the
+    /// current pixel size, inside the draw's command buffer, and presents
+    /// that frame with the panel. The background and the refraction always
+    /// sample the frame produced for that draw. The app's own clock decides
+    /// when to call ``requestFrame()``; the view runs no display loop.
+    ///
+    /// Pass `nil` to stop producing; the last frame stays the source.
+    public func setFrameProducer(_ producer: FrameProducer?) {
+        frameProducer = producer
+        if producer != nil {
+            metalView.isHidden = false
+            metalView.setNeedsDisplay()
+        } else if renderer.currentFrame == nil {
+            metalView.isHidden = true
+        }
+    }
+
+    /// Requests one draw in the next display pass. Several requests before
+    /// that pass coalesce into one draw.
+    public func requestFrame() {
+        metalView.setNeedsDisplay()
+    }
+
+    /// Removes the source and shows the opaque fallback. A frame producer,
+    /// if set, keeps producing on the next draw.
     public func clearSource() {
         renderer.clearSource()
-        metalView.isHidden = true
+        metalView.isHidden = frameProducer == nil
         // Record the defined skip; the renderer returns before touching a
         // drawable because no source is attached.
         render(in: metalView)
@@ -137,10 +180,28 @@ public final class GlassSurfaceView: UIView {
 
     /// Draws through the same path the `MTKView` delegate uses.
     func render(in view: MTKView) {
-        let outcome = renderer.draw(targetPixelSize: pixelSize, displayScale: traitCollection.displayScale) {
-            // Acquire the drawable as late as possible.
+        // Acquire the drawable as late as possible: after the checks and
+        // after any frame production has been encoded.
+        let acquireTarget = { () -> BackgroundDrawTarget? in
             guard let descriptor = view.currentRenderPassDescriptor else { return nil }
             return BackgroundDrawTarget(renderPassDescriptor: descriptor, drawable: view.currentDrawable)
+        }
+        let scale = traitCollection.displayScale
+        let outcome: BackgroundRenderOutcome
+        if let frameProducer {
+            do {
+                outcome = try renderer.drawProducing(
+                    targetPixelSize: pixelSize, displayScale: scale,
+                    produce: frameProducer, acquireTarget: acquireTarget
+                )
+                lastProducedFrameError = nil
+            } catch {
+                // The previous source stays; the next request tries again.
+                lastProducedFrameError = error
+                return
+            }
+        } else {
+            outcome = renderer.draw(targetPixelSize: pixelSize, displayScale: scale, acquireTarget: acquireTarget)
         }
         lastRenderOutcome = outcome
         renderObserver?(outcome)

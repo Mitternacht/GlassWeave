@@ -83,8 +83,73 @@ public final class GlassRenderer {
         displayScale: Double,
         acquireTarget: () -> BackgroundDrawTarget?
     ) -> BackgroundRenderOutcome {
+        draw(targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: nil, acquireTarget: acquireTarget)
+    }
+
+    /// Produces a new source frame and draws it, in one command buffer.
+    ///
+    /// The renderer makes a command buffer on its queue and calls `produce`
+    /// with it and the target size. The producer encodes its writes into that
+    /// command buffer and returns a lease whose frame declares
+    /// ``BackgroundFrameReadiness/encoded(in:)`` with the same command
+    /// buffer. The renderer then attaches the frame, encodes the background
+    /// and panel *later in the same command buffer*, so Metal orders the
+    /// sampling after the writes, and commits it once. The background and the
+    /// refraction therefore always show the frame produced for this draw.
+    ///
+    /// Ownership: the renderer takes over the producer's hold and retires it
+    /// once the frame is attached, so do not hand the lease to another
+    /// consumer. The release still waits for every use, including the
+    /// command buffer that carries the writes.
+    ///
+    /// `produce` may return `nil` to produce nothing this time (for example,
+    /// when no reusable texture is free); it must then encode nothing. The
+    /// renderer draws the current source instead.
+    ///
+    /// Defined skips are those of ``draw(targetPixelSize:displayScale:acquireTarget:)``.
+    /// A zero-size target skips before `produce` is called. When a frame was
+    /// produced but no drawable is available, the frame still becomes current
+    /// and its writes are committed, so a later draw can show it.
+    ///
+    /// - Throws: ``BackgroundSourceError`` if the produced frame breaks the
+    ///   source contract. Its writes are still committed, its producer hold
+    ///   is retired once they complete, and the previous source stays.
+    public func drawProducing(
+        targetPixelSize: (width: Int, height: Int),
+        displayScale: Double,
+        produce: (_ commandBuffer: any MTLCommandBuffer, _ pixelSize: (width: Int, height: Int)) -> BackgroundFrameLease?,
+        acquireTarget: () -> BackgroundDrawTarget?
+    ) throws(BackgroundSourceError) -> BackgroundRenderOutcome {
+        guard targetPixelSize.width > 0, targetPixelSize.height > 0 else {
+            return .skipped(.zeroSizeTarget)
+        }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            return .skipped(.encoderUnavailable)
+        }
+        if let lease = produce(commandBuffer, targetPixelSize) {
+            commandBuffer.label = "GlassWeave produced frame \(lease.frame.frameID)"
+            do {
+                try background.setSource(lease, drawCommandBuffer: commandBuffer)
+            } catch {
+                // Let the producer's writes finish before it may reuse them.
+                let core = lease.core
+                commandBuffer.addCompletedHandler { _ in core.retireProducer() }
+                commandBuffer.commit()
+                throw error
+            }
+            lease.retire()
+        }
+        return draw(targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: commandBuffer, acquireTarget: acquireTarget)
+    }
+
+    private func draw(
+        targetPixelSize: (width: Int, height: Int),
+        displayScale: Double,
+        commandBuffer: (any MTLCommandBuffer)?,
+        acquireTarget: () -> BackgroundDrawTarget?
+    ) -> BackgroundRenderOutcome {
         let panel = panel
-        return background.draw(targetPixelSize: targetPixelSize, acquireTarget: acquireTarget, overlay: { [panelPipeline] encoder, frame, backgroundUniforms, targetSize in
+        return background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, overlay: { [panelPipeline] encoder, frame, backgroundUniforms, targetSize in
             // Converted only once a target exists, so the skips that run
             // before (including a zero display scale's zero-size target)
             // never see the scale.
