@@ -134,3 +134,12 @@ The application remains responsible for content semantics and layout. GlassWeave
 Start with no package dependency. A later example may depend on both packages and exchange an explicit texture lease. A future `FrostfieldMetal` product is worth considering only after both implementations need the same measured resource/pipeline behavior. That product must not import scene nodes, mesh loaders, materials, or UI adapters. Avoid exposing its internal types through GlassWeave's public API unless that dependency is a deliberate long-term contract.
 
 See [the plan](../tasks/plan.md), [task checklist](../tasks/todo.md), and [validation protocol](validation.md) for implementation order and acceptance evidence.
+
+## Language decision
+
+Use Swift for CPU implementation and native APIs, MSL for custom GPU work, and a
+small verified C-compatible data-layout boundary when needed. The proposed
+manifest baseline is Swift tools 6.2 with Swift 6 language mode. See the
+[language strategy](language-strategy.md)
+for toolchain distinctions, layout tests, ownership rules, foreign-language
+admission gates, and conditional backend alternatives.

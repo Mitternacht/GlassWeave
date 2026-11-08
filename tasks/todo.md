@@ -13,11 +13,11 @@ Use the native Xcode MCP tools for project edits, builds, tests, diagnostics, an
 **Dependencies:** None. **Scope:** Medium, four files.
 
 **Acceptance criteria:**
-- [ ] A Swift 6 package exposes the `GlassWeave` product with planned iOS/iPadOS 26 and macOS 26 minimums; core compilation does not import UIKit or SwiftUI.
+- [ ] A package using Swift tools 6.2 and Swift 6 language mode exposes the `GlassWeave` product with planned iOS/iPadOS 26 and macOS 26 minimums; core compilation does not import UIKit or SwiftUI.
 - [ ] Xcode builds the package for macOS and an iOS simulator destination, and CI repeats the package build without account credentials.
 - [ ] The support note distinguishes OS availability from Metal GPU capabilities and macOS core compilation from a promised macOS UI adapter.
 
-**Verification:** Use Xcode documentation search to confirm the available SDK and capability APIs; build through Xcode MCP and inspect diagnostics. Do not add an always-passing test for an empty module; add tests when testable behavior first exists.
+**Verification:** Use Xcode documentation search to confirm the available SDK and capability APIs; build through Xcode MCP and inspect diagnostics. Record compiler, SDK, language mode, default actor isolation, and MSL dialect separately under `docs/language-strategy.md`. Do not add an always-passing test for an empty module; add tests when testable behavior first exists.
 
 **Likely files:** `Package.swift`, `Sources/GlassWeave/GlassWeave.swift`, `.github/workflows/build.yml`, `docs/support.md`.
 
@@ -67,7 +67,7 @@ Use the native Xcode MCP tools for project edits, builds, tests, diagnostics, an
 - [ ] A test pattern stays correctly oriented and cropped through resize, rotation, safe-area changes, and display-scale changes derived from host bounds and traits.
 - [ ] Missing source, zero-size surface, and unavailable drawable produce defined skip or fallback behavior without waiting on the main thread.
 
-**Verification:** Xcode build; Swift Testing for coordinate mapping and lease state; Metal API Validation; device/simulator rotation with a four-corner test pattern.
+**Verification:** Xcode build; Swift Testing for coordinate mapping and lease state; Metal API Validation; device/simulator rotation with a four-corner test pattern. Add host layout assertions and a distinctive-value GPU round-trip for uploaded records; split shared-layout packaging into a prerequisite subtask if needed to keep this slice focused.
 
 **Likely files:** `Sources/GlassWeave/BackgroundFrame.swift`, `Sources/GlassWeave/BackgroundRenderer.swift`, `Sources/GlassWeaveUIKit/GlassSurfaceView.swift`, `Sources/GlassWeave/Shaders/Background.metal`, `Tests/GlassWeaveTests/BackgroundFrameTests.swift`.
 

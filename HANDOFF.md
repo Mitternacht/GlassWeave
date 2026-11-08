@@ -12,6 +12,10 @@ The user deliberately reserved implementation for Claude.
 4. [Verification and performance protocol](docs/validation.md).
 5. [Ordered implementation tasks](tasks/todo.md) — the only completion checklist.
 
+Read the [language strategy](docs/language-strategy.md) before creating the package.
+It specifies Swift CPU code, MSL shaders, a verified data-layout boundary, and gates
+for adding C/C++ or Rust.
+
 ## The outcome to prove first
 
 Build a UIKit laboratory app with native Apple glass beside a custom refractive

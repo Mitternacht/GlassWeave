@@ -113,3 +113,12 @@ These do not block repository preparation:
 ## Completion bar
 
 The first milestone requires the [validation protocol](../docs/validation.md), not a claim that every proposed budget has already been achieved. Later pre-alpha release work also requires a minimal consumer app, documented failure behavior, recorded API changes, and an explicit support matrix. Any failed quality target remains visible in the report and blocks an unqualified success claim.
+
+## Language decision
+
+Use Swift for CPU implementation and native APIs, MSL for custom GPU work, and a
+small verified C-compatible data-layout boundary when needed. The proposed
+manifest baseline is Swift tools 6.2 with Swift 6 language mode. See the
+[language strategy](../docs/language-strategy.md)
+for toolchain distinctions, layout tests, ownership rules, foreign-language
+admission gates, and conditional backend alternatives.

@@ -125,3 +125,12 @@ Required follow-up tasks and evidence links.
 ```
 
 Successful repository creation or a clean package build never substitutes for this report.
+
+## Language and data-layout evidence
+
+Follow [the language strategy](language-strategy.md). With the first actual GPU
+records, verify host size/alignment/offsets/stride and a shader round-trip with
+distinctive values. Record allocations, copied bytes where measurable, and
+retain/release hotspots during state updates, resize, and steady rendering.
+For foreign kernels, include conversion and FFI cost and a clean Swift consumer
+build; do not infer a whole-app benefit from an isolated microbenchmark.
