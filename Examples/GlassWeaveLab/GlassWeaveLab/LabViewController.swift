@@ -1,4 +1,5 @@
 import GlassWeave
+import GlassWeaveUIKit
 import Metal
 import UIKit
 
@@ -17,8 +18,15 @@ final class LabViewController: UIViewController {
         title: String(localized: "Custom GlassWeave"),
         identifier: "lab.customRegion"
     )
+    private let regions = UIStackView()
     private let diagnosticsLabel = UILabel()
     private let resetButton = UIButton(configuration: .bordered())
+
+    /// The app-owned background producer and the surface presenting it, or
+    /// the reason the custom region could not be set up.
+    private var custom: Result<(source: PatternSource, surface: GlassSurfaceView), any Error>?
+    private var nextFrameID: UInt64 = 1
+    private var lastRelease: BackgroundFrameRelease?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -34,7 +42,8 @@ final class LabViewController: UIViewController {
         resetButton.accessibilityIdentifier = "lab.reset"
         resetButton.addAction(UIAction { [weak self] _ in self?.reset() }, for: .primaryActionTriggered)
 
-        let regions = UIStackView(arrangedSubviews: [referenceRegion, customRegion])
+        regions.addArrangedSubview(referenceRegion)
+        regions.addArrangedSubview(customRegion)
         regions.axis = .vertical
         regions.spacing = 16
         regions.distribution = .fillEqually
@@ -51,30 +60,110 @@ final class LabViewController: UIViewController {
             stack.topAnchor.constraint(equalTo: guide.topAnchor, constant: 16),
             stack.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -16),
         ])
+
+        setUpCustomRegion()
         reset()
+    }
+
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        // Side by side when the scene is wider than tall, from local bounds.
+        let axis: NSLayoutConstraint.Axis = view.bounds.width > view.bounds.height ? .horizontal : .vertical
+        if regions.axis != axis {
+            regions.axis = axis
+        }
     }
 
     /// Returns every laboratory control to its initial state.
     func reset() {
         resetCount += 1
-        diagnosticsLabel.text = Self.diagnosticsText(resetCount: resetCount)
+        presentNextPatternFrame()
+        updateDiagnostics()
     }
 
-    private static func diagnosticsText(resetCount: Int) -> String {
-        let capabilities = MTLCreateSystemDefaultDevice().map(RenderCapabilities.init(device:))
-        let gpu: String
-        if let capabilities {
-            let family = capabilities.highestAppleFamily.map { "apple\($0)" } ?? "none"
-            gpu = "GPU \(capabilities.deviceName) · Metal 3 \(capabilities.supportsMetal3) · Metal 4 \(capabilities.supportsMetal4) · \(family)"
-        } else {
-            gpu = "No Metal device"
+    // MARK: Custom region
+
+    private func setUpCustomRegion() {
+        do {
+            let source = try PatternSource()
+            let surface = GlassSurfaceView(renderer: try BackgroundRenderer(commandQueue: source.queue))
+            surface.accessibilityIdentifier = "lab.customSurface"
+            surface.renderObserver = { [weak self] _ in self?.updateDiagnostics() }
+            customRegion.setBody(surface)
+            custom = .success((source, surface))
+        } catch {
+            let label = UILabel()
+            label.text = String(describing: error)
+            label.font = .preferredFont(forTextStyle: .body)
+            label.adjustsFontForContentSizeCategory = true
+            label.numberOfLines = 0
+            customRegion.setBody(label)
+            custom = .failure(error)
         }
-        return "\(gpu)\nResets: \(resetCount)"
+    }
+
+    /// Hands the surface a newly produced frame. The previous frame's lease
+    /// is released once the surface lets go of it and every draw that
+    /// sampled it has completed.
+    private func presentNextPatternFrame() {
+        guard case let .success((source, surface)) = custom else { return }
+        let frameID = nextFrameID
+        nextFrameID += 1
+        do {
+            let lease = try source.makeFrame(frameID: frameID) { [weak self] release in
+                Task { @MainActor in
+                    self?.lastRelease = release
+                    self?.updateDiagnostics()
+                }
+            }
+            try surface.setSource(lease)
+            // The laboratory hands each frame to one surface only.
+            lease.retire()
+        } catch {
+            custom = .failure(error)
+        }
+    }
+
+    // MARK: Diagnostics
+
+    private func updateDiagnostics() {
+        var lines = [Self.gpuDescription(), "Resets: \(resetCount)"]
+        switch custom {
+        case let .success((_, surface)):
+            let frame = surface.renderer.currentFrame.map { "frame \($0.frameID)" } ?? "no frame"
+            let size = "\(surface.pixelSize.width)×\(surface.pixelSize.height) px"
+            let outcome = surface.lastRenderOutcome.map(Self.describe) ?? "not drawn"
+            lines.append("Custom: \(frame) · \(size) · \(outcome)")
+        case let .failure(error):
+            lines.append("Custom unavailable: \(error)")
+        case nil:
+            break
+        }
+        if let lastRelease {
+            lines.append("Released frame \(lastRelease.frameID): \(lastRelease.completedSubmissions) drawn, \(lastRelease.skippedSubmissions) skipped")
+        }
+        diagnosticsLabel.text = lines.joined(separator: "\n")
+    }
+
+    private static func describe(_ outcome: BackgroundRenderOutcome) -> String {
+        switch outcome {
+        case let .submitted(frameID): "submitted frame \(frameID)"
+        case let .skipped(reason): "skipped (\(reason))"
+        }
+    }
+
+    private static func gpuDescription() -> String {
+        guard let device = MTLCreateSystemDefaultDevice() else { return "No Metal device" }
+        let capabilities = RenderCapabilities(device: device)
+        let family = capabilities.highestAppleFamily.map { "apple\($0)" } ?? "none"
+        return "GPU \(capabilities.deviceName) · Metal 3 \(capabilities.supportsMetal3) · Metal 4 \(capabilities.supportsMetal4) · \(family)"
     }
 }
 
 /// A titled, outlined container for one comparison mode.
 final class LabRegionView: UIView {
+    private let body = UIView()
+
     init(title: String, identifier: String) {
         super.init(frame: .zero)
         layer.cornerRadius = 16
@@ -88,10 +177,16 @@ final class LabRegionView: UIView {
         label.adjustsFontForContentSizeCategory = true
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
+        body.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(body)
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             label.topAnchor.constraint(equalTo: topAnchor, constant: 12),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            body.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            body.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            body.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 8),
+            body.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
         ])
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
             self.layer.borderColor = UIColor.separator.cgColor
@@ -100,4 +195,17 @@ final class LabRegionView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Places `content` in the region below its title, filling the space.
+    func setBody(_ content: UIView) {
+        body.subviews.forEach { $0.removeFromSuperview() }
+        content.translatesAutoresizingMaskIntoConstraints = false
+        body.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            content.topAnchor.constraint(equalTo: body.topAnchor),
+            content.bottomAnchor.constraint(equalTo: body.bottomAnchor),
+        ])
+    }
 }

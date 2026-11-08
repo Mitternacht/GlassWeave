@@ -1,6 +1,6 @@
 # Support policy
 
-Status: GW-01 baseline, recorded 2026-11-08. This page states what the package
+Status: updated for GW-04, 2026-11-08. This page states what the package
 declares and what it checks at runtime. It is not a list of qualified devices.
 No physical-device measurement has been made yet; see
 [the validation protocol](validation.md).
@@ -40,8 +40,20 @@ the backend today.
 
 ## Modules
 
-| Product | Imports | Purpose |
+| Product or target | Imports | Purpose |
 | --- | --- | --- |
-| `GlassWeave` | Metal (and simd) | Core types and rendering. Never imports UIKit or SwiftUI. |
+| `GlassWeave` | Metal, simd, os | Core types and rendering: the source-frame contract, its validation and lease, and the background renderer. Never imports UIKit or SwiftUI. |
+| `GlassWeaveUIKit` | UIKit, MetalKit | UIKit presentation. `GlassSurfaceView` hosts an `MTKView` for an explicit source. Compiled only where UIKit exists; on macOS the module is empty. |
+| `GlassWeaveShaderTypes` (internal C target, not a product) | simd | The single definition of every record uploaded to the GPU, shared by Swift and the Metal shaders. |
 
-UIKit presentation arrives as a separate product when a working slice needs it.
+GlassWeave never creates a Metal device or command queue. An app that uses
+custom rendering passes its own command queue to `BackgroundRenderer`.
+
+## Source contract (v0.1)
+
+`BackgroundRenderer` accepts exactly one source format: a single-sample 2D
+`bgra8Unorm_srgb` texture with `shaderRead` usage on the renderer's device,
+declared `.sRGBOpaque`. It samples in linear light and ignores source alpha.
+Every other format, a texture from another device, or writes committed to
+another queue is rejected with a `BackgroundSourceError` that names the fix.
+Wide color, HDR, transparent sources, and video formats are not supported.

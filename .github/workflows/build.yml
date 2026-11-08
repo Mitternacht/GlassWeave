@@ -40,15 +40,25 @@ jobs:
             fi
           done
 
+      # The combined workspace's shared GlassWeave scheme builds every package
+      # product and runs both test bundles with MTL_DEBUG_LAYER=1 (Metal API
+      # Validation) set in its test action.
       - name: Build package (macOS Debug)
-        run: xcodebuild build -scheme GlassWeave -destination 'generic/platform=macOS' -configuration Debug CODE_SIGNING_ALLOWED=NO
+        run: xcodebuild build -workspace Examples/GlassWeave.xcworkspace -scheme GlassWeave -destination 'generic/platform=macOS' -configuration Debug CODE_SIGNING_ALLOWED=NO
 
       - name: Build package (macOS Release)
-        run: xcodebuild build -scheme GlassWeave -destination 'generic/platform=macOS' -configuration Release CODE_SIGNING_ALLOWED=NO
+        run: xcodebuild build -workspace Examples/GlassWeave.xcworkspace -scheme GlassWeave -destination 'generic/platform=macOS' -configuration Release CODE_SIGNING_ALLOWED=NO
 
       - name: Build package (iOS Simulator Release)
-        run: xcodebuild build -scheme GlassWeave -destination 'generic/platform=iOS Simulator' -configuration Release CODE_SIGNING_ALLOWED=NO
+        run: xcodebuild build -workspace Examples/GlassWeave.xcworkspace -scheme GlassWeave -destination 'generic/platform=iOS Simulator' -configuration Release CODE_SIGNING_ALLOWED=NO
 
-      - name: Build laboratory app (iOS Simulator Debug)
-        working-directory: Examples/GlassWeaveLab
-        run: xcodebuild build -project GlassWeaveLab.xcodeproj -scheme GlassWeaveLab -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO
+      - name: Test package (macOS, Metal API Validation)
+        run: xcodebuild test -workspace Examples/GlassWeave.xcworkspace -scheme GlassWeave -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+
+      # The UIKit tests run on an iOS simulator; CI compiles them without
+      # depending on a particular simulator device being installed.
+      - name: Build package tests (iOS Simulator)
+        run: xcodebuild build-for-testing -workspace Examples/GlassWeave.xcworkspace -scheme GlassWeave -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+
+      - name: Build laboratory app and UI tests (iOS Simulator Debug)
+        run: xcodebuild build-for-testing -workspace Examples/GlassWeave.xcworkspace -scheme GlassWeaveLab -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO

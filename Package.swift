@@ -11,10 +11,27 @@ let package = Package(
     ],
     products: [
         .library(name: "GlassWeave", targets: ["GlassWeave"]),
+        .library(name: "GlassWeaveUIKit", targets: ["GlassWeaveUIKit"]),
     ],
     targets: [
-        // Core: Metal and simd only. Must not import UIKit or SwiftUI.
-        .target(name: "GlassWeave"),
+        // CPU/GPU record layouts shared by Swift and Metal shaders. C only;
+        // the header is the single definition of every uploaded record.
+        .target(name: "GlassWeaveShaderTypes"),
+        // Core: Metal, simd, and os only. Must not import UIKit or SwiftUI.
+        // Shaders live in Sources/GlassWeave/Shaders and are compiled by Xcode
+        // into the target's default.metallib.
+        .target(name: "GlassWeave", dependencies: ["GlassWeaveShaderTypes"]),
+        // UIKit presentation. Every file is guarded by `#if canImport(UIKit)`
+        // so the macOS core build still compiles the package.
+        .target(name: "GlassWeaveUIKit", dependencies: ["GlassWeave"]),
+        .testTarget(
+            name: "GlassWeaveTests",
+            dependencies: ["GlassWeave", "GlassWeaveShaderTypes"]
+        ),
+        .testTarget(
+            name: "GlassWeaveUIKitTests",
+            dependencies: ["GlassWeaveUIKit", "GlassWeave"]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )

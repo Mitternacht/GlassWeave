@@ -86,3 +86,25 @@ synchronized groups). Xcode 27's template writes a new `project.xcproj` format,
 but the native Xcode tools offer no operation to add a local package reference
 to it, and earlier Xcode releases cannot open it. The classic format was written
 once as a bootstrap and is edited through Xcode afterwards.
+
+## Shared record layout (GW-04)
+
+Recorded 2026-11-08 with the first uploaded record.
+
+- `Sources/GlassWeaveShaderTypes/include/GlassWeaveShaderTypes.h` is the single
+  definition of `GWBackgroundUniforms` and the binding indices. Swift imports
+  it as the `GlassWeaveShaderTypes` module (an internal C target with one `.c`
+  file); `Background.metal` includes it by relative path.
+- The record uses only `simd_float2` fields: size 40, alignment 8, stride 40,
+  offsets 0/8/16/24/32. The matrix convention is an affine map stored as three
+  column vectors (`x` axis, `y` axis, origin). Binding: fragment buffer 0 and
+  fragment texture 0.
+- Host layout is asserted three ways: C `_Static_assert`s in the `.c` file,
+  MSL `static_assert`s in the shader, and Swift Testing `MemoryLayout` checks.
+- A compute probe in the test target (`Tests/GlassWeaveTests/Shaders/LayoutProbe.metal`)
+  reads a record filled with distinctive, exactly representable values and
+  writes back each field plus the shader's `sizeof`, `alignof`, and
+  `offsetof`. The test passed on My Mac (Apple M5) and on the iOS 27.2
+  Simulator, both with Metal API Validation enabled.
+- `swift build` cannot compile `.metal` files; build and test through Xcode.
+

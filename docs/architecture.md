@@ -1,6 +1,6 @@
 # GlassWeave architecture
 
-This is a proposed design. The repository currently contains planning documents only. API names, targets, and file paths below are implementation guidance for Claude; none is presented as a shipped interface.
+This is a proposed design. API names, targets, and file paths below are implementation guidance for Claude; none is presented as a shipped interface. Sections marked as implemented describe code that exists in the repository; [the task checklist](../tasks/todo.md) records what has been verified.
 
 ## Purpose and boundaries
 
@@ -83,6 +83,30 @@ Define this contract before accepting outside producers. It is a behavioral cont
 For v0.1, use one documented SDR convention: sRGB BGRA8 textures with shader sampling in linear light and an explicitly documented alpha convention. Prefer an opaque source in the first laboratory to isolate optical correctness. A later transparent source path must consistently use premultiplied alpha. Reject unsupported formats rather than displaying a plausible but incorrect result. Wide color, HDR, YCbCr video import, and color conversion are later capabilities.
 
 Treat frame metadata as immutable for a submission. Keep mutable GPU objects under an explicit owner; do not apply `@unchecked Sendable` to silence concurrency errors. The UI host runs on the main actor. The rendering owner manages encoding and resource state. Pure descriptors may be `Sendable` when their stored values actually satisfy that contract.
+
+### Implemented v0.1 contract (GW-04)
+
+GW-04 settled the rows above in code. This is the first concrete form, used
+by the laboratory and tests; it is not yet a frozen public API.
+
+| Row | Implementation |
+| --- | --- |
+| Device identity | `BackgroundRenderer.setSource` rejects a texture whose `device` is not the renderer's (`.deviceMismatch`). |
+| Frame identity | `BackgroundFrame.frameID` (must increase per renderer) and `timestamp` (`Duration` on the producer's clock, must not go back). Stale frames throw `.outOfOrderFrame` / `.timestampRegressed`. |
+| Extent | The texture's pixel size plus `validRect` in texture pixels (origin at the top-left of texture memory). View size in points never enters the source contract; `GlassSurfaceView` converts bounds × `displayScale` to target pixels. |
+| Coordinate mapping | Destination UV → upright UV (aspect fill, centered crop) → stored UV (undo `SourceOrientation.rotation`, a clockwise quarter-turn count, then `verticalOrigin`) → texture UV (place `validRect`). Samples are clamped half a texel inside `validRect`. Display scale changes pixel count, not the mapping. |
+| Texture usage | Single-sample `.type2D` with `.shaderRead`; anything else is rejected. |
+| Color and alpha | `.sRGBOpaque` only: `bgra8Unorm_srgb`, decoded to linear light on read, alpha ignored. The output is `bgra8Unorm` holding sRGB-encoded values written by the shader, because the iOS Simulator cannot render to sRGB targets. |
+| Readiness | `.committed(on: queue)`: the producer committed its writes to the renderer's own queue before handing over the frame. Another queue is rejected (`.queueMismatch`). |
+| Lifetime | `BackgroundFrameLease` keeps the frame. The renderer holds a presentation hold while the frame is current and one submission hold per draw, ended in the command buffer's completed handler. Command buffers retain the texture until they complete. |
+| Completion | The lease's `onRelease` runs exactly once, after the producer called `retire()` and every hold ended. It reports completed, failed, skipped (for example, no drawable), and cancelled uses. |
+
+Defined skips (`BackgroundRenderOutcome.skipped`): no source, zero-size
+target, no drawable, released source, or no encoder. Missing-source and
+zero-size checks run before a drawable is requested. No path waits for GPU
+completion. Known limit carried to GW-07: `MTKView.currentDrawable` can block
+for up to the layer's one-second timeout if every drawable is still in
+flight; bounding in-flight frames belongs to the lifecycle task.
 
 ### Synchronization progression
 
