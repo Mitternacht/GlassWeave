@@ -18,6 +18,8 @@ The first supported presentation environment is planned to be UIKit on iOS/iPadO
 
 Native mode is in v0.1. Custom mode starts with one rounded panel. Enhanced-native mode is a later measured experiment.
 
+Implemented (GW-03): `NativeGlassView` in `GlassWeaveUIKit` is native mode. It is a `UIVisualEffectView` whose effect is a public `UIGlassEffect` built from a configuration of tint and `isInteractive`; native controls go in its `contentView`. It references no GlassWeave rendering type, and a test confirms that creating, configuring, laying out, and actuating it records no renderer in the renderer census and places no `MTKView` in its hierarchy.
+
 `UIGlassEffect` provides tint and interactive behavior, and `UIGlassContainerEffect` coordinates native glass elements. The public API describes native effect configuration and composition. This design therefore does not assume a custom shader injection point or native/custom shared optical merging. That is an architectural inference from the documented interface, not a claim about Apple's internal renderer. [UIGlassEffect](https://developer.apple.com/documentation/uikit/uiglasseffect), [UIGlassContainerEffect](https://developer.apple.com/documentation/uikit/uiglasscontainereffect).
 
 When a future custom morph joins two surfaces, GlassWeave must own both participating optical surfaces. Native controls can remain above them. A native glass control next to a custom surface remains an independent material.

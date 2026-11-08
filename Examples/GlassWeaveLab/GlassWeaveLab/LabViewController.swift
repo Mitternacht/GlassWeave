@@ -22,6 +22,14 @@ final class LabViewController: UIViewController {
     private let diagnosticsLabel = UILabel()
     private let resetButton = UIButton(configuration: .bordered())
 
+    /// Native mode: genuine Apple glass around a real button, over a simple
+    /// moving backdrop. Nothing in this region creates a GlassWeave renderer.
+    private let nativeGlass = NativeGlassView()
+    private let nativeButton = UIButton(configuration: .plain())
+    private let tintControl = UISegmentedControl(items: NativeTint.allCases.map(\.title))
+    private let enabledSwitch = UISwitch()
+    private var nativeTapCount = 0
+
     /// The app-owned background producer and the surface presenting it, or
     /// the reason the custom region could not be set up.
     private var custom: Result<(source: PatternSource, surface: GlassSurfaceView), any Error>?
@@ -61,6 +69,7 @@ final class LabViewController: UIViewController {
             stack.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -16),
         ])
 
+        setUpReferenceRegion()
         setUpCustomRegion()
         reset()
     }
@@ -77,8 +86,120 @@ final class LabViewController: UIViewController {
     /// Returns every laboratory control to its initial state.
     func reset() {
         resetCount += 1
+        resetNativeReference()
         presentNextPatternFrame()
         updateDiagnostics()
+    }
+
+    // MARK: Native reference region
+
+    /// The glass tints the laboratory compares.
+    enum NativeTint: Int, CaseIterable {
+        case none, blue, orange
+
+        var title: String {
+            switch self {
+            case .none: String(localized: "None")
+            case .blue: String(localized: "Blue")
+            case .orange: String(localized: "Orange")
+            }
+        }
+
+        var color: UIColor? {
+            switch self {
+            case .none: nil
+            case .blue: .systemBlue
+            case .orange: .systemOrange
+            }
+        }
+
+        var diagnosticName: String {
+            switch self {
+            case .none: "none"
+            case .blue: "blue"
+            case .orange: "orange"
+            }
+        }
+    }
+
+    private func setUpReferenceRegion() {
+        let stage = UIView()
+        stage.clipsToBounds = true
+        stage.layer.cornerRadius = 12
+        let stripes = MovingStripesView()
+        stripes.translatesAutoresizingMaskIntoConstraints = false
+        stage.addSubview(stripes)
+
+        nativeButton.configuration?.title = String(localized: "Native action")
+        nativeButton.configuration?.baseForegroundColor = .label
+        nativeButton.accessibilityIdentifier = "lab.nativeButton"
+        nativeButton.translatesAutoresizingMaskIntoConstraints = false
+        nativeButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            nativeTapCount += 1
+            updateDiagnostics()
+        }, for: .primaryActionTriggered)
+
+        nativeGlass.cornerConfiguration = .capsule()
+        nativeGlass.accessibilityIdentifier = "lab.nativeGlass"
+        nativeGlass.translatesAutoresizingMaskIntoConstraints = false
+        nativeGlass.contentView.addSubview(nativeButton)
+        stage.addSubview(nativeGlass)
+
+        NSLayoutConstraint.activate([
+            stripes.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+            stripes.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
+            stripes.topAnchor.constraint(equalTo: stage.topAnchor),
+            stripes.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+            nativeButton.leadingAnchor.constraint(equalTo: nativeGlass.contentView.leadingAnchor, constant: 20),
+            nativeButton.trailingAnchor.constraint(equalTo: nativeGlass.contentView.trailingAnchor, constant: -20),
+            nativeButton.topAnchor.constraint(equalTo: nativeGlass.contentView.topAnchor, constant: 8),
+            nativeButton.bottomAnchor.constraint(equalTo: nativeGlass.contentView.bottomAnchor, constant: -8),
+            nativeGlass.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+            nativeGlass.centerYAnchor.constraint(equalTo: stage.centerYAnchor),
+            nativeGlass.leadingAnchor.constraint(greaterThanOrEqualTo: stage.leadingAnchor, constant: 16),
+            nativeGlass.topAnchor.constraint(greaterThanOrEqualTo: stage.topAnchor, constant: 8),
+        ])
+
+        tintControl.accessibilityIdentifier = "lab.nativeTint"
+        tintControl.addAction(UIAction { [weak self] _ in self?.applyNativeState() }, for: .valueChanged)
+        enabledSwitch.accessibilityIdentifier = "lab.nativeEnabled"
+        enabledSwitch.accessibilityLabel = String(localized: "Native action enabled")
+        enabledSwitch.addAction(UIAction { [weak self] _ in self?.applyNativeState() }, for: .valueChanged)
+        let enabledLabel = UILabel()
+        enabledLabel.text = String(localized: "Enabled")
+        enabledLabel.font = .preferredFont(forTextStyle: .subheadline)
+        enabledLabel.adjustsFontForContentSizeCategory = true
+        // The switch carries the label for VoiceOver.
+        enabledLabel.isAccessibilityElement = false
+
+        let controls = UIStackView(arrangedSubviews: [tintControl, UIView(), enabledLabel, enabledSwitch])
+        controls.axis = .horizontal
+        controls.spacing = 8
+        controls.alignment = .center
+
+        let body = UIStackView(arrangedSubviews: [stage, controls])
+        body.axis = .vertical
+        body.spacing = 8
+        referenceRegion.setBody(body)
+    }
+
+    /// Applies the tint and enabled state the controls show. A disabled
+    /// control also gets non-interactive glass.
+    private func applyNativeState() {
+        let tint = NativeTint(rawValue: tintControl.selectedSegmentIndex) ?? .none
+        let enabled = enabledSwitch.isOn
+        nativeGlass.configuration = NativeGlassView.Configuration(tintColor: tint.color, isInteractive: enabled)
+        nativeButton.isEnabled = enabled
+        updateDiagnostics()
+    }
+
+    /// Restores untinted, enabled, interactive glass and clears the tap count.
+    private func resetNativeReference() {
+        tintControl.selectedSegmentIndex = NativeTint.none.rawValue
+        enabledSwitch.isOn = true
+        nativeTapCount = 0
+        applyNativeState()
     }
 
     // MARK: Custom region
@@ -128,6 +249,8 @@ final class LabViewController: UIViewController {
 
     private func updateDiagnostics() {
         var lines = [Self.gpuDescription(), "Resets: \(resetCount)"]
+        let tint = NativeTint(rawValue: tintControl.selectedSegmentIndex) ?? .none
+        lines.append("Native taps: \(nativeTapCount) · tint \(tint.diagnosticName) · \(nativeButton.isEnabled ? "enabled" : "disabled")")
         switch custom {
         case let .success((_, surface)):
             let frame = surface.renderer.currentFrame.map { "frame \($0.frameID)" } ?? "no frame"

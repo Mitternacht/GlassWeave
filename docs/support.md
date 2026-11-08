@@ -1,6 +1,6 @@
 # Support policy
 
-Status: updated for GW-04, 2026-11-08. This page states what the package
+Status: updated for GW-03 and GW-04, 2026-11-08. This page states what the package
 declares and what it checks at runtime. It is not a list of qualified devices.
 No physical-device measurement has been made yet; see
 [the validation protocol](validation.md).
@@ -43,7 +43,7 @@ the backend today.
 | Product or target | Imports | Purpose |
 | --- | --- | --- |
 | `GlassWeave` | Metal, simd, os | Core types and rendering: the source-frame contract, its validation and lease, and the background renderer. Never imports UIKit or SwiftUI. |
-| `GlassWeaveUIKit` | UIKit, MetalKit | UIKit presentation. `GlassSurfaceView` hosts an `MTKView` for an explicit source. Compiled only where UIKit exists; on macOS the module is empty. |
+| `GlassWeaveUIKit` | UIKit, MetalKit | UIKit presentation. `NativeGlassView` is native mode: a `UIVisualEffectView` with a public `UIGlassEffect` (tint, interactive) around native controls, creating no GlassWeave renderer. `GlassSurfaceView` hosts an `MTKView` for an explicit source. Compiled only where UIKit exists; on macOS the module is empty. |
 | `GlassWeaveShaderTypes` (internal C target, not a product) | simd | The single definition of every record uploaded to the GPU, shared by Swift and the Metal shaders. |
 
 GlassWeave never creates a Metal device or command queue. An app that uses
