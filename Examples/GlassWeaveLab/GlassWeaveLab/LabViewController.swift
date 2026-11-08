@@ -56,6 +56,9 @@ final class LabViewController: UIViewController {
     private let enabledSwitch = UISwitch()
     private let pauseButton = UIButton(configuration: .bordered())
     private let overlaySwitch = UISwitch()
+    private let stageSwitch = UISwitch()
+    private let newWindowButton = UIButton(configuration: .bordered())
+    private let closeWindowButton = UIButton(configuration: .bordered())
     private let diagnosticsLabel = UILabel()
     private let resetButton = UIButton(configuration: .bordered())
     private var portraitConstraints: [NSLayoutConstraint] = []
@@ -79,6 +82,10 @@ final class LabViewController: UIViewController {
     private var lastRelease: BackgroundFrameRelease?
     /// The frame-ID strip's center, in the surface's points.
     private var stripCenterY: CGFloat = 0
+    /// Submissions counted when the surface last stopped being visible, and
+    /// how many it made while hidden (always zero when scheduling works).
+    private var submittedWhenHidden: Int?
+    private var hiddenPeriodSubmissions: Int?
 
     // MARK: Lifecycle
 
@@ -123,6 +130,8 @@ final class LabViewController: UIViewController {
         wantsMotion = true
         showsFrameID = true
         overlaySwitch.isOn = true
+        stageSwitch.isOn = true
+        applyStageVisibility()
         applyMotionState()
         if mode == .pattern {
             presentNextPatternFrame()
@@ -247,6 +256,17 @@ final class LabViewController: UIViewController {
             updateDiagnostics()
         }, for: .valueChanged)
 
+        stageSwitch.accessibilityIdentifier = "lab.stageVisible"
+        stageSwitch.accessibilityLabel = String(localized: "Show stage")
+        stageSwitch.addAction(UIAction { [weak self] _ in self?.applyStageVisibility() }, for: .valueChanged)
+
+        newWindowButton.configuration?.title = String(localized: "New window")
+        newWindowButton.accessibilityIdentifier = "lab.newWindow"
+        newWindowButton.addAction(UIAction { [weak self] _ in self?.openNewWindow() }, for: .primaryActionTriggered)
+        closeWindowButton.configuration?.title = String(localized: "Close window")
+        closeWindowButton.accessibilityIdentifier = "lab.closeWindow"
+        closeWindowButton.addAction(UIAction { [weak self] _ in self?.closeWindow() }, for: .primaryActionTriggered)
+
         diagnosticsLabel.font = .preferredFont(forTextStyle: .footnote)
         diagnosticsLabel.adjustsFontForContentSizeCategory = true
         diagnosticsLabel.numberOfLines = 0
@@ -261,7 +281,12 @@ final class LabViewController: UIViewController {
         let motionRow = Self.row([pauseButton, UIView(), Self.caption(String(localized: "Frame ID")), overlaySwitch])
         // The still pattern has no clock and no frame-ID strip.
         motionRow.isHidden = mode == .pattern
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, diagnosticsLabel, resetButton])
+        // Lifecycle checks: hide the stage, or open a second window where
+        // the system supports several (iPad).
+        let lifecycleRow = Self.row([newWindowButton, closeWindowButton, UIView(), Self.caption(String(localized: "Stage")), stageSwitch])
+        newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
+        closeWindowButton.isHidden = newWindowButton.isHidden
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, diagnosticsLabel, resetButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -335,6 +360,7 @@ final class LabViewController: UIViewController {
             surface.accessibilityIdentifier = "lab.customSurface"
             surface.translatesAutoresizingMaskIntoConstraints = false
             surface.renderObserver = { [weak self] _ in self?.renderDidFinish() }
+            surface.visibilityHandler = { [weak self] visible in self?.surfaceVisibilityChanged(visible) }
             stage.insertSubview(surface, at: 0)
             NSLayoutConstraint.activate([
                 surface.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
@@ -427,14 +453,78 @@ final class LabViewController: UIViewController {
         stageRendering.surface.requestFrame()
     }
 
+    // MARK: Lifecycle checks
+
+    /// Whether the custom surface currently draws. The still pattern and a
+    /// failed setup have no clock to run.
+    private var surfaceIsVisible: Bool {
+        guard case let .success(stageRendering) = custom else { return false }
+        return stageRendering.surface.isVisible
+    }
+
+    /// Shows or hides the whole stage. The surface notices on its next
+    /// request: it stops drawing while hidden and draws the pending frame
+    /// once shown again.
+    private func applyStageVisibility() {
+        stage.isHidden = !stageSwitch.isOn
+        if case let .success(stageRendering) = custom {
+            stageRendering.surface.requestFrame()
+        }
+        updateDiagnostics()
+    }
+
+    /// While the surface is not visible (stage hidden, scene in the
+    /// background, window gone) the background gives its free textures
+    /// back. The diagnostics count what the surface submitted meanwhile.
+    private func surfaceVisibilityChanged(_ visible: Bool) {
+        guard case let .success(stageRendering) = custom else { return }
+        let submitted = stageRendering.surface.frameStatistics.submitted
+        if visible {
+            if let submittedWhenHidden {
+                hiddenPeriodSubmissions = submitted - submittedWhenHidden
+            }
+            submittedWhenHidden = nil
+        } else {
+            submittedWhenHidden = submitted
+            stageRendering.background.trim()
+        }
+        applyMotionState()
+        updateDiagnostics()
+    }
+
+    /// Asks the system for another laboratory window, which gets its own
+    /// scene, stage, surface, and clock.
+    private func openNewWindow() {
+        let options = UIWindowScene.ActivationRequestOptions()
+        options.requestingScene = view.window?.windowScene
+        let request = UISceneSessionActivationRequest(role: .windowApplication, options: options)
+        UIApplication.shared.activateSceneSession(for: request) { [weak self] error in
+            Task { @MainActor in
+                self?.diagnosticsLabel.text = "New window failed: \(error)"
+            }
+        }
+    }
+
+    /// Closes this window's scene session.
+    private func closeWindow() {
+        guard let session = view.window?.windowScene?.session else { return }
+        UIApplication.shared.requestSceneSessionDestruction(session, options: nil) { [weak self] error in
+            Task { @MainActor in
+                self?.diagnosticsLabel.text = "Close window failed: \(error)"
+            }
+        }
+    }
+
     @objc private func reduceMotionChanged() {
         applyMotionState()
         updateDiagnostics()
     }
 
-    /// Runs the clock while the user wants motion and Reduce Motion is off.
+    /// Runs the clock while the user wants motion, Reduce Motion is off, and
+    /// the surface is visible: a hidden stage needs no new frames, so the
+    /// clock stops instead of asking the surface for frames it would defer.
     private func applyMotionState() {
-        let running = mode == .moving && wantsMotion && !UIAccessibility.isReduceMotionEnabled
+        let running = mode == .moving && wantsMotion && !UIAccessibility.isReduceMotionEnabled && surfaceIsVisible
         updateLink?.isEnabled = running
         pauseButton.configuration?.title = wantsMotion ? String(localized: "Pause") : String(localized: "Resume")
     }
@@ -453,10 +543,19 @@ final class LabViewController: UIViewController {
             displayScale: scale,
             stripCenterY: showsFrameID ? Double(stripCenterY) * scale : nil
         ) { [weak self] release in
-            Task { @MainActor in self?.lastRelease = release }
+            Task { @MainActor in self?.frameReleased(release) }
         }
         if lease != nil { nextFrameID += 1 }
         return lease
+    }
+
+    /// Records a released frame. While the surface is not drawing, nothing
+    /// else refreshes the diagnostics, so a release does.
+    private func frameReleased(_ release: BackgroundFrameRelease) {
+        lastRelease = release
+        if case let .success(stageRendering) = custom, !stageRendering.surface.isVisible {
+            updateDiagnostics()
+        }
     }
 
     /// Diagnostics follow the frames, at most ten times a second while the
@@ -547,7 +646,8 @@ final class LabViewController: UIViewController {
         let motion: String = switch (mode, updateLink?.isEnabled == true) {
         case (.pattern, _): "still pattern"
         case (.moving, true): "running"
-        case (.moving, false): UIAccessibility.isReduceMotionEnabled && wantsMotion ? "paused (Reduce Motion)" : "paused"
+        case (.moving, false):
+            if !wantsMotion { "paused" } else if UIAccessibility.isReduceMotionEnabled { "paused (Reduce Motion)" } else { "paused (hidden)" }
         }
         var lines = [
             Self.gpuDescription(),
@@ -563,10 +663,17 @@ final class LabViewController: UIViewController {
             let size = "\(surface.pixelSize.width)×\(surface.pixelSize.height) px"
             let outcome = surface.lastRenderOutcome.map(Self.describe) ?? "not drawn"
             lines.append("Custom: \(frame) · \(size) · \(outcome)")
+            let statistics = surface.frameStatistics
+            lines.append("Surface: \(surface.isVisible ? "visible" : "hidden") · scene \(Self.describe(view.window?.windowScene?.activationState))")
+            lines.append("Frames: \(statistics.submitted) submitted · \(statistics.framesInFlight) in flight (peak \(statistics.peakFramesInFlight) of \(GlassSurfaceView.maximumFramesInFlight)) · \(statistics.deferredWhileHidden) deferred hidden · \(statistics.deferredAtLimit) at limit · \(statistics.coalesced) coalesced")
+            if let hiddenPeriodSubmissions {
+                lines.append("Last hidden period: \(hiddenPeriodSubmissions) submitted")
+            }
             if mode == .moving {
                 let background = stageRendering.background
+                let pool = background.poolStatistics
                 let produced = background.lastProduced.map { "produced frame \($0.frameID) at t \(String(format: "%.2f", $0.contentSeconds)) s" } ?? "nothing produced"
-                lines.append("Source: \(produced) · \(background.textureCount) textures · \(background.coalescedCount) coalesced")
+                lines.append("Source: \(produced) · \(pool.liveTextures) textures (\(pool.allocations) allocated) · \(pool.exhaustedCheckouts) coalesced")
             }
             if let error = surface.lastProducedFrameError {
                 lines.append("Rejected frame: \(error)")
@@ -580,6 +687,17 @@ final class LabViewController: UIViewController {
             lines.append("Released frame \(lastRelease.frameID): \(lastRelease.completedSubmissions) drawn, \(lastRelease.skippedSubmissions) skipped")
         }
         diagnosticsLabel.text = lines.joined(separator: "\n")
+    }
+
+    private static func describe(_ state: UIScene.ActivationState?) -> String {
+        switch state {
+        case .foregroundActive: "active"
+        case .foregroundInactive: "inactive"
+        case .background: "background"
+        case .unattached: "unattached"
+        case nil: "none"
+        @unknown default: "unknown"
+        }
     }
 
     private static func describe(_ outcome: BackgroundRenderOutcome) -> String {

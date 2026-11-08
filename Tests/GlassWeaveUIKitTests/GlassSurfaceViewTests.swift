@@ -18,8 +18,11 @@ struct GlassSurfaceViewTests {
         queue = try #require(device.makeCommandQueue())
     }
 
+    /// A surface that draws: the test process has no window scenes, so it
+    /// stands in for a window in a foreground-active scene.
     private func makeSurface(scale: CGFloat, size: CGSize) throws -> GlassSurfaceView {
         let surface = GlassSurfaceView(renderer: try GlassRenderer(commandQueue: queue))
+        surface.sceneStateOverride = .foregroundActive
         surface.traitOverrides.displayScale = scale
         surface.frame = CGRect(origin: .zero, size: size)
         surface.updateTraitsIfNeeded()

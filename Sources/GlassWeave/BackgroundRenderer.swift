@@ -225,10 +225,14 @@ public final class BackgroundRenderer {
     ///   path that gets past the source checks, so the writes always run,
     ///   and a skipped use ends only when it completes, so the producer
     ///   never hears "reusable" while its writes are in flight.
+    /// - Parameter onCommit: Called with each command buffer just before
+    ///   this draw commits it, so a host can track the frame until it
+    ///   completes. Not called when the draw commits nothing.
     func draw(
         targetPixelSize: (width: Int, height: Int),
         commandBuffer provided: (any MTLCommandBuffer)? = nil,
         acquireTarget: () -> BackgroundDrawTarget?,
+        onCommit: (any MTLCommandBuffer) -> Void = { _ in },
         overlay: Overlay?
     ) -> BackgroundRenderOutcome {
         guard let source else { return .skipped(.missingSource) }
@@ -245,6 +249,7 @@ public final class BackgroundRenderer {
                 return
             }
             provided.addCompletedHandler { _ in submission.end(outcome) }
+            onCommit(provided)
             provided.commit()
         }
         guard let target = acquireTarget(),
@@ -293,6 +298,7 @@ public final class BackgroundRenderer {
         commandBuffer.addCompletedHandler { commandBuffer in
             submission.end(commandBuffer.status == .completed ? .completed : .failed)
         }
+        onCommit(commandBuffer)
         commandBuffer.commit()
         return .submitted(frameID: frame.frameID)
     }

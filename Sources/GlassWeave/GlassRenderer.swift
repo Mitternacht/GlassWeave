@@ -83,7 +83,19 @@ public final class GlassRenderer {
         displayScale: Double,
         acquireTarget: () -> BackgroundDrawTarget?
     ) -> BackgroundRenderOutcome {
-        draw(targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: nil, acquireTarget: acquireTarget)
+        draw(targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: nil, acquireTarget: acquireTarget, onCommit: { _ in })
+    }
+
+    /// ``draw(targetPixelSize:displayScale:acquireTarget:)`` that also hands
+    /// the host each command buffer just before it is committed, so the host
+    /// can bound and track frames in flight.
+    package func draw(
+        targetPixelSize: (width: Int, height: Int),
+        displayScale: Double,
+        acquireTarget: () -> BackgroundDrawTarget?,
+        onCommit: (any MTLCommandBuffer) -> Void
+    ) -> BackgroundRenderOutcome {
+        draw(targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: nil, acquireTarget: acquireTarget, onCommit: onCommit)
     }
 
     /// Produces a new source frame and draws it, in one command buffer.
@@ -120,6 +132,19 @@ public final class GlassRenderer {
         produce: (_ commandBuffer: any MTLCommandBuffer, _ pixelSize: (width: Int, height: Int)) -> BackgroundFrameLease?,
         acquireTarget: () -> BackgroundDrawTarget?
     ) throws(BackgroundSourceError) -> BackgroundRenderOutcome {
+        try drawProducing(targetPixelSize: targetPixelSize, displayScale: displayScale, produce: produce, acquireTarget: acquireTarget, onCommit: { _ in })
+    }
+
+    /// ``drawProducing(targetPixelSize:displayScale:produce:acquireTarget:)``
+    /// that also hands the host the command buffer just before it is
+    /// committed, on every path that commits it (including a rejected frame).
+    package func drawProducing(
+        targetPixelSize: (width: Int, height: Int),
+        displayScale: Double,
+        produce: (_ commandBuffer: any MTLCommandBuffer, _ pixelSize: (width: Int, height: Int)) -> BackgroundFrameLease?,
+        acquireTarget: () -> BackgroundDrawTarget?,
+        onCommit: (any MTLCommandBuffer) -> Void
+    ) throws(BackgroundSourceError) -> BackgroundRenderOutcome {
         guard targetPixelSize.width > 0, targetPixelSize.height > 0 else {
             return .skipped(.zeroSizeTarget)
         }
@@ -134,22 +159,24 @@ public final class GlassRenderer {
                 // Let the producer's writes finish before it may reuse them.
                 let core = lease.core
                 commandBuffer.addCompletedHandler { _ in core.retireProducer() }
+                onCommit(commandBuffer)
                 commandBuffer.commit()
                 throw error
             }
             lease.retire()
         }
-        return draw(targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: commandBuffer, acquireTarget: acquireTarget)
+        return draw(targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit)
     }
 
     private func draw(
         targetPixelSize: (width: Int, height: Int),
         displayScale: Double,
         commandBuffer: (any MTLCommandBuffer)?,
-        acquireTarget: () -> BackgroundDrawTarget?
+        acquireTarget: () -> BackgroundDrawTarget?,
+        onCommit: (any MTLCommandBuffer) -> Void
     ) -> BackgroundRenderOutcome {
         let panel = panel
-        return background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, overlay: { [panelPipeline] encoder, frame, backgroundUniforms, targetSize in
+        return background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline] encoder, frame, backgroundUniforms, targetSize in
             // Converted only once a target exists, so the skips that run
             // before (including a zero display scale's zero-size target)
             // never see the scale.

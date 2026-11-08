@@ -27,11 +27,21 @@ comparison controls below it (portrait) or beside it (landscape).
   stage's renderer belongs to the custom panel. The two are separate material
   systems: nothing here merges the native glass with the custom panel.
 
+- **Lifecycle checks.** The Stage switch hides and shows the whole stage.
+  While the custom surface is not visible (stage hidden, scene in the
+  background) its clock stops, it submits nothing, and the background gives
+  its free pooled textures back. On iPad, New window opens a second
+  laboratory scene with its own stage, surface, and clock, and Close window
+  closes the scene it is in.
+
 The diagnostics list the clock state and content time, both tap counts, the
-presented and produced frame IDs, the drawable size, pooled textures and
-coalesced ticks, and the last released frame. The background stops moving
-while Reduce Motion is on; that path is not yet verified (GW-08 owns the
-accessibility checks).
+presented and produced frame IDs, the drawable size, the surface's
+visibility and its own scene's activation state, the scheduler's counts
+(submitted, in flight with peak and bound, deferred while hidden, deferred
+at the bound, coalesced), the submissions during the last hidden period,
+pooled textures with total allocations and coalesced ticks, and the last
+released frame. The background stops moving while Reduce Motion is on; that
+path is not yet verified (GW-08 owns the accessibility checks).
 
 Nothing here is evidence of physical device performance. The remaining work
 and its acceptance gates are listed in [the task checklist](../tasks/todo.md).

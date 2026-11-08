@@ -40,6 +40,14 @@ jobs:
             fi
           done
 
+      # GW-07: no package or laboratory path may block a thread on GPU work.
+      - name: Reject blocking GPU waits
+        run: |
+          if grep -rnE "waitUntil(Completed|Scheduled)" Sources Examples/GlassWeaveLab/GlassWeaveLab; then
+            echo "::error::A blocking GPU wait was found in package or laboratory sources"
+            exit 1
+          fi
+
       # The combined workspace's shared GlassWeave scheme builds every package
       # product and runs both test bundles with MTL_DEBUG_LAYER=1 (Metal API
       # Validation) set in its test action.

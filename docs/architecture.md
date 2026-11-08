@@ -179,6 +179,28 @@ them stay public is decided after the coexistence proof (plan decision 3).
 
 `MTKView` supports event-driven drawing when `isPaused` and `enableSetNeedsDisplay` are configured together. These controls underpin the proposed idle policy. [enableSetNeedsDisplay](https://developer.apple.com/documentation/metalkit/mtkview/enablesetneedsdisplay).
 
+### Implemented lifecycle (GW-07)
+
+`FrameScheduler` (core, package access) owns one host's policy; its state
+machine `FrameLedger` is a value type the tests drive directly, and the
+thread-safe wrapper is what Metal completion handlers capture.
+`GlassSurfaceView` runs every draw through it. `FrameTexturePool` (core,
+public) bounds a producer's textures; the laboratory's moving source uses it.
+
+| Rule | Implementation |
+| --- | --- |
+| On demand | The `MTKView` is paused with `enableSetNeedsDisplay`. A draw happens only after a request (new source, panel, pixel size, display scale, producer, or `requestFrame()`). Requests before the next display pass merge into one (`FrameStatistics.coalesced`). A stationary source with a settled surface submits nothing. |
+| Visibility per host | A surface draws only while it is in a window, neither it nor an ancestor is hidden or at alpha ≈ 0, and its *own* window scene is `foregroundActive` or `foregroundInactive` (an inactive scene beside an active one is still on screen). It observes only that scene's `UIScene` messages (typed `NotificationCenter` messages, re-subscribed in `didMoveToWindow`), so another scene's state never affects it. Requests while not visible leave one pending frame, drawn once when visible again. An ancestor's `isHidden` is not observable; it is checked on every request, layout pass, and draw. |
+| In-flight bound | At most `GlassSurfaceView.maximumFramesInFlight` (2) frames are committed and not completed. A display pass at the bound is deferred (`deferredAtLimit`) and its frame stays pending; the next completion schedules it. Nothing queues and nothing waits. Two leaves one of the layer's three drawables free while one is on screen; a completed frame not yet presented can still make the next drawable wait for a display refresh, never for GPU work. |
+| Texture bound | `FrameTexturePool` holds at most `capacity` textures, counting those in use, and takes a texture back only when GlassWeave releases its frame (after the last GPU use). With every texture in use, `checkout` returns `nil` and the producer skips that frame. A new size discards free textures of the old size at once and in-use ones when released; `trim()` discards free textures and marks in-use ones. |
+| Hidden resources | Leaving the visible state calls `MTKView.releaseDrawables()` and the app's `visibilityHandler`; the laboratory trims its pool there and stops its clock, so a hidden stage keeps only the presented frame's texture. |
+| Teardown | Command buffers retain every texture they use; leases keep frames until their last submission completes; the pool's ledger outlives the pool for late returns. Dropping the renderer, scheduler, and pool while a frame is in flight releases nothing until the GPU finishes. No path calls `waitUntilCompleted`; CI rejects it in package and laboratory sources. |
+
+The renderers hand each command buffer to the host just before committing it
+(package-level `onCommit`), on every committing path including a rejected
+produced frame and a produced frame without a drawable, so the host counts
+exactly the GPU work in flight.
+
 ## Backend decision
 
 Use conventional Metal command submission to establish the first proof. Evaluate Metal 4 with the same scene, shader behavior, and measurement recipe after that proof. Runtime capability checks must accompany OS availability checks. A Metal 4-only implementation, a conventional implementation, or two supported paths are all possible outcomes of the experiment; no result is presumed. [Understanding the Metal 4 core API](https://developer.apple.com/documentation/metal/understanding-the-metal-4-core-api), [Metal feature tables](https://developer.apple.com/metal/availability/).

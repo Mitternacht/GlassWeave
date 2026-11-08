@@ -15,6 +15,21 @@ import UIKit
 /// The view sizes its drawable from its own bounds and
 /// `traitCollection.displayScale`, never from a screen or a global scene.
 ///
+/// Scheduling (``frameStatistics`` reports each step):
+/// - Requests made before the next display pass merge into one draw.
+/// - The view draws only while it is visible: in a window, not hidden (nor
+///   any ancestor), with an alpha above zero, and with its *own* window
+///   scene in the foreground (active or inactive). It observes that scene
+///   only, so a hidden or backgrounded surface never pauses a visible
+///   surface in another scene. Requests while not visible leave one pending
+///   frame, drawn when the view is visible again.
+/// - At most ``maximumFramesInFlight`` frames are committed and not yet
+///   completed. A draw at that bound is deferred, never queued or waited
+///   for; the pending frame is drawn when a frame completes.
+/// - Leaving the visible state releases the view's drawables. Every texture
+///   a submitted frame uses stays alive until that frame completes, and no
+///   path waits for the GPU.
+///
 /// Defined skips, none of which waits on the GPU or the main thread:
 /// - No source: the Metal view is hidden and the opaque `backgroundColor`
 ///   shows as the fallback. ``lastRenderOutcome`` is
@@ -54,8 +69,30 @@ public final class GlassSurfaceView: UIView {
     /// to whole pixels. Zero in a dimension when the view has no area.
     public private(set) var pixelSize: (width: Int, height: Int) = (0, 0)
 
+    /// The most frames this view keeps committed and not yet completed.
+    public static let maximumFramesInFlight = FrameScheduler.defaultMaxFramesInFlight
+
+    /// What the scheduler has done: requests, coalesced requests, submitted
+    /// and completed frames, deferrals, and frames in flight.
+    public var frameStatistics: FrameStatistics {
+        scheduler.statistics
+    }
+
+    /// Whether the view currently draws: in a window, not hidden, and with its
+    /// window scene in the foreground.
+    public private(set) var isVisible = false
+
+    /// Called when ``isVisible`` changes, for example to trim a producer's
+    /// texture pool while the view is hidden.
+    public var visibilityHandler: ((Bool) -> Void)?
+
+    let scheduler = FrameScheduler(isVisible: false)
     private let metalView: MTKView
     private let drawDelegate = DrawDelegate()
+    /// The window scene whose lifecycle messages are observed, and the
+    /// observations. Replacing the tokens ends the previous observations.
+    private weak var observedScene: UIWindowScene?
+    private var sceneObservations: [NotificationCenter.ObservationToken] = []
 
     public init(renderer: GlassRenderer) {
         self.renderer = renderer
@@ -87,6 +124,20 @@ public final class GlassSurfaceView: UIView {
         }
     }
 
+    override public var isHidden: Bool {
+        didSet { refreshVisibility() }
+    }
+
+    override public var alpha: CGFloat {
+        didSet { refreshVisibility() }
+    }
+
+    override public func didMoveToWindow() {
+        super.didMoveToWindow()
+        observeScene(window?.windowScene)
+        refreshVisibility()
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
@@ -96,7 +147,7 @@ public final class GlassSurfaceView: UIView {
     public func setSource(_ lease: BackgroundFrameLease) throws(BackgroundSourceError) {
         try renderer.setSource(lease)
         metalView.isHidden = false
-        metalView.setNeedsDisplay()
+        scheduleFrame()
     }
 
     /// The panel drawn over the source, in this view's points, after the
@@ -112,7 +163,7 @@ public final class GlassSurfaceView: UIView {
         let previous = renderer.panel
         try renderer.setPanel(panel)
         if renderer.panel != previous {
-            metalView.setNeedsDisplay()
+            scheduleFrame()
         }
     }
 
@@ -130,16 +181,18 @@ public final class GlassSurfaceView: UIView {
         frameProducer = producer
         if producer != nil {
             metalView.isHidden = false
-            metalView.setNeedsDisplay()
+            scheduleFrame()
         } else if renderer.currentFrame == nil {
             metalView.isHidden = true
         }
     }
 
-    /// Requests one draw in the next display pass. Several requests before
-    /// that pass coalesce into one draw.
+    /// Requests one draw. Requests before the next display pass coalesce
+    /// into one draw; while the view is not visible or at the in-flight
+    /// bound, the draw stays pending (see the scheduling rules above).
     public func requestFrame() {
-        metalView.setNeedsDisplay()
+        refreshVisibility()
+        scheduleFrame()
     }
 
     /// Removes the source and shows the opaque fallback. A frame producer,
@@ -147,15 +200,105 @@ public final class GlassSurfaceView: UIView {
     public func clearSource() {
         renderer.clearSource()
         metalView.isHidden = frameProducer == nil
-        // Record the defined skip; the renderer returns before touching a
-        // drawable because no source is attached.
-        render(in: metalView)
+        if frameProducer != nil {
+            scheduleFrame()
+        } else {
+            // The defined skip, recorded without a draw: with no source the
+            // renderer would return before touching a drawable.
+            record(.skipped(.missingSource))
+        }
     }
 
     override public func layoutSubviews() {
         super.layoutSubviews()
         metalView.frame = bounds
+        refreshVisibility()
         updatePixelSize()
+    }
+
+    // MARK: Scheduling and visibility
+
+    /// Records a request and asks for a display pass when one may draw now.
+    private func scheduleFrame() {
+        if scheduler.request() {
+            metalView.setNeedsDisplay()
+        }
+    }
+
+    /// Stands in for the window and window scene, for tests: a test process
+    /// has no connected scenes, so no surface there is ever on screen. With
+    /// an override the view behaves as if it were in a window whose scene is
+    /// in that state; its own and its ancestors' hidden state still count.
+    /// The laboratory's UI tests cover the real UIKit path.
+    var sceneStateOverride: SurfaceVisibility.SceneState? {
+        didSet { refreshVisibility() }
+    }
+
+    /// Recomputes visibility from the view's window, hierarchy, and own
+    /// window scene.
+    private func refreshVisibility() {
+        let sceneState = sceneStateOverride
+            ?? window?.windowScene.map { SurfaceVisibility.SceneState($0.activationState) }
+            ?? .none
+        applyVisibility(SurfaceVisibility(
+            isInWindow: sceneStateOverride != nil || window != nil,
+            isHiddenInHierarchy: isHiddenInHierarchy,
+            sceneState: sceneState
+        ))
+    }
+
+    /// Whether this view or an ancestor is hidden or fully transparent.
+    private var isHiddenInHierarchy: Bool {
+        var view: UIView? = self
+        while let current = view {
+            if current.isHidden || current.alpha <= 0.01 { return true }
+            view = current.superview
+        }
+        return false
+    }
+
+    /// Applies observed visibility to the scheduler.
+    private func applyVisibility(_ observation: SurfaceVisibility) {
+        let visible = observation.isVisible
+        guard visible != isVisible else { return }
+        isVisible = visible
+        if scheduler.setVisible(visible) {
+            metalView.setNeedsDisplay()
+        }
+        if !visible {
+            // Hidden drawables are not needed; the next visible draw
+            // acquires a new one. In-flight frames keep theirs until they
+            // complete.
+            metalView.releaseDrawables()
+        }
+        visibilityHandler?(visible)
+    }
+
+    /// Observes the lifecycle of `scene` only, replacing any earlier
+    /// observation.
+    private func observeScene(_ scene: UIWindowScene?) {
+        guard scene !== observedScene || (scene != nil && sceneObservations.isEmpty) else { return }
+        observedScene = scene
+        sceneObservations = []
+        guard let scene else { return }
+        let center = NotificationCenter.default
+        let subject: UIScene = scene
+        sceneObservations = [
+            center.addObserver(of: subject, for: UIScene.WillEnterForegroundMessage.self) { [weak self] _ in
+                // Posted before the state changes; look again once it has.
+                self?.refreshVisibility()
+                Task { @MainActor [weak self] in self?.refreshVisibility() }
+            },
+            center.addObserver(of: subject, for: UIScene.DidActivateMessage.self) { [weak self] _ in
+                self?.refreshVisibility()
+            },
+            center.addObserver(of: subject, for: UIScene.WillDeactivateMessage.self) { [weak self] _ in
+                self?.refreshVisibility()
+            },
+            center.addObserver(of: subject, for: UIScene.DidEnterBackgroundMessage.self) { [weak self] _ in
+                self?.refreshVisibility()
+            },
+        ]
     }
 
     /// Recomputes the target size from local bounds and the display scale,
@@ -175,16 +318,35 @@ public final class GlassSurfaceView: UIView {
         if newSize.width > 0, newSize.height > 0 {
             metalView.drawableSize = CGSize(width: newSize.width, height: newSize.height)
         }
-        metalView.setNeedsDisplay()
+        scheduleFrame()
     }
 
-    /// Draws through the same path the `MTKView` delegate uses.
+    /// Draws through the same path the `MTKView` delegate uses, if the
+    /// scheduler permits a draw now.
     func render(in view: MTKView) {
+        // An ancestor's hidden state is not observable; check it here so a
+        // hidden surface never draws.
+        refreshVisibility()
+        guard scheduler.beginDraw() == .draw else { return }
         // Acquire the drawable as late as possible: after the checks and
         // after any frame production has been encoded.
         let acquireTarget = { () -> BackgroundDrawTarget? in
             guard let descriptor = view.currentRenderPassDescriptor else { return nil }
             return BackgroundDrawTarget(renderPassDescriptor: descriptor, drawable: view.currentDrawable)
+        }
+        var committed = false
+        let onCommit = { [scheduler, weak self] (commandBuffer: any MTLCommandBuffer) in
+            committed = true
+            scheduler.drawCommitted()
+            commandBuffer.addCompletedHandler { [weak self] _ in
+                // A frame deferred at the bound is pending; draw it now that
+                // a slot is free.
+                guard scheduler.frameCompleted() else { return }
+                Task { @MainActor [weak self] in self?.metalView.setNeedsDisplay() }
+            }
+        }
+        defer {
+            if !committed { scheduler.drawSkipped() }
         }
         let scale = traitCollection.displayScale
         let outcome: BackgroundRenderOutcome
@@ -192,7 +354,7 @@ public final class GlassSurfaceView: UIView {
             do {
                 outcome = try renderer.drawProducing(
                     targetPixelSize: pixelSize, displayScale: scale,
-                    produce: frameProducer, acquireTarget: acquireTarget
+                    produce: frameProducer, acquireTarget: acquireTarget, onCommit: onCommit
                 )
                 lastProducedFrameError = nil
             } catch {
@@ -201,8 +363,12 @@ public final class GlassSurfaceView: UIView {
                 return
             }
         } else {
-            outcome = renderer.draw(targetPixelSize: pixelSize, displayScale: scale, acquireTarget: acquireTarget)
+            outcome = renderer.draw(targetPixelSize: pixelSize, displayScale: scale, acquireTarget: acquireTarget, onCommit: onCommit)
         }
+        record(outcome)
+    }
+
+    private func record(_ outcome: BackgroundRenderOutcome) {
         lastRenderOutcome = outcome
         renderObserver?(outcome)
     }
@@ -214,6 +380,45 @@ public final class GlassSurfaceView: UIView {
 
     /// The hosted Metal view, for tests.
     var hostedMetalView: MTKView { metalView }
+}
+
+/// What a surface observes about where it is shown, reduced to whether it
+/// should draw.
+struct SurfaceVisibility: Hashable {
+    /// The activation state of the surface's own window scene.
+    enum SceneState: Hashable {
+        case foregroundActive
+        case foregroundInactive
+        case background
+        case unattached
+        /// The window has no scene, so it is not on screen.
+        case none
+
+        init(_ state: UIScene.ActivationState) {
+            switch state {
+            case .foregroundActive: self = .foregroundActive
+            case .foregroundInactive: self = .foregroundInactive
+            case .background: self = .background
+            case .unattached: self = .unattached
+            @unknown default: self = .background
+            }
+        }
+    }
+
+    var isInWindow: Bool
+    /// The surface or an ancestor is hidden or fully transparent.
+    var isHiddenInHierarchy: Bool
+    var sceneState: SceneState
+
+    /// A foreground scene is on screen whether or not it receives events, so
+    /// an inactive scene (for example beside an active one) keeps drawing.
+    var isVisible: Bool {
+        guard isInWindow, !isHiddenInHierarchy else { return false }
+        switch sceneState {
+        case .foregroundActive, .foregroundInactive: return true
+        case .background, .unattached, .none: return false
+        }
+    }
 }
 
 /// Forwards `MTKView` callbacks without exposing the conformance publicly.

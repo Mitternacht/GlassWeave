@@ -29,13 +29,14 @@ struct DeterministicClock {
 /// The app-owned procedural background: a GPU-rendered moving pattern that is
 /// a pure function of the clock's content time.
 ///
-/// Each frame is rendered into its own texture, in the command buffer that
-/// GlassWeave then uses to sample it (`GlassRenderer.drawProducing`), so the
-/// visible background and the panel's refraction come from that one frame.
-/// Textures are recycled only after their lease is released, which happens
-/// after the last GPU use completes. At most ``textureLimit`` textures exist;
-/// when none is free the producer skips the frame (the surface redraws the
-/// current one) instead of allocating more.
+/// Each frame is rendered into a texture from a GlassWeave
+/// `FrameTexturePool`, in the command buffer that GlassWeave then uses to
+/// sample it (`GlassRenderer.drawProducing`), so the visible background and
+/// the panel's refraction come from that one frame. The pool takes a texture
+/// back only after GlassWeave releases its frame, which happens after the
+/// last GPU use completes. At most ``textureLimit`` textures exist; when none
+/// is free the producer skips the frame (the surface redraws the current
+/// one) instead of allocating more.
 ///
 /// Rendering writes a `bgra8Unorm` texture, because the iOS Simulator cannot
 /// write sRGB textures, and hands GlassWeave a `bgra8Unorm_srgb` view of it,
@@ -51,31 +52,21 @@ final class ProceduralBackground {
         }
     }
 
-    /// Textures that may exist at once: one presented, one in flight, one
-    /// being produced.
+    /// Textures that may exist at once: the presented frame plus the
+    /// surface's in-flight bound (two), so a free texture exists whenever the
+    /// surface may draw.
     static let textureLimit = 3
 
     let device: any MTLDevice
     private let pipeline: any MTLRenderPipelineState
-    private var slots: [Slot] = []
+    private let pool: FrameTexturePool
     private let clock = ContinuousClock()
     private let start: ContinuousClock.Instant
 
     /// Frames produced so far.
     private(set) var producedCount = 0
-    /// Frames skipped because every texture was still in use.
-    private(set) var coalescedCount = 0
     /// The most recently produced frame and its content time.
     private(set) var lastProduced: (frameID: UInt64, contentSeconds: Double)?
-
-    private struct Slot {
-        let id: Int
-        let storage: any MTLTexture
-        let sampled: any MTLTexture
-        var inUse: Bool
-    }
-
-    private var nextSlotID = 0
 
     init(device: any MTLDevice) throws {
         guard let library = device.makeDefaultLibrary() else {
@@ -97,6 +88,15 @@ final class ProceduralBackground {
             throw Failure.shaderUnavailable(String(describing: error))
         }
         self.device = device
+        self.pool = FrameTexturePool(
+            device: device,
+            descriptor: FrameTexturePool.Descriptor(
+                pixelFormat: .bgra8Unorm,
+                usage: [.renderTarget, .shaderRead, .pixelFormatView],
+                sampledPixelFormat: BackgroundColorConvention.sRGBOpaque.requiredPixelFormat
+            ),
+            capacity: Self.textureLimit
+        )
         self.start = clock.now
     }
 
@@ -108,7 +108,8 @@ final class ProceduralBackground {
     ///   - displayScale: Pixels per point, so the pattern is laid out in points.
     ///   - stripCenterY: Where the frame-ID strip runs, in pixels from the
     ///     top, or `nil` to omit it.
-    ///   - onRelease: Called once GlassWeave released the frame.
+    ///   - onRelease: Called once GlassWeave released the frame, after the
+    ///     texture is back in the pool.
     func encodeFrame(
         into commandBuffer: any MTLCommandBuffer,
         pixelSize: (width: Int, height: Int),
@@ -118,16 +119,15 @@ final class ProceduralBackground {
         stripCenterY: Double?,
         onRelease: @escaping @Sendable (BackgroundFrameRelease) -> Void
     ) -> BackgroundFrameLease? {
-        guard let slotIndex = freeSlot(width: pixelSize.width, height: pixelSize.height) else {
-            coalescedCount += 1
+        guard let pooled = pool.checkout(width: pixelSize.width, height: pixelSize.height) else {
             return nil
         }
-        let slot = slots[slotIndex]
         let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = slot.storage
+        pass.colorAttachments[0].texture = pooled.storage
         pass.colorAttachments[0].loadAction = .dontCare
         pass.colorAttachments[0].storeAction = .store
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
+            pool.returnUnused(pooled)
             return nil
         }
         var parameters: [Float] = [
@@ -143,54 +143,26 @@ final class ProceduralBackground {
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
 
-        slots[slotIndex].inUse = true
         producedCount += 1
         lastProduced = (frameID, contentSeconds)
-        let slotID = slot.id
         let frame = BackgroundFrame(
-            texture: slot.sampled,
+            texture: pooled.texture,
             frameID: frameID,
             timestamp: clock.now - start,
             colorConvention: .sRGBOpaque,
             readiness: .encoded(in: commandBuffer)
         )
-        return BackgroundFrameLease(frame: frame) { [weak self] release in
-            Task { @MainActor in self?.recycle(slotID: slotID) }
-            onRelease(release)
-        }
+        return pool.lease(frame, using: pooled, onRelease: onRelease)
     }
 
-    /// A free texture of the requested size, creating one within the limit.
-    /// Free textures of another size (from before a resize) are dropped.
-    private func freeSlot(width: Int, height: Int) -> Int? {
-        slots.removeAll { !$0.inUse && ($0.storage.width != width || $0.storage.height != height) }
-        if let index = slots.firstIndex(where: { !$0.inUse }) {
-            return index
-        }
-        guard slots.count < Self.textureLimit else { return nil }
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
-        )
-        descriptor.storageMode = .private
-        descriptor.usage = [.renderTarget, .shaderRead, .pixelFormatView]
-        guard let storage = device.makeTexture(descriptor: descriptor),
-              let sampled = storage.makeTextureView(pixelFormat: BackgroundColorConvention.sRGBOpaque.requiredPixelFormat)
-        else { return nil }
-        storage.label = "GlassWeaveLab background \(nextSlotID)"
-        slots.append(Slot(id: nextSlotID, storage: storage, sampled: sampled, inUse: false))
-        nextSlotID += 1
-        return slots.count - 1
+    /// Gives free textures back to Metal, for example while the stage is
+    /// hidden. Textures still in use go when their frames are released.
+    func trim() {
+        pool.trim()
     }
 
-    /// Returns a released texture to the pool.
-    private func recycle(slotID: Int) {
-        if let index = slots.firstIndex(where: { $0.id == slotID }) {
-            slots[index].inUse = false
-        }
-    }
-
-    /// Textures currently allocated, for diagnostics.
-    var textureCount: Int {
-        slots.count
+    /// The texture pool's counts, for diagnostics.
+    var poolStatistics: FrameTexturePool.Statistics {
+        pool.statistics
     }
 }
