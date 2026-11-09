@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		58026BAD7C010D8BF4A3D9F8 /* GlassWeaveUIKit in Frameworks */ = {isa = PBXBuildFile; productRef = 10DF1D96432F5FB9575E5F04 /* GlassWeaveUIKit */; };
+		A15C0DE500000000000000A1 /* GlassWeaveSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = A15C0DE500000000000000A2 /* GlassWeaveSwiftUI */; };
 		9F452DA743C3B4CC44E0D5B8 /* GlassWeave in Frameworks */ = {isa = PBXBuildFile; productRef = 03DAA17B9FD53E965687B47E /* GlassWeave */; };
 /* End PBXBuildFile section */
 
@@ -66,6 +67,7 @@
 			files = (
 				9F452DA743C3B4CC44E0D5B8 /* GlassWeave in Frameworks */,
 				58026BAD7C010D8BF4A3D9F8 /* GlassWeaveUIKit in Frameworks */,
+				A15C0DE500000000000000A1 /* GlassWeaveSwiftUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -135,6 +137,7 @@
 			packageProductDependencies = (
 				03DAA17B9FD53E965687B47E /* GlassWeave */,
 				10DF1D96432F5FB9575E5F04 /* GlassWeaveUIKit */,
+				A15C0DE500000000000000A2 /* GlassWeaveSwiftUI */,
 			);
 			productName = GlassWeaveLab;
 			productReference = D249E712C4097D5FCD29A5E6 /* GlassWeaveLab.app */;
@@ -453,6 +456,10 @@
 		10DF1D96432F5FB9575E5F04 /* GlassWeaveUIKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = GlassWeaveUIKit;
+		};
+		A15C0DE500000000000000A2 /* GlassWeaveSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GlassWeaveSwiftUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -36,6 +36,20 @@
          </BuildActionEntry>
          <BuildActionEntry
             buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "GlassWeaveSwiftUI"
+               BuildableName = "GlassWeaveSwiftUI"
+               BlueprintName = "GlassWeaveSwiftUI"
+               ReferencedContainer = "container:..">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
             buildForRunning = "NO"
             buildForProfiling = "NO"
             buildForArchiving = "NO"
@@ -59,6 +73,20 @@
                BlueprintIdentifier = "GlassWeaveUIKitTests"
                BuildableName = "GlassWeaveUIKitTests"
                BlueprintName = "GlassWeaveUIKitTests"
+               ReferencedContainer = "container:..">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "GlassWeaveSwiftUITests"
+               BuildableName = "GlassWeaveSwiftUITests"
+               BlueprintName = "GlassWeaveSwiftUITests"
                ReferencedContainer = "container:..">
             </BuildableReference>
          </BuildActionEntry>
@@ -102,6 +130,16 @@
                BlueprintIdentifier = "GlassWeaveUIKitTests"
                BuildableName = "GlassWeaveUIKitTests"
                BlueprintName = "GlassWeaveUIKitTests"
+               ReferencedContainer = "container:..">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "GlassWeaveSwiftUITests"
+               BuildableName = "GlassWeaveSwiftUITests"
+               BlueprintName = "GlassWeaveSwiftUITests"
                ReferencedContainer = "container:..">
             </BuildableReference>
          </TestableReference>

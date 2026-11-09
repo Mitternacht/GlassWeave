@@ -12,6 +12,9 @@ let package = Package(
     products: [
         .library(name: "GlassWeave", targets: ["GlassWeave"]),
         .library(name: "GlassWeaveUIKit", targets: ["GlassWeaveUIKit"]),
+        // Optional and experimental (GW-15): a SwiftUI view over the UIKit
+        // host. Nothing else in the package depends on it.
+        .library(name: "GlassWeaveSwiftUI", targets: ["GlassWeaveSwiftUI"]),
     ],
     targets: [
         // CPU/GPU record layouts shared by Swift and Metal shaders. C only;
@@ -24,6 +27,11 @@ let package = Package(
         // UIKit presentation. Every file is guarded by `#if canImport(UIKit)`
         // so the macOS core build still compiles the package.
         .target(name: "GlassWeaveUIKit", dependencies: ["GlassWeave"]),
+        // SwiftUI presentation adapter (GW-15). It wraps GlassSurfaceView in a
+        // view and owns no rendering of its own. Guarded by
+        // `#if canImport(UIKit)`: macOS is not a presentation target.
+        // GlassWeave and GlassWeaveUIKit never import it.
+        .target(name: "GlassWeaveSwiftUI", dependencies: ["GlassWeave", "GlassWeaveUIKit"]),
         .testTarget(
             name: "GlassWeaveTests",
             dependencies: ["GlassWeave", "GlassWeaveShaderTypes"]
@@ -31,6 +39,10 @@ let package = Package(
         .testTarget(
             name: "GlassWeaveUIKitTests",
             dependencies: ["GlassWeaveUIKit", "GlassWeave"]
+        ),
+        .testTarget(
+            name: "GlassWeaveSwiftUITests",
+            dependencies: ["GlassWeaveSwiftUI", "GlassWeaveUIKit", "GlassWeave"]
         ),
         // GW-09's fixed workload rendered offscreen and measured with
         // RenderMetrics. Uses no `@testable` import, so the
