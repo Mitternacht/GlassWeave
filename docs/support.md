@@ -1,6 +1,6 @@
 # Support policy
 
-Status: updated for the v0.1 pre-alpha candidate (GW-10), 2026-11-09. This
+Status: updated for the v0.1 pre-alpha candidate (GW-10), 2026-11-09, after review fixes. This
 page states what the package declares, what it checks at runtime, and which
 combinations have been tested. **No device is qualified.** No physical iPhone
 or iPad has been measured; see [the Milestone 1 report](evidence/milestone-1.md).
@@ -35,11 +35,11 @@ functional evidence only.
 | Physical iPhone, iOS 27.x | **Untested** | None. |
 | Physical iPad | **Untested** | None. No iPad presentation support is claimed. |
 | iOS 26 Simulator | **Untested** | The iOS 26 runtime is not installed; the 26.0 floor is declared, not run. |
-| iOS 27.2 Simulator, iPhone 18 Pro | Tested, functional | Package scheme: 147 test functions (core, UIKit, documentation examples, characterization). Laboratory: 18 UI tests passed, 1 iPad-only test skipped, including coexistence, rotation, lifecycle, accessibility, and the benchmark modes. |
+| iOS 27.2 Simulator, iPhone 18 Pro | Tested, functional | Package scheme: 155 test functions (core, UIKit, documentation examples, characterization). Laboratory: 18 UI tests passed, 1 iPad-only test skipped, including coexistence, rotation, lifecycle, accessibility, and the benchmark modes. |
 | iOS 27.2 Simulator, iPad Pro 13-inch (M5) | Tested, functional | Laboratory: 18 UI tests passed, 1 skipped (the system-dark audit; system dark does not reach apps on that simulator), including two window scenes. Full-screen apps mode only; Stage Manager not exercised. |
-| macOS 27.2, Apple M5, core | Tested | Package scheme: 118 test functions (core, documentation example, characterization) with Metal API Validation; the Release characterization in [the Milestone 1 report](evidence/milestone-1.md). There is no macOS view. |
+| macOS 27.2, Apple M5, core | Tested | Package scheme: 126 test functions (core, documentation example, characterization) with Metal API Validation; the Release characterization in [the Milestone 1 report](evidence/milestone-1.md). There is no macOS view. |
 | macOS 26.x | **Untested** | Declared floor; not run. |
-| Clean consumer, SwiftPM git dependency | Tested | A separate package resolved the candidate revision and ran native and custom mode tests on My Mac and the iPhone 18 Pro simulator; see [the pre-alpha notes](evidence/pre-alpha.md#clean-consumer-check). |
+| Clean consumer, SwiftPM git dependency | Tested | `Examples/ConsumerCheck`, run by `scripts/consumer_check.sh`, resolved the candidate revision and ran native and custom mode tests on My Mac and the iPhone 18 Pro simulator; see [the pre-alpha notes](evidence/pre-alpha.md#clean-consumer-check). |
 | Xcode 27.2 (27B52), Swift 6.4.2 | Used for every result | Other toolchains are untested. |
 | GitHub Actions `macos-26` | **Not run** | The workflow is written; it has not run on GitHub. It selects `/Applications/Xcode_27.2.app` and fails if that Xcode is missing or reports another version, so a hosted run uses the recorded toolchain or stops. Whether the hosted image provides Xcode 27.2 is not known. |
 | Metal 4 | Not used | `RenderCapabilities` reports it; the renderer uses conventional Metal (GW-11 decides). |
