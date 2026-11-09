@@ -80,6 +80,36 @@ final class OffscreenStage {
         return count
     }
 
+    /// Display passes at 60 Hz for `duration` with nothing requested, as
+    /// UIKit or a late GPU completion can start them while the source is
+    /// frozen and the panel settled. Returns how many passes ran.
+    @discardableResult
+    func idlePasses(for duration: Duration) async throws -> Int {
+        let clock = ContinuousClock()
+        let begin = clock.now
+        var deadline = begin
+        var count = 0
+        while clock.now - begin < duration {
+            displayPass()
+            count += 1
+            deadline = max(deadline + Workload.tickInterval, clock.now)
+            try await clock.sleep(until: deadline, tolerance: .microseconds(500))
+        }
+        return count
+    }
+
+    /// Draws a frame still pending (the stage, unlike the surface, does not
+    /// redraw from completions) and waits for every frame to complete.
+    func settle() async {
+        displayPass()
+        await awaitIdle()
+    }
+
+    /// Frames the producer has made.
+    var producedFrames: Int {
+        Int(nextFrameID - 1)
+    }
+
     /// `count` ticks at 60 Hz.
     func tick(count: Int) async throws {
         for _ in 0..<count {

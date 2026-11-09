@@ -128,12 +128,22 @@ struct CharacterizationTests {
             }
         }
 
-        // Idle: a frozen source and settled panel request nothing, so
-        // nothing is submitted.
+        // Idle: a frozen source and settled panel request nothing. Display
+        // passes still run at 60 Hz, as UIKit or a late completion can start
+        // them; the on-demand rule must turn every one into nothing, with no
+        // frame produced and none submitted.
+        await stage.settle()
+        #expect(!stage.scheduler.snapshot.hasPendingFrame, "Nothing is pending before the idle period")
         let idleSeconds = min(settings.measuredSeconds, 5)
         let submittedBeforeIdle = stage.scheduler.statistics.submitted
-        try await Task.sleep(for: .seconds(idleSeconds))
-        let idleSubmissions = stage.scheduler.statistics.submitted - submittedBeforeIdle
+        let producedBeforeIdle = stage.producedFrames
+        let idlePasses = try await stage.idlePasses(for: .seconds(idleSeconds))
+        let idle = Report.Idle(
+            seconds: idleSeconds,
+            passes: idlePasses,
+            submissions: stage.scheduler.statistics.submitted - submittedBeforeIdle,
+            productions: stage.producedFrames - producedBeforeIdle
+        )
 
         // Lifecycle: settle, then hide (trimming the pool), request while
         // hidden, show, and rotate the target, `lifecycleCycles` times, and
@@ -162,7 +172,7 @@ struct CharacterizationTests {
         let report = Report(
             settings: settings, stage: stage, results: results,
             thermalStates: (thermalStateAtStart, ProcessInfo.processInfo.thermalState),
-            idleSeconds: idleSeconds, idleSubmissions: idleSubmissions,
+            idle: idle,
             lifecycle: (settledBefore, settledAfter, poolBefore, poolAfter)
         )
         print(report.text)
@@ -183,7 +193,9 @@ struct CharacterizationTests {
             #expect(result.summary.samplesWithoutGPUTime == 0, "This GPU reports command buffer times")
             #endif
         }
-        #expect(idleSubmissions == 0)
+        #expect(idle.passes >= Int(idleSeconds * Double(Workload.ticksPerSecond) / 2), "Too few idle display passes ran")
+        #expect(idle.submissions == 0, "Display passes with nothing requested submitted frames")
+        #expect(idle.productions == 0, "Display passes with nothing requested produced frames")
         #expect(poolAfter.liveTextures <= Workload.poolCapacity)
         #if targetEnvironment(simulator)
         // The iOS Simulator reports no allocation sizes, so retained memory

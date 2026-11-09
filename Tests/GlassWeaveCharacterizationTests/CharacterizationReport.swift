@@ -4,10 +4,18 @@ import Metal
 
 /// The plain-text record of one characterization run: environment, every
 /// run's distributions, distributions pooled per mode, the comparative GPU
-/// statistic, idle submissions, and lifecycle allocations.
+/// statistic, the idle check, and lifecycle allocations.
 struct Report {
     typealias Workload = CharacterizationTests.Workload
     typealias Mode = CharacterizationTests.Mode
+
+    /// The idle period: display passes with nothing requested.
+    struct Idle {
+        let seconds: Double
+        let passes: Int
+        let submissions: Int
+        let productions: Int
+    }
 
     let text: String
 
@@ -16,8 +24,7 @@ struct Report {
         stage: OffscreenStage,
         results: [CharacterizationTests.RunResult],
         thermalStates: (start: ProcessInfo.ThermalState, end: ProcessInfo.ThermalState),
-        idleSeconds: Double,
-        idleSubmissions: Int,
+        idle: Idle,
         lifecycle: (before: Int, after: Int, poolBefore: FrameTexturePool.Statistics, poolAfter: FrameTexturePool.Statistics)
     ) {
         var lines: [String] = []
@@ -72,7 +79,7 @@ struct Report {
         }
         lines.append("  pooled: \(Self.difference(pooledGPU[.panel]?.p95, pooledGPU[.background]?.p95))")
         lines.append("")
-        lines.append("Idle: \(idleSubmissions) submissions in \(idleSeconds) s with no requests")
+        lines.append("Idle: \(idle.passes) display passes in \(idle.seconds) s with nothing requested: \(idle.submissions) submissions, \(idle.productions) frames produced")
         lines.append("Lifecycle: \(settings.lifecycleCycles) cycles of hide (trim) / 2 hidden ticks / show / rotate / 4 ticks")
         if lifecycle.before == 0, lifecycle.after == 0 {
             lines.append("  settled currentAllocatedSize: not reported by this device (0 B)")
