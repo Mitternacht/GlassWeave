@@ -281,6 +281,25 @@ struct EnhancedNativeGlassViewTests {
         #expect(!rim.bandPath.contains(CGPoint(x: 80, y: 50), using: .winding))
     }
 
+    @Test(arguments: [
+        (CGSize(width: 300, height: 60), NativeGlowLayout.CornerRadii(topLeft: 30, topRight: 30, bottomRight: 30, bottomLeft: 30)),
+        (CGSize(width: 160, height: 100), NativeGlowLayout.CornerRadii(topLeft: 20, topRight: 20, bottomRight: 20, bottomLeft: 20)),
+        (CGSize(width: 120, height: 120), NativeGlowLayout.CornerRadii(topLeft: 60, topRight: 60, bottomRight: 60, bottomLeft: 60)),
+        (CGSize(width: 220, height: 64), NativeGlowLayout.CornerRadii(topLeft: 4, topRight: 20, bottomRight: 0, bottomLeft: 10)),
+    ])
+    func `The point each ray takes its light from lies on the outline`(size: CGSize, radii: NativeGlowLayout.CornerRadii) {
+        let halfSize = SIMD2(Double(size.width), Double(size.height)) / 2
+        for step in 0..<720 {
+            let turn = Double(step) / 720
+            let point = NativeGlowLayout.outlinePoint(atTurn: turn, halfSize: halfSize, radii: radii)
+            let distance = NativeGlowLayout.signedDistance(at: point, halfSize: halfSize, radii: radii)
+            #expect(abs(distance) < 1e-9, "turn \(turn): \(point) is \(distance) from the outline")
+            // On the ray: the same angle in the panel's square.
+            let back = NativeGlowLayout.turn(ofDirection: point / halfSize)
+            #expect(abs(back - turn) < 1e-9 || abs(abs(back - turn) - 1) < 1e-9, "turn \(turn) came back as \(back)")
+        }
+    }
+
     @Test func `The light uses the outline's own normal, as in custom mode`() throws {
         let fixture = Fixture(size: CGSize(width: 300, height: 60))
         let view = fixture.view
@@ -538,6 +557,54 @@ struct EnhancedNativeGlassViewTests {
         for layer in view.glowLayers {
             #expect(layer.animationKeys() == nil, "\(layer) has \(layer.animationKeys() ?? [])", sourceLocation: sourceLocation)
         }
+    }
+
+    // MARK: Cost
+
+    /// The CPU cost the glow adds to a layout pass that changes the size
+    /// (paths, gradients with their light, layer updates), on the simulator
+    /// in a Debug build, recorded in the evidence: the same 120 resizes with
+    /// the glow and without one (the glass's own layout). It is paid once per
+    /// change of size, corners, scale, settings, or glow, never per frame; a
+    /// layout pass that changes none of them skips it.
+    @Test func `The glow adds under a millisecond to a resizing layout pass`() throws {
+        func medianResize(glow: GlassGlow) throws -> (median: Duration, p95: Duration) {
+            let fixture = Fixture()
+            let view = fixture.view
+            view.sceneStateOverride = .foregroundActive
+            try view.setGlow(glow)
+            view.layoutIfNeeded()
+            var samples: [Duration] = []
+            let clock = ContinuousClock()
+            for index in 0..<120 {
+                let size = CGSize(width: 200 + Double(index % 7) * 13, height: 56 + Double(index % 5) * 6)
+                samples.append(clock.measure {
+                    view.frame.size = size
+                    view.layoutIfNeeded()
+                })
+                #expect(view.layout.size == size)
+            }
+            samples.sort()
+            return (samples[samples.count / 2], samples[samples.count * 95 / 100])
+        }
+        // Alternate, so neither runs on a colder process.
+        let plain1 = try medianResize(glow: .none), glowing1 = try medianResize(glow: Self.energy)
+        let plain2 = try medianResize(glow: .none), glowing2 = try medianResize(glow: Self.energy)
+        let plain = min(plain1.median, plain2.median), glowing = min(glowing1.median, glowing2.median)
+        print("Enhanced-native layout per resize (Debug, simulator): without a glow median \(plain1.median)/\(plain2.median) p95 \(plain1.p95)/\(plain2.p95); with the energy glow median \(glowing1.median)/\(glowing2.median) p95 \(glowing1.p95)/\(glowing2.p95)")
+        #expect(glowing - plain < .milliseconds(1), "added \(glowing - plain)")
+
+        // A layout pass that changes nothing rebuilds nothing.
+        let fixture = Fixture()
+        try fixture.view.setGlow(Self.energy)
+        fixture.view.layoutIfNeeded()
+        let builds = fixture.view.layoutBuilds
+        fixture.view.setNeedsLayout()
+        fixture.view.layoutIfNeeded()
+        #expect(fixture.view.layoutBuilds == builds)
+        fixture.view.frame.size.width += 10
+        fixture.view.layoutIfNeeded()
+        #expect(fixture.view.layoutBuilds == builds + 1)
     }
 
     // MARK: Normalization

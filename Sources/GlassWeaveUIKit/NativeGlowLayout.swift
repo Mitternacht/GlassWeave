@@ -152,7 +152,9 @@ struct NativeGlowLayout {
         // round as the rim's reach, so the light turns smoothly.
         let feather = max(glow.rimSoftness, Double(pixel))
         let normalRadii = radii.maximized(with: CGFloat(glow.rimWidth + feather)).clamped(to: size)
-        let light = { (turn: Double) in
+        // The color and light at every sampled angle, shared by the rim and
+        // the halo.
+        let samples = Self.samples(stops: stops) { turn in
             Self.light(atTurn: turn, glow: glow, halfSize: halfSize, radii: radii, normalRadii: normalRadii)
         }
 
@@ -165,7 +167,7 @@ struct NativeGlowLayout {
                 bandPath: band,
                 softBandPath: softness > 0 ? Self.band(in: bounds, radii: radii, from: -softness / 2, to: width + softness / 2) : band,
                 softnessRadius: softness / 4,
-                gradient: Self.gradient(stops: stops, intensity: glow.rimIntensity, light: light) { $0 }
+                gradient: Self.gradient(samples, intensity: glow.rimIntensity) { $0 }
             )
         } else {
             rim = nil
@@ -195,7 +197,7 @@ struct NativeGlowLayout {
                 holePath: hole,
                 shadowPath: Self.roundedRect(inner.insetBy(dx: -outset, dy: -outset), radii: radii.offset(by: outset)),
                 shadowRadius: sigma,
-                gradient: Self.gradient(stops: stops, intensity: glow.haloIntensity, light: light) { turn in
+                gradient: Self.gradient(samples, intensity: glow.haloIntensity) { turn in
                     Self.turn(ofDirection: Self.direction(atTurn: turn, halfSize: halfSize) / grown)
                 }
             )
@@ -236,21 +238,23 @@ struct NativeGlowLayout {
     }
 
     /// Where the ray from the center at `turn` crosses the outline, relative
-    /// to the center, in points.
+    /// to the center, in points: on the rectangle's edge where that is
+    /// straight, otherwise on the corner's circle (closed form).
     static func outlinePoint(atTurn turn: Double, halfSize: SIMD2<Double>, radii: CornerRadii) -> SIMD2<Double> {
         let direction = direction(atTurn: turn, halfSize: halfSize)
-        // The direction reaches the rectangle's edge at most at t = 1 and its
-        // corner at t = √2; bisect the signed distance between 0 and 2.
-        var low = 0.0, high = 2.0
-        for _ in 0..<48 {
-            let middle = (low + high) / 2
-            if signedDistance(at: direction * middle, halfSize: halfSize, radii: radii) < 0 {
-                low = middle
-            } else {
-                high = middle
-            }
-        }
-        return direction * ((low + high) / 2)
+        let radius = radius(at: direction, radii: radii)
+        let ax = abs(direction.x), ay = abs(direction.y)
+        // The rectangle's edge.
+        let t = min(ax > 0 ? halfSize.x / ax : .infinity, ay > 0 ? halfSize.y / ay : .infinity)
+        let cornerX = halfSize.x - radius, cornerY = halfSize.y - radius
+        guard ax * t > cornerX, ay * t > cornerY else { return direction * t }
+        // The corner's circle: |s·(ax, ay) − (cornerX, cornerY)| = radius,
+        // the far root.
+        let a = ax * ax + ay * ay
+        let b = ax * cornerX + ay * cornerY
+        let c = cornerX * cornerX + cornerY * cornerY - radius * radius
+        let s = (b + max(b * b - a * c, 0).squareRoot()) / a
+        return direction * s
     }
 
     /// The corner radius for the quadrant of `point` (relative to the
@@ -288,41 +292,51 @@ struct NativeGlowLayout {
         return d.x > d.y ? SIMD2(sign(point.x), 0) : SIMD2(0, sign(point.y))
     }
 
-    /// The conic gradient for one part of the glow: the glow color at every
-    /// sampled panel angle, with alpha `intensity × light`, placed at the
-    /// layer's own angle for that ray (`location`, identity for a layer the
-    /// panel's size).
-    static func gradient(
-        stops: (colors: [SIMD3<Double>], turns: [Double]),
-        intensity: Double,
-        light: (Double) -> Double,
-        location: (Double) -> Double
-    ) -> Gradient {
+    /// The glow at one sampled angle.
+    struct Sample {
+        /// Where the sample sits, in turns of the panel's angle (0...1).
+        var turn: Double
+        /// sRGB-encoded color.
+        var color: SIMD3<Double>
+        /// The light factor, 0...1.
+        var light: Double
+    }
+
+    /// The glow color and light at every sampled panel angle: a regular
+    /// two-degree grid plus both sides of every stop, so a hard edge (two
+    /// stops at one angle) stays hard.
+    static func samples(stops: (colors: [SIMD3<Double>], turns: [Double]), light: (Double) -> Double) -> [Sample] {
         let count = samplesPerTurn
-        // Both sides of every stop, so a hard edge (two stops at one angle)
-        // stays hard; then a regular two-degree grid.
         var turns = (0...count).map { Double($0) / Double(count) }
         for stop in stops.turns {
             turns.append(stop)
             turns.append(max(stop - 1e-7, 0))
         }
         turns.sort()
-        var colors: [SIMD4<Double>] = []
-        var locations: [Double] = []
-        for (index, turn) in turns.enumerated() {
+        return turns.enumerated().map { index, turn in
             // The second of two equal turns takes the color after the stop;
             // the last sample closes the circle with the color just before
             // the top (equal to the first sample's unless a stop sits at 0).
             let sampled = index == turns.count - 1 ? 1 - 1e-9 : turn
             let linear = GlowColorModel.color(atTurn: sampled, colorsLinear: stops.colors, stopTurns: stops.turns)
-            let alpha = min(max(intensity * light(sampled), 0), 1)
-            colors.append(SIMD4(
-                GlowColorModel.encodeSRGB(linear.x), GlowColorModel.encodeSRGB(linear.y),
-                GlowColorModel.encodeSRGB(linear.z), alpha
-            ))
-            locations.append(turn >= 1 ? 1 : location(turn))
+            return Sample(
+                turn: turn,
+                color: SIMD3(
+                    GlowColorModel.encodeSRGB(linear.x), GlowColorModel.encodeSRGB(linear.y), GlowColorModel.encodeSRGB(linear.z)
+                ),
+                light: light(sampled)
+            )
         }
-        return Gradient(colors: colors, locations: locations)
+    }
+
+    /// The conic gradient for one part of the glow: each sample's color with
+    /// alpha `intensity × light`, placed at the layer's own angle for that
+    /// ray (`location`, identity for a layer the panel's size).
+    static func gradient(_ samples: [Sample], intensity: Double, location: (Double) -> Double) -> Gradient {
+        Gradient(
+            colors: samples.map { SIMD4($0.color, min(max(intensity * $0.light, 0), 1)) },
+            locations: samples.map { $0.turn >= 1 ? 1 : location($0.turn) }
+        )
     }
 
     // MARK: Paths

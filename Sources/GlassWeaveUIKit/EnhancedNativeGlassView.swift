@@ -244,16 +244,33 @@ public final class EnhancedNativeGlassView: UIView {
             size: frame.size
         )
         presentedGlow = presented
-        let newLayout = NativeGlowLayout(
-            size: frame.size, radii: cornerRadii, displayScale: traitCollection.displayScale, glow: presented
-        )
+        let radii = cornerRadii
+        let scale = traitCollection.displayScale
+        // Most layout passes change nothing the glow depends on.
+        if frame.origin == layoutOrigin, frame.size == layout.size, radii.clamped(to: frame.size) == layout.radii,
+           scale == layout.displayScale, presented == layout.glow {
+            updatePulse()
+            return
+        }
+        let newLayout = NativeGlowLayout(size: frame.size, radii: radii, displayScale: scale, glow: presented)
         apply(newLayout, at: frame.origin, like: template)
         layout = newLayout
+        layoutOrigin = frame.origin
+        layoutBuilds += 1
         updatePulse()
     }
 
+    /// Where the glass was when ``layout`` was applied.
+    private var layoutOrigin = CGPoint.zero
+    /// How many times the layers were rebuilt, for tests.
+    private(set) var layoutBuilds = 0
+
     override public func layoutSubviews() {
         super.layoutSubviews()
+        // The glass resolves its corners (a capsule's radius follows its
+        // height) in its own layout pass; run it first so the radii read
+        // below belong to the frame just set.
+        glass.layoutIfNeeded()
         let template = glass.layer.animation(forKey: "bounds.size") ?? glass.layer.animation(forKey: "bounds")
         updateGlow(like: template)
         refreshVisibility()
