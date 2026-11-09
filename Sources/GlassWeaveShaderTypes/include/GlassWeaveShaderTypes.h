@@ -676,8 +676,9 @@ typedef enum GWFillFlag {
 /// - `line`: the color of the caustic edges and the wall line (`xyz`) and the
 ///   brightness of the edges 0...1 (`w`).
 /// - `region`: the mode (`x`, a `GWFillMode`), the wall thickness (`y`), the
-///   dome radius over which the fill's thickness rises (`z`), and the fill's
-///   thickness at its deepest, as a fraction of the dome radius (`w`).
+///   dome radius over which the fill's thickness rises (`z`), and the phase of
+///   the body's slow flow in radians (`w`; this slot was a constant 1 that
+///   nothing read, so the layout is unchanged).
 /// - `surface`: level mode: the surface's height at the panel's center line
 ///   (`x`), its slope (`y`, rise over run, y down), the meniscus height (`z`)
 ///   and the meniscus width (`w`).
@@ -690,7 +691,8 @@ typedef enum GWFillFlag {
 /// - `gelBounds`: gel mode: the gel's bounding box center (`xy`) and half size
 ///   (`zw`).
 /// - `flags`: `GWFillFlag` bits. `bubbleCount`: 0 to 16. `ior`: the liquid's
-///   index of refraction. `padding0`: set to zero.
+///   index of refraction. `padding0`: the liquid's gloss 0...1 (a slot that was
+///   padding, so the layout is unchanged).
 /// - `gel`: the gel's own `GWShapeUniforms`, relative to `gelBounds.xy`.
 /// - `bubbles`: center `xy`, radius `z` and brightness `w` of each bubble at
 ///   this draw's time; unused ones are zero.

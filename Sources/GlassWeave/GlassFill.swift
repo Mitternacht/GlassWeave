@@ -30,6 +30,14 @@ import Foundation
 /// term). Up to 16 tiny *bubbles*, computed on the CPU, are small soft discs
 /// with a faint highlight, always inside the liquid.
 ///
+/// **A curved body.** The liquid's surface is a dome whose slope (and a slow,
+/// smooth field of luminous masses that drifts on small loops) gives it a
+/// normal, so one key light (the light model's, or the upper left) shades it:
+/// the side facing the light is brighter and yellower, the far side a deeper
+/// amber, and a soft specular streak follows the lit wall at a fixed depth. What
+/// lies inside the liquid (the sheets, the bubbles) is bent by that surface, so
+/// the edges magnify it like a lens. See ``gloss``.
+///
 /// **Normalization rule** (the ``GlassParameters`` rule). A NaN or infinite
 /// value anywhere is rejected with ``GlassParameterError/nonFiniteFill(_:)``
 /// naming its ``Field``; finite values out of range are clamped as the table
@@ -45,8 +53,9 @@ import Foundation
 /// | ``absorption`` | normalized | 0...1 | 0.6 | How much of what is behind the liquid it absorbs and colors. |
 /// | ``sheets`` | see ``Sheets`` | see ``Sheets`` | 3 sheets | The contour sheets and their bright edges. |
 /// | ``wallLine`` | normalized | 0...1 | 0.5 | The thin line in the glass wall. |
+/// | ``gloss`` | normalized | 0...1 | 0.6 | How glossy the liquid's curved surface is: its soft specular streak, the bright thin edge and a level's meniscus line. 0 is matte. |
 /// | ``bubbles`` | see ``Bubbles`` | see ``Bubbles`` | 5 | The tiny bubbles. |
-/// | ``surface`` | see ``Surface`` | see ``Surface`` | calm | The level surface's waves and meniscus (level mode only). |
+/// | ``surface`` | see ``Surface`` | see ``Surface`` | calm | The level surface's waves and meniscus (level mode only); its ``Surface/waveSpeed`` also sets how fast the body's slow flow moves. |
 /// | ``opaque`` | — | — | `false` | A single flat, opaque color: what Reduce Transparency presents. |
 public struct GlassFill: Hashable, Sendable {
     /// What the vessel holds.
@@ -162,6 +171,7 @@ public struct GlassFill: Hashable, Sendable {
         case emission, absorption
         case sheetSpacing, sheetEdge, sheetWobble
         case wallLine
+        case gloss
         case bubbleSize, bubbleSpeed
         case waveAmplitude, wavelength, waveSpeed, meniscus
         /// The vessel tilt of a ``GlassFillSlosh``.
@@ -181,6 +191,7 @@ public struct GlassFill: Hashable, Sendable {
     public var wallLine: Double
     public var bubbles: Bubbles
     public var surface: Surface
+    public var gloss: Double
     public var opaque: Bool
 
     /// The most colors the emissive ramp uses; further ones are dropped.
@@ -207,6 +218,7 @@ public struct GlassFill: Hashable, Sendable {
         wallLine: Double = 0.5,
         bubbles: Bubbles = Bubbles(),
         surface: Surface = Surface(),
+        gloss: Double = 0.6,
         opaque: Bool = false
     ) {
         self.region = region
@@ -218,6 +230,7 @@ public struct GlassFill: Hashable, Sendable {
         self.wallLine = wallLine
         self.bubbles = bubbles
         self.surface = surface
+        self.gloss = gloss
         self.opaque = opaque
     }
 
@@ -230,18 +243,15 @@ public struct GlassFill: Hashable, Sendable {
         }
     }
 
-    /// Whether the fill changes with time: drifting bubbles, running waves on
-    /// a level surface, or a gel's wobbling outline. An opaque fill never
-    /// moves.
+    /// Whether the fill changes with time: drifting bubbles, the body's slow
+    /// flow and a level's running waves (both follow ``Surface/waveSpeed``), or
+    /// a gel's wobbling outline. An opaque fill never moves.
     public var isAnimated: Bool {
         guard isActive, !opaque else { return false }
         if bubbles.count > 0, bubbles.speed > 0, bubbles.size > 0 { return true }
-        switch region {
-        case .none: return false
-        case let .level(level, _):
-            return level < 1 && surface.waveAmplitude > 0 && surface.waveSpeed > 0
-        case let .gel(shape): return shape.isAnimated
-        }
+        if surface.waveSpeed > 0 { return true }
+        if case let .gel(shape) = region { return shape.isAnimated }
+        return false
     }
 
     /// The time, in seconds of ``GlassRenderer/setEffectTime(_:)`` divided by
@@ -319,6 +329,7 @@ extension GlassFill {
             wallLine: unit(try finite(wallLine, .wallLine)),
             bubbles: bubbles,
             surface: surface,
+            gloss: unit(try finite(gloss, .gloss)),
             opaque: opaque
         )
     }

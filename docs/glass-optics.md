@@ -745,33 +745,52 @@ own GW-26 field (frame units, any shape but the rounded rectangle, which becomes
 a squircle), `max(gel distance, inset distance)`. A blob's wobble is its
 loop-locked motion.
 
-**Body.** Thickness is a parabolic dome `h = 1 - (1 - s)^2` over the depth `s`
-into the region (the depth over a dome radius: 55 % of the gel's inscribed
-radius, 60 % of a level vessel's inset depth, so the plateau of a thick body
-hides the creases of the distance field's medial axis). Beer-Lambert absorbs
-what is behind: `T = exp(-sigma h R)` with `sigma = 3 absorption (1 - mid color)
-/ R`. The liquid's own light is `ramp(t) (0.16 + 0.84 (1 - exp(-3.5 h))) emission`
-screened over what is left, with `t = h^2 (0.5 + 0.5 noise) + 0.36 core` (a slow
-noise, and a hotter core where the body is deepest). The ramp has up to three
-stops (thin edge, middle, deep). The dome slope `2 (1 - s)` and the key light
-brighten the lit side a little; the liquid's index is 1.33 (record field `ior`).
+**Body (enhance pass).** The thickness is a parabolic dome `h = 1 - (1 - s)^2`
+over the depth `s` into the region (the depth over a dome radius: 55 % of the
+gel's inscribed radius, 60 % of a level vessel's inset depth), plus a slow field
+of luminous masses (two octaves of value noise, cells 1.25 dome radii wide,
+drifting on small loops: `region.w` carries the flow phase, two turns per 64 s
+divided by `surface.waveSpeed`). The gradient of that height, with the dome's
+slope scaled by 0.55, is a surface normal. One key light (the light model's, or
+the upper left, set low over the screen) shades it: `shade = 1 + 0.55 (n.l - n.l
+flat)`, so the lit side is brighter and yellower (the ramp parameter takes
+`0.30 facing`) and the far side a deeper amber. Beer-Lambert absorbs what is
+behind: `T = exp(-sigma h R)`. The liquid's own light is
+`ramp(t) (0.08 + 0.92 (1 - exp(-2.4 h))^1.3) emission`: dark amber toward the
+walls, a calm glow in the thick middle, and a core that saturates at the dome
+radius (so the distance field's ridges never show as creases; the depth of a
+gel clipped by the inset wall, and a level's depth against its surface, are
+blended with a smooth minimum for the same reason). **Gloss** (`GlassFill.gloss`,
+record `padding0`): a Blinn specular `0.85 cos^30 + 0.07 cos^6` against the half
+vector, which tilts 33 degrees toward the light, so a soft streak follows the lit
+wall about 0.4 dome radii inside it, plus a narrow golden line a little inside
+the far edge (light through the thin liquid), a glossy meniscus line with a
+brighter band just under it, and the edge line. What is inside the liquid is seen
+through its curved surface: the masses, the sheets and the bubbles are read at
+`q - n.xy 0.14 R`, so near the edge they stretch and the sheets crowd toward the
+wall (the edge magnifies like a lens). The liquid's index is 1.33 (record field
+`ior`, which sets that bend).
 
-**Edges.** Up to four contour sheets: iso-offsets of the depth, bent by noise,
-each a thin line `exp(-(u / w)^2)` plus a wide weak bloom `exp(-(u / 5.5 w)^2)`,
-weighted toward the side that faces the key light
-(`0.10 + 0.90 facing^1.6`), added through the light model's soft knee (so
-nothing exceeds 1), and each sheet's inside is lifted a little. The wall line is
-a thin Gaussian at the inset boundary, stronger where the liquid is near
-(`exp(-distance / reach)`) and where the wall is steep; a soft glow that
-continues the liquid's edge light outward fades within about a tenth of the dome
-radius.
+**Edges.** Up to four contour sheets (the balanced tier two): iso-offsets of the
+depth seen through the surface, bent by noise, spaced 22 % tighter on the lit side
+than on the far one and faded out toward the distance field's middle. Each is a
+thin edge (sharp outside, 2.4 times softer inside), a weak bloom in a saturated
+gold (not the pale of the thin lines, which washed the amber to beige), a soft
+dark gap just outside it, and a slightly lifted inside; all weighted toward the
+side that faces the light (`0.10 + 0.90 facing^1.6`) and added through the light
+model's soft knee (so nothing exceeds 1). In the glass: a thin wall line at the
+inset boundary, a tight glow and a wide faint one that warm the dark wall near the
+liquid, a soft long gradient on the lit wall (a gaussian band centered 0.42 bezel
+widths inside the outline) and a faint secondary rim on the far wall (the wall's
+inner face, 0.16 bezel widths inside), both a cool gray warmed a third toward the
+liquid.
 
 **Bubbles.** Up to 16, computed on the CPU per draw (`placeBubbles`): candidate
 points from a hash of the seed, kept only if inside the region with room for
 their radius, their drift, a gel's wobble and a level's waves; each drifts on a
 small loop of whole turns per 64 s, so none is ever outside the liquid and the
-motion repeats exactly. Drawn as a small soft disc (a little dimmer than the
-liquid) with a faint highlight toward the light: no ring, no crescent.
+motion repeats exactly. Drawn as a tiny disc of air (a little darker) with a micro
+highlight toward the light and a fainter one opposite: no ring, no crescent.
 
 **Slosh.** `GlassFillSlosh` is a deterministic damped spring in fixed 1/240 s
 steps. `nudge(velocity:)` reports the vessel's horizontal velocity (the surface
@@ -781,21 +800,31 @@ app passes `tilt` into the region and may scale the waves by `agitation`.
 
 **Tiers and accessibility.** Balanced: at most 2 sheets and 8 bubbles. Minimal: no
 sheets, no bubbles, flat surface. Reduce Transparency: a flat opaque fill
-(`opaque`: one color, no ramp, sheets, lines, bubbles or waves). Reduce Motion:
-bubbles, waves and a gel's wobble at speed 0. Increase Contrast keeps the fill;
-no text over a fill (it has no legibility bound).
+(`opaque`: one color, no ramp, sheets, lines, gloss, wall reflections, bubbles or
+waves). Reduce Motion: bubbles, waves, the body's flow (`waveSpeed`) and a gel's
+wobble at speed 0, a still frame. Increase Contrast keeps the fill; no text over
+a fill (it has no legibility bound).
 
-**Look and limits.** Tuned in four rounds against Apple's own glass (the native
-Close and Nudge buttons on the same stage): a dark, mostly clear smoky body
-(tint strength 0.5), a thin crisp rim from the refined light model, and a calm
-gel whose light falls off quickly. Compared with the private reference of thick
-smoky glass with orange liquid, the gap is real: ours is an emissive gel seen
-through a flat-shaded shell. It has no 3D liquid surface, no specular highlights
-on the liquid's own curved surface, no parallax and no back-face reflections, and
-the liquid is more diffuse and less translucent than a photograph's. A level fill
-has no second tap for the background seen through the liquid (the lens's single
-refraction is all the background gets). Quads of panels must not overlap, as
-always.
+**Look and limits.** First pass: four rounds against Apple's own glass (the native
+Close and Nudge buttons on the same stage): a dark, mostly clear smoky body (tint
+strength 0.5), a thin crisp rim from the refined light model, a calm gel. Enhance
+pass (ENHANCE-VESSEL): five rounds against the private reference of thick smoky
+glass with orange liquid, with a real `UIGlassEffect` twin in the same frame. The
+large vessel is now an organic GW-26 shell (a smooth union of two round masses and
+a soft box) holding a gel that wets the lower and right walls; the picture reads
+as the same family as the native glass (dark smoky body, one thin rim) with a
+liquid that has volume. Tuning notes: lobes at amplitude 0.7 on small cells read
+as mottled cheese (now 0.55 on 1.25 dome radii, read through the dome); three
+equal-spaced sheets read as a topographic map (now two or three, tighter on the
+lit side, faded near the middle); the pale line color washed the lit side to
+beige (broad terms now use a saturated gold); distance-field ridges showed as
+straight seams, in the depth, the normal (blended now), the core (saturates at the
+dome radius) and the sheets' plate (no lit weighting). Still missing against the
+reference: white-hot sheet edges, a real specular spot on the liquid's curved
+surface, parallax, and the gray studio reflections on the thick rims (left out
+on purpose: the user asked for restraint). A level fill has no second tap for the
+background seen through the liquid (the lens's single refraction is all the
+background gets). Quads of panels must not overlap, as always.
 
 ## Apple-grade defaults (REFINE)
 
