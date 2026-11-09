@@ -84,7 +84,11 @@ measures a glow mode (the same panel with a rim, inner glow, 28-point halo,
 and a pulse advancing with the ticks) and reports its increment over the
 plain panel; the glow mode has no laboratory benchmark counterpart, and the
 scenario version is unchanged. Results: [the glow characterization
-record](evidence/glow-characterization.md).
+record](evidence/glow-characterization.md). Since GW-19 it also measures
+three interior modes (the glow mode plus an energy, rays, or embers
+interior moving with the ticks) and reports each one's increment over the
+glow mode: [the interior characterization
+record](evidence/interior-characterization.md).
 
 ## Device matrix
 

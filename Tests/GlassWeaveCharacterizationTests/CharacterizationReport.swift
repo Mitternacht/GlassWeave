@@ -47,6 +47,8 @@ struct Report {
         lines.append("Settings: \(settings)")
         lines.append("Workload: target \(Workload.portrait.width)×\(Workload.portrait.height) px at scale \(Workload.displayScale); panel 320×180 pt = \(Int(320 * Workload.displayScale))×\(Int(180 * Workload.displayScale)) px; \(Workload.ticksPerSecond) Hz requests; in-flight bound \(FrameStatistics.boundForCharacterization); pool \(Workload.poolCapacity); frame-ID strip off")
         let glow = Workload.glowPanel.parameters.glow
+        let interior = Workload.interiorPanel(.energy).parameters.interior
+        lines.append("Interior modes (GW-19): the glow mode plus an energy, rays, or embers interior, \(interior.colors.count) colors, intensity \(interior.intensity), speed \(interior.speed), center fade \(interior.centerFade), moving with the effect time")
         lines.append("Glow mode (GW-18): the panel plus \(glow.colors.count) colors, rim \(glow.rimWidth) + \(glow.rimSoftness) pt, inner glow \(glow.innerGlowRadius) pt × \(glow.innerGlowIntensity), halo \(glow.haloRadius) pt × \(glow.haloIntensity) (quad \(Int((320 + 2 * glow.haloRadius) * Workload.displayScale) + 2)×\(Int((180 + 2 * glow.haloRadius) * Workload.displayScale) + 2) px), pulse \(glow.pulsePeriod) s × \(glow.pulseDepth), effect time advancing 1/\(Workload.ticksPerSecond) s per tick")
         lines.append("")
         lines.append("Per run (ms; nearest-rank percentiles p50/p95/p99/max):")
@@ -73,7 +75,10 @@ struct Report {
             lines.append("    acquire \(Self.describe(RenderMetrics.Distribution(frames.map(\.targetAcquisitionDuration))))")
         }
         lines.append("")
-        for (mode, baseline) in [(Mode.panel, Mode.background), (.glow, .panel), (.glow, .background)] {
+        for (mode, baseline) in [
+            (Mode.panel, Mode.background), (.glow, .panel), (.glow, .background),
+            (.energy, .glow), (.rays, .glow), (.embers, .glow),
+        ] {
             lines.append("Comparative GPU statistic, p95(\(mode.rawValue)) − p95(\(baseline.rawValue)):")
             for run in Set(results.map(\.run)).sorted() {
                 let base = results.first { $0.run == run && $0.mode == baseline }?.summary.gpu

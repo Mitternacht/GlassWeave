@@ -16,7 +16,9 @@ import Testing
 /// same background plus one custom panel), and, for GW-18, that panel with
 /// a glow: rim, inner glow, a 28-point halo, and a pulse whose effect time
 /// advances with the ticks (the laboratory's `energy` preset with fixed
-/// stand-in colors). The glow mode has no laboratory benchmark counterpart.
+/// stand-in colors), and, for GW-19, that glowing panel with each animated
+/// interior (energy, rays, embers) moving with the same effect time. The
+/// glow and interior modes have no laboratory benchmark counterpart.
 ///
 /// The workload follows the laboratory's benchmark scenario (version 2): a
 /// full-screen 402 × 874 point surface at display scale 3 (1206 × 2622
@@ -97,6 +99,22 @@ struct CharacterizationTests {
                 return parameters
             }()
         )
+        /// The glowing panel with an animated interior (GW-19): the
+        /// laboratory's interior presets with fixed stand-in colors, at
+        /// speed 1 with the documented center fade.
+        static func interiorPanel(_ effect: GlassInterior.Effect) -> GlassPanel {
+            var panel = glowPanel
+            panel.parameters.interior = GlassInterior(
+                effect: effect,
+                colors: [
+                    .init(red: 0.35, green: 0.34, blue: 0.84),
+                    .init(red: 0.39, green: 0.82, blue: 1),
+                    .init(red: 1, green: 1, blue: 1),
+                ],
+                intensity: 0.85, speed: 1, seed: 7, centerFade: 1
+            )
+            return panel
+        }
         static let ticksPerSecond = 60
         static let tickInterval = Duration.nanoseconds(1_000_000_000 / Int64(ticksPerSecond))
         static let renderTargets = 3
@@ -112,12 +130,21 @@ struct CharacterizationTests {
         /// The same panel with the GW-18 glow (rim, inner glow, halo, and
         /// pulse); no laboratory benchmark mode corresponds to it.
         case glow
+        /// The glowing panel with the GW-19 energy interior.
+        case energy
+        /// The glowing panel with the GW-19 rays interior.
+        case rays
+        /// The glowing panel with the GW-19 embers interior.
+        case embers
 
         var drawnPanel: GlassPanel? {
             switch self {
             case .background: nil
             case .panel: Workload.panel
             case .glow: Workload.glowPanel
+            case .energy: Workload.interiorPanel(.energy)
+            case .rays: Workload.interiorPanel(.rays)
+            case .embers: Workload.interiorPanel(.embers)
             }
         }
     }
