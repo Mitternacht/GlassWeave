@@ -137,7 +137,7 @@ struct GlowAccessibilityTests {
     /// Renders `panel` at display scale 1 over a source whose left half is
     /// black and right half white, and returns the bytes (BGRA, rows top to
     /// bottom).
-    private func render(_ panel: GlassPanel, width: Int = 160, height: Int = 100) async throws -> [UInt8] {
+    private func render(_ panel: GlassPanel, width: Int = 160, height: Int = 100, effectTime: Double = 0) async throws -> [UInt8] {
         var bytes = [UInt8]()
         for _ in 0..<height {
             for x in 0..<width {
@@ -172,6 +172,7 @@ struct GlowAccessibilityTests {
         try renderer.setSource(lease)
         lease.retire()
         try renderer.setPanel(panel)
+        try renderer.setEffectTime(effectTime)
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target
         pass.colorAttachments[0].loadAction = .clear
@@ -268,6 +269,79 @@ struct GlowAccessibilityTests {
         #expect(rimDiffering > 200, "The rim is still drawn")
         // So the tint's legibility rule, which describes the glass without a
         // glow, still describes the interior text sits on.
+    }
+
+    // MARK: Halo and pulse (GW-18)
+
+    /// A smaller panel with room for its halo inside the 160 × 100 target.
+    private static let haloing = GlassPanel(
+        frame: CGRect(x: 30, y: 25, width: 100, height: 50),
+        parameters: GlassParameters(
+            cornerRadius: 20, bezelWidth: 14, refraction: 0.7, edgeHighlight: 0.5,
+            tint: GlassTint(red: 0.08, green: 0.09, blue: 0.12, strength: 0.45),
+            glow: GlassGlow(
+                colors: [amber, .init(red: 0.3, green: 0.5, blue: 1, angle: 180)],
+                rimWidth: 1.5, rimSoftness: 1.5, innerGlowRadius: 14, innerGlowIntensity: 0.6,
+                centerOpacity: 0.2, lightAngle: 0, directionality: 0.6,
+                haloRadius: 16, haloIntensity: 0.9, pulsePeriod: 1.6, pulseDepth: 0.6
+            )
+        )
+    )
+
+    /// Under Increase Contrast the halo and pulse stay, outside the shape;
+    /// at every instant of the pulse the interior is still exactly the glass
+    /// without a glow, so text there keeps the legibility rule.
+    @Test(arguments: [0.0, 0.4, 0.8])
+    func `Under Increase Contrast a pulsing halo leaves the interior exactly the glass without a glow`(effectTime: Double) async throws {
+        let presented = GlassAccessibilityPolicy.presentedPanel(
+            for: Self.haloing, settings: GlassAccessibilitySettings(), traits: Self.traits(.dark, .high)
+        )
+        #expect(presented.parameters.glow.hasHalo && presented.parameters.glow.isAnimated)
+        var withoutGlow = presented
+        withoutGlow.parameters.glow = .none
+        let drawn = try await render(presented, effectTime: effectTime)
+        let reference = try await render(withoutGlow, effectTime: effectTime)
+        let rimExtent = presented.parameters.glow.rimWidth + max(presented.parameters.glow.rimSoftness, 1)
+        var interior = 0, differing = 0, haloChanged = 0
+        for y in 0..<100 {
+            for x in 0..<160 {
+                let i = (y * 160 + x) * 4
+                let same = drawn[i] == reference[i] && drawn[i + 1] == reference[i + 1] && drawn[i + 2] == reference[i + 2]
+                let depth = Self.depth(presented, x: x, y: y)
+                if depth > rimExtent + 0.5 {
+                    interior += 1
+                    if !same { differing += 1 }
+                } else if depth < -1, depth > -14, !same {
+                    haloChanged += 1
+                }
+            }
+        }
+        #expect(interior > 2500)
+        #expect(differing == 0)
+        #expect(haloChanged > 1000, "The halo is drawn outside the shape")
+    }
+
+    /// Under Reduce Transparency nothing is drawn outside the shape: every
+    /// pixel beyond the outline is the background, as without a glow.
+    @Test func `Under Reduce Transparency no halo is drawn`() async throws {
+        let settings = GlassAccessibilitySettings(reduceTransparency: true)
+        let presented = GlassAccessibilityPolicy.presentedPanel(for: Self.haloing, settings: settings, traits: Self.traits(.light, .normal))
+        var withoutGlow = presented
+        withoutGlow.parameters.glow = .none
+        let drawn = try await render(presented, effectTime: 0.8)
+        let reference = try await render(withoutGlow, effectTime: 0.8)
+        var outside = 0, differing = 0
+        for y in 0..<100 {
+            for x in 0..<160 where Self.depth(presented, x: x, y: y) < -0.5 {
+                let i = (y * 160 + x) * 4
+                outside += 1
+                if drawn[i] != reference[i] || drawn[i + 1] != reference[i + 1] || drawn[i + 2] != reference[i + 2] {
+                    differing += 1
+                }
+            }
+        }
+        #expect(outside > 10_000)
+        #expect(differing == 0)
     }
 }
 #endif

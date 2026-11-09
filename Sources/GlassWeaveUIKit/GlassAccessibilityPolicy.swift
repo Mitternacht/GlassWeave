@@ -11,8 +11,9 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
     /// Reduce Transparency is on: draw an opaque, legible surface instead of
     /// see-through glass.
     public var reduceTransparency: Bool
-    /// Reduce Motion is on. GlassWeave's panel has no motion of its own; the
-    /// app owns its source's motion and should stop nonessential movement.
+    /// Reduce Motion is on. A glow's pulse stops at its mean level (see
+    /// ``GlassAccessibilityPolicy``); the app owns its source's motion and
+    /// should stop nonessential movement there.
     public var reduceMotion: Bool
 
     public init(reduceTransparency: Bool = false, reduceMotion: Bool = false) {
@@ -35,9 +36,9 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | Setting | Behavior |
 /// | --- | --- |
 /// | VoiceOver | The surface is decorative: it and its Metal view expose no accessibility elements, so VoiceOver reaches only the native content placed above it. |
-/// | Reduce Transparency | The panel keeps its frame and corner radius but becomes an opaque surface: no refraction, no edge illumination, and a tint of ``opaqueSurfaceTint(for:)`` at full strength. A glow keeps only its rim, as a crisp, evenly lit band at most ``reducedTransparencyRimWidth`` wide; its inner glow and center fill are removed, so the body is exactly the opaque surface. Native content on it keeps its behavior. |
-/// | Increase Contrast (`accessibilityContrast == .high`) | A glow keeps its rim, evenly lit (directionality 0) as a clearer boundary, and loses its inner glow and center fill, so the interior is exactly the glass without a glow and the legibility rule for its tint still holds for text. |
-/// | Reduce Motion | Nothing changes in the panel, which never moves on its own; ``GlassSurfaceView`` reports the setting so the app can stop its source's nonessential motion. |
+/// | Reduce Transparency | The panel keeps its frame and corner radius but becomes an opaque surface: no refraction, no edge illumination, and a tint of ``opaqueSurfaceTint(for:)`` at full strength. A glow keeps only its rim, as a crisp, evenly lit, steady band at most ``reducedTransparencyRimWidth`` wide, at its own intensity; its inner glow, center fill, halo, and pulse are removed, so the body is exactly the opaque surface and nothing animates. Native content on it keeps its behavior. |
+/// | Increase Contrast (`accessibilityContrast == .high`) | A glow keeps its rim, evenly lit (directionality 0) as a clearer boundary, and loses its inner glow and center fill, so the interior is exactly the glass without a glow and the legibility rule for its tint still holds for text. Its halo (outside the shape, behind no text) and pulse are kept. |
+/// | Reduce Motion | A glow's pulse stops: the rim, inner glow, and halo stay at the pulse's mean level, `1 − pulseDepth / 2` of their opacity, and nothing animates, so ``GlassSurfaceView`` runs no effect clock. ``GlassSurfaceView`` also reports the setting so the app can stop its source's nonessential motion. |
 /// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
     /// The widest rim a glow keeps under Reduce Transparency, in points.
@@ -58,13 +59,18 @@ public enum GlassAccessibilityPolicy {
         } else if traits.accessibilityContrast == .high {
             presented.parameters.glow = rimOnly(panel.parameters.glow, maximumWidth: nil)
         }
+        if settings.reduceMotion {
+            presented.parameters.glow = presented.parameters.glow.steadyAtMeanPulseLevel()
+        }
         return presented
     }
 
     /// A glow reduced to its rim, evenly lit, with no inner glow or center
-    /// fill. With `maximumWidth`, the rim's whole extent (width plus
-    /// softness) becomes a crisp band of at most that width. A glow without
-    /// colors stays ``GlassGlow/none``.
+    /// fill. With `maximumWidth` (Reduce Transparency), the rim's whole
+    /// extent (width plus softness) becomes a crisp band of at most that
+    /// width, and the halo and pulse are removed; without it (Increase
+    /// Contrast), they are kept. A glow without colors stays
+    /// ``GlassGlow/none``.
     private static func rimOnly(_ glow: GlassGlow, maximumWidth: Double?) -> GlassGlow {
         guard !glow.colors.isEmpty else { return glow }
         var reduced = glow
@@ -74,6 +80,8 @@ public enum GlassAccessibilityPolicy {
         if let maximumWidth {
             reduced.rimWidth = min(glow.rimWidth + glow.rimSoftness, maximumWidth)
             reduced.rimSoftness = 0
+            reduced.haloRadius = 0
+            reduced.pulseDepth = 0
         }
         return reduced
     }

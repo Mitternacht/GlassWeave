@@ -7,13 +7,26 @@ import UIKit
 /// panel over it, through an `MTKView`, on demand.
 ///
 /// The view draws only when something changes: a new source, a new panel, a
-/// new pixel size, a display-scale change, or an app request through
-/// ``requestFrame()``. No display loop runs in between; an app animating its
-/// source drives redraws from its own clock and can produce each frame
-/// inside the draw with ``setFrameProducer(_:)``. The panel is given in this
-/// view's points and converted with the same display scale as the drawable.
-/// The view sizes its drawable from its own bounds and
-/// `traitCollection.displayScale`, never from a screen or a global scene.
+/// new pixel size, a display-scale change, an app request through
+/// ``requestFrame()``, or a tick of the view's effect clock while its glow
+/// animates. No other display loop runs; an app animating its source drives
+/// redraws from its own clock and can produce each frame inside the draw
+/// with ``setFrameProducer(_:)``. The panel is given in this view's points
+/// and converted with the same display scale as the drawable. The view sizes
+/// its drawable from its own bounds and `traitCollection.displayScale`,
+/// never from a screen or a global scene.
+///
+/// Effect clock (``isAnimating``): while the presented panel's glow animates
+/// (`GlassGlow.isAnimated`, a pulse) and the view is visible, the view runs
+/// one `UIUpdateLink` created for itself, so it follows its own window's
+/// display. Each update advances the effect time by the update's model time
+/// and calls ``requestFrame()``, so ticks go through the same scheduler as
+/// every other request: they coalesce, wait while hidden, and never exceed
+/// the in-flight bound. Each draw evaluates the glow at the effect time
+/// (`GlassRenderer.effectTime`). The link is removed as soon as the glow no
+/// longer animates (no pulse, or Reduce Motion, which steadies it), the view
+/// stops being visible, or it leaves its window; the effect time then
+/// stays where it was and continues from there when the clock runs again.
 ///
 /// Scheduling (``frameStatistics`` reports each step):
 /// - Requests made before the next display pass merge into one draw.
@@ -47,7 +60,9 @@ import UIKit
 ///   free or the layer's one-second timeout passes. With at most
 ///   ``maximumFramesInFlight`` frames in flight the wait is normally at most
 ///   about one display refresh; when no drawable is free it can last up to
-///   one second.
+///   one second. A running effect clock draws more often but within the
+///   same bound, so it does not lengthen that wait; it does not remove it
+///   either.
 ///
 /// The surface is decorative: neither it nor its Metal view is an
 /// accessibility element (its accessibility elements are hidden), and it
@@ -56,8 +71,10 @@ import UIKit
 ///
 /// Accessibility settings (``accessibilitySettings``) change what is drawn
 /// as ``GlassAccessibilityPolicy`` documents: under Reduce Transparency the
-/// panel becomes an opaque surface (``presentedPanel``). By default the
-/// view follows the system settings and their change notifications.
+/// panel becomes an opaque surface (``presentedPanel``), and under Reduce
+/// Motion a pulsing glow is drawn steady at its mean level, so the effect
+/// clock stops. By default the view follows the system settings and their
+/// change notifications.
 @MainActor
 public final class GlassSurfaceView: UIView {
     public let renderer: GlassRenderer
@@ -124,6 +141,22 @@ public final class GlassSurfaceView: UIView {
     /// Called when ``accessibilitySettings`` change, for example so the app
     /// can stop its source's nonessential motion under Reduce Motion.
     public var accessibilitySettingsHandler: ((GlassAccessibilitySettings) -> Void)?
+
+    /// Whether the effect clock runs: the presented panel's glow animates
+    /// (a pulse that Reduce Motion has not steadied) and the view is
+    /// visible. While it runs, the view requests a frame on every display
+    /// update of its window; otherwise the glow is drawn only when something
+    /// else requests a frame.
+    public var isAnimating: Bool {
+        effectLink != nil
+    }
+
+    /// The effect clock's time, in seconds, given to the renderer at each
+    /// draw. It advances only while ``isAnimating``.
+    private(set) var effectClock = EffectClock()
+    /// The update link that ticks the effect clock; present only while it
+    /// runs.
+    private var effectLink: UIUpdateLink?
 
     /// The panel as the app set it, after the normalization rule.
     private var requestedPanel: GlassPanel?
@@ -242,16 +275,82 @@ public final class GlassSurfaceView: UIView {
     }
 
     /// Draws ``panel`` as the accessibility policy says, redrawing if that
-    /// changes what is drawn.
+    /// changes what is drawn, and starts or stops the effect clock.
     private func presentPanel() {
         let presented = requestedPanel.map {
             GlassAccessibilityPolicy.presentedPanel(for: $0, settings: accessibilitySettings, traits: traitCollection)
         }
-        guard presented != renderer.panel else { return }
-        // A presented panel derives from a normalized one and keeps every
-        // value in range, so the renderer never rejects it.
-        try? renderer.setPanel(presented)
-        scheduleFrame()
+        if presented != renderer.panel {
+            // A presented panel derives from a normalized one and keeps every
+            // value in range, so the renderer never rejects it.
+            try? renderer.setPanel(presented)
+            scheduleFrame()
+        }
+        updateEffectClock()
+    }
+
+    // MARK: Effect clock
+
+    /// Effect time in seconds, advanced by the model time between display
+    /// updates while the clock runs. Restarting continues from the time
+    /// reached, so a pulse resumes where it stopped instead of jumping.
+    struct EffectClock: Equatable {
+        private(set) var time: Double = 0
+        /// The model time of the last update since the clock started, or
+        /// `nil` before the first one.
+        private var lastModelTime: Double?
+
+        /// Starts a new running period: its first update only sets the base.
+        mutating func start() {
+            lastModelTime = nil
+        }
+
+        /// Advances by the model time since the previous update (never
+        /// backward).
+        mutating func advance(toModelTime modelTime: Double) {
+            guard modelTime.isFinite else { return }
+            if let lastModelTime {
+                time += max(modelTime - lastModelTime, 0)
+            }
+            lastModelTime = modelTime
+        }
+    }
+
+    /// Whether the effect clock should run now.
+    private var wantsEffectClock: Bool {
+        isVisible && renderer.panel?.parameters.glow.isAnimated == true
+    }
+
+    /// Starts or stops the effect clock to match ``wantsEffectClock``.
+    private func updateEffectClock() {
+        if wantsEffectClock {
+            guard effectLink == nil else { return }
+            // The link belongs to this view, so it follows this view's own
+            // window and display (never a global display link), and its
+            // handler holds the view weakly.
+            let link = UIUpdateLink(view: self) { [weak self] _, info in
+                self?.effectTick(modelTime: info.modelTime)
+            }
+            // Without continuous updates the link only observes updates
+            // something else causes; the pulse needs every one.
+            link.requiresContinuousUpdates = true
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+            link.isEnabled = true
+            effectClock.start()
+            effectLink = link
+        } else if let effectLink {
+            effectLink.isEnabled = false
+            self.effectLink = nil
+        }
+    }
+
+    /// One display update of the effect clock: advance the effect time and
+    /// request a frame through the scheduler. Ignored when the clock is not
+    /// running.
+    func effectTick(modelTime: Double) {
+        guard effectLink != nil else { return }
+        effectClock.advance(toModelTime: modelTime)
+        requestFrame()
     }
 
     /// Makes every draw produce its own frame first.
@@ -367,6 +466,7 @@ public final class GlassSurfaceView: UIView {
         if scheduler.setVisible(visible) {
             requestDisplayPass()
         }
+        updateEffectClock()
         // Hiding frees nothing here: `MTKView.releaseDrawables()` releases
         // only depth/stencil and multisample textures, which this view does
         // not create, and the layer keeps its drawable pool. Memory a hidden
@@ -449,6 +549,8 @@ public final class GlassSurfaceView: UIView {
             }
         }
         let scale = traitCollection.displayScale
+        // The effect clock's time is always finite.
+        try? renderer.setEffectTime(effectClock.time)
         let outcome: BackgroundRenderOutcome?
         if let frameProducer {
             do {
