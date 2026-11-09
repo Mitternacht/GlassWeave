@@ -118,7 +118,10 @@ struct GlassFillModel: Equatable {
         let absorb = (SIMD3<Double>(repeating: 1) - mid) * (3 * fill.absorption / shellDome)
         record.absorption = SIMD4<Float>(SIMD3<Float>(absorb), Float(fill.emission))
         record.line = SIMD4<Float>(SIMD3<Float>(pale), Float(fill.sheets.edge))
-        record.region = SIMD4<Float>(Float(mode), Float(wall), Float(shellDome), 1)
+        // The body's slow flow: two turns per loop, so it repeats exactly.
+        let flow = 2 * 2 * Double.pi * time / loop
+        record.region = SIMD4<Float>(Float(mode), Float(wall), Float(shellDome), Float(flow))
+        record.padding0 = Float(fill.opaque ? 0 : fill.gloss)
         record.surface = SIMD4<Float>(Float(surfaceY), Float(slope), Float(meniscusHeight), Float(meniscusReach))
         record.waves = SIMD4<Float>(Float(waveAmplitude), Float(wavelength), Float(wavePhases.x), Float(wavePhases.y))
         let sheetCount = fill.opaque ? 0 : fill.sheets.count

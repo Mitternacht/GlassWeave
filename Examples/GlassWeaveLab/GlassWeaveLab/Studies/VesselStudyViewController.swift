@@ -5,17 +5,18 @@ import UIKit
 /// The vessel study (GW-29): thick, smoky glass holding a calm luminous
 /// liquid, on a dark stage.
 ///
-/// - **The glass.** Two vessels, each one panel: a large rounded vessel holding
-///   a **gel** (a calm luminous body with a rounded top) and a small tall
-///   vessel with a **level** liquid (a surface with a meniscus at the wall).
-///   The shells are the refined thick lens
-///   (a squircle bevel that magnifies the stage's edge, controlled dispersion,
-///   the thin lit-side rim) with a smoky tint, so the glass itself is nearly
-///   clear and the liquid is the only bright thing.
-/// - **The liquid.** One warm ramp (deep amber, orange, pale gold), one inner
-///   contour sheet, a thin line in the glass wall and a few tiny bubbles. The
-///   restraint is the point: the picture should read as a premium material,
-///   not as a gel toy.
+/// - **The glass.** Two vessels, each one panel: a large organic vessel (a GW-26
+///   blob shell) holding a **gel** that wets its lower and right walls, and a
+///   small tall vessel with a **level** liquid (a glossy surface with a meniscus
+///   at the wall). The shells are the refined thick lens (a squircle bevel that
+///   magnifies the stage's edge, controlled dispersion, the thin lit-side rim)
+///   with a smoky tint, so the glass itself is nearly clear and the liquid is the
+///   only bright thing.
+/// - **The liquid.** One warm ramp (deep amber, orange, pale gold) on a curved
+///   body (dark amber toward the walls, a lit side, a soft specular streak),
+///   two or three layered sheets with thin caustic edges, a few tiny bubbles and
+///   a warm glow on the wall. The restraint is the point: the picture should
+///   read as a premium material, not as a gel toy.
 /// - **Native controls.** A title, a "Liquid level" slider and a "Nudge"
 ///   button for the small vessel. The level moves its surface and, a little,
 ///   the light it throws on the table; Nudge starts a damped slosh (``GlassFillSlosh``) that
@@ -180,22 +181,34 @@ final class VesselStudyViewController: StudyViewController {
     override func panels(at time: Double) -> [GlassPanel] {
         guard heroAnchor.bounds.width > 0 else { return [] }
 
-        // The large vessel: a gel, a calm luminous body that sits low in the
-        // glass with a rounded top, clipped to the inset shell.
-        var hero = Self.shell(corner: 70, bezel: 30, thickness: 28)
+        // The large vessel: an organic shell, a smooth union of two round
+        // masses and a soft box (a GW-26 blob), holding a gel that sits low in
+        // it and wets the lower and right walls, so the thick glass bends its
+        // edge there. Frame units: 1 is half the frame's shorter side.
+        var hero = Self.shell(corner: 999, bezel: 34, thickness: 30)
+        hero.shape = .blob(GlassBlob(
+            primitives: [
+                .circle(center: CGPoint(x: -0.16, y: -0.14), radius: 0.80),
+                .circle(center: CGPoint(x: 0.20, y: 0.20), radius: 0.76),
+                .box(center: CGPoint(x: 0.0, y: 0.34), halfSize: CGSize(width: 0.80, height: 0.66), cornerRadius: 0.55, rotation: -3),
+            ],
+            smoothness: 0.55
+        ))
         hero.fill = GlassFill(
             region: .gel(.blob(GlassBlob(
                 primitives: [
-                    .box(center: CGPoint(x: 0.03, y: 0.34), halfSize: CGSize(width: 0.88, height: 0.74), cornerRadius: 0.62, rotation: 0)
+                    .box(center: CGPoint(x: 0.12, y: 0.46), halfSize: CGSize(width: 0.92, height: 0.58), cornerRadius: 0.50, rotation: -4),
+                    .circle(center: CGPoint(x: 0.34, y: 0.02), radius: 0.56),
                 ],
-                smoothness: 0.5, wobble: GlassBlob.Wobble(amplitude: 0.008, speed: 0.5)
+                smoothness: 0.62, wobble: GlassBlob.Wobble(amplitude: 0.008, speed: 0.5)
             ))),
-            wallThickness: 6,
-            colors: [Self.color(0.34, 0.06, 0.01), Self.color(1.00, 0.40, 0.05), Self.color(1.00, 0.70, 0.30)],
+            wallThickness: 8,
+            colors: [Self.color(0.30, 0.05, 0.01), Self.color(1.00, 0.40, 0.05), Self.color(1.00, 0.72, 0.32)],
             emission: 0.85, absorption: 0.7,
-            sheets: GlassFill.Sheets(count: 1, spacing: 20, edge: 0.35, wobble: 0.2),
-            wallLine: 0.4,
-            bubbles: GlassFill.Bubbles(count: 5, size: 2.2, speed: 0.6, seed: 7)
+            sheets: GlassFill.Sheets(count: 3, spacing: 16, edge: 0.45, wobble: 0.6),
+            wallLine: 0.45,
+            bubbles: GlassFill.Bubbles(count: 6, size: 2.6, speed: 0.6, seed: 7),
+            gloss: 0.7
         )
 
         // The small vessel: a level liquid that the slider fills and Nudge
