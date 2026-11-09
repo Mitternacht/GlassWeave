@@ -16,7 +16,7 @@ import UIKit
 /// | ``GlassGlow`` field | In native mode |
 /// | --- | --- |
 /// | `colors`, `lightAngle`, `directionality` | As in custom mode: the gradient around the center (the shape scaled to a square, 0° at the top, clockwise), interpolated in linear light, and the light of the outline point on each ray from the center. Sampled every 2° into conic gradients. |
-/// | `rimWidth`, `rimSoftness`, `rimIntensity` | A band `rimWidth` deep just inside the outline, over the glass's edge. With a softness `s` its inner edge fades over about `s` (half intensity at `rimWidth + s/2`, a Core Animation shadow of `s/4`); with `s = 0` it is crisp. Both lengths are limited to half the shorter side of the bounds. |
+/// | `rimWidth`, `rimSoftness`, `rimIntensity` | A band `rimWidth` deep just inside the outline, over the glass's edge, fully opaque (times `rimIntensity` and the light). With a softness `s` its inner edge then fades over about `s` (half intensity at `rimWidth + s/2`, from a Core Animation shadow of `s/4`); with `s = 0` it is crisp. Both lengths are limited to half the shorter side of the bounds. |
 /// | `haloRadius`, `haloIntensity` | A halo outside the outline only: a Core Animation shadow (Gaussian) of the outline, about 95 % of `haloIntensity` at a straight edge, 25 % at half the radius, and below 0.2 % at the radius. |
 /// | `pulsePeriod`, `pulseDepth` | A Core Animation opacity animation of the rim and halo with custom mode's level, `1 − pulseDepth × (1 − cos 2πt/period) / 2`, while the view is visible. |
 /// | `innerGlowRadius`, `innerGlowIntensity`, `centerOpacity` | Not drawn: the inside is Apple's material. ``presentedGlow`` reports them as 0. |
@@ -44,9 +44,13 @@ import UIKit
 /// device, command queue, `MTKView`, display link, or update link. A settled
 /// glow (no pulse, or Reduce Motion) runs no animation; a pulse is one
 /// Core Animation animation per layer, attached only while the view is in a
-/// window, neither it nor an ancestor is hidden or transparent at the last
-/// check (a window, visibility, layout, or scene change), and its own window
-/// scene is in the foreground. It resumes where it stopped.
+/// window, neither it nor an ancestor is hidden or transparent, and its own
+/// window scene is in the foreground. The view looks again when it moves to
+/// a window, its own `isHidden` or `alpha` changes, its scene changes state,
+/// and at every layout pass; UIKit reports no change to an ancestor's
+/// `isHidden` or `alpha`, so after hiding an ancestor call `setNeedsLayout()`
+/// and `layoutIfNeeded()` on this view to remove the pulse at once. The pulse
+/// resumes where it stopped.
 ///
 /// **Accessibility** follows ``GlassAccessibilityPolicy`` (the glow rows):
 /// Reduce Transparency keeps only a crisp, evenly lit rim at most
@@ -164,6 +168,7 @@ public final class EnhancedNativeGlassView: UIView {
         haloLayer.mask = haloHoleMask
 
         rimBandMask.fillRule = .nonZero
+        rimBandMask.fillColor = UIColor.black.cgColor
         rimBandMask.shadowColor = UIColor.black.cgColor
         rimBandMask.shadowOffset = .zero
         rimGradient.mask = rimBandMask
@@ -277,13 +282,11 @@ public final class EnhancedNativeGlassView: UIView {
             rimGradient.colors = rim.gradient.cgColors
             rimGradient.locations = rim.gradient.locations.map { NSNumber(value: $0) }
             if rim.softnessRadius > 0 {
-                // Only the band's shadow shows: a soft band.
-                rimBandMask.fillColor = nil
-                animator.set(rimBandMask, shadowPath: rim.bandPath)
+                // The crisp band over the shadow of the extended band.
+                animator.set(rimBandMask, shadowPath: rim.softBandPath)
                 rimBandMask.shadowRadius = rim.softnessRadius
                 rimBandMask.shadowOpacity = 1
             } else {
-                rimBandMask.fillColor = UIColor.black.cgColor
                 rimBandMask.shadowOpacity = 0
                 rimBandMask.shadowPath = nil
             }

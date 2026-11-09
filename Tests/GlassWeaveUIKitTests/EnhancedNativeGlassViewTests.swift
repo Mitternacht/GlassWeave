@@ -247,6 +247,40 @@ struct EnhancedNativeGlassViewTests {
         #expect(pixels.rgba(atPoint: CGPoint(x: 1, y: 1)).alpha == 0)
     }
 
+    @Test func `A soft rim is opaque to its width, and a shadow softens its edges`() throws {
+        let fixture = Fixture(size: CGSize(width: 160, height: 100), scale: 2)
+        let view = fixture.view
+        view.glass.cornerConfiguration = .corners(radius: .fixed(20))
+        var glow = Self.aurora
+        glow.rimWidth = 3
+        glow.rimSoftness = 4
+        try view.setGlow(glow)
+        view.layoutIfNeeded()
+        let rim = try #require(view.layout.rim)
+        let bounds = CGRect(x: 0, y: 0, width: 160, height: 100)
+        let radii = view.layout.radii
+        #expect(rim.bandPath == NativeGlowLayout.band(in: bounds, radii: radii, from: 0, to: 3))
+        #expect(rim.softBandPath == NativeGlowLayout.band(in: bounds, radii: radii, from: -2, to: 5))
+        #expect(rim.softnessRadius == 1)
+        #expect(view.rimBandMask.path == rim.bandPath)
+        #expect(view.rimBandMask.shadowPath == rim.softBandPath)
+        #expect(view.rimBandMask.shadowOpacity == 1 && view.rimBandMask.shadowRadius == 1)
+        #expect(view.rimBandMask.fillColor != nil)
+        // The CPU renderer draws the crisp band (not the shadow): opaque to
+        // the rim width, nothing beyond it; the compositor adds the soft
+        // edge (checked in the laboratory's UI tests).
+        let pixels = render(view.rimLayer, size: bounds.size, scale: 2)
+        #expect(pixels.rgba(atPoint: CGPoint(x: 80, y: 0.5)).alpha >= 251)
+        #expect(pixels.rgba(atPoint: CGPoint(x: 80, y: 2.5)).alpha >= 251)
+        // 1.5 points past the band (the CPU renderer's masks bleed about a
+        // pixel; the shadow, were it drawn, would be about 69 % here).
+        #expect(pixels.rgba(atPoint: CGPoint(x: 80, y: 4.5)).alpha == 0)
+        // The band paths contain what they should.
+        #expect(rim.softBandPath.contains(CGPoint(x: 80, y: 4.5), using: .winding))
+        #expect(!rim.softBandPath.contains(CGPoint(x: 80, y: 5.5), using: .winding))
+        #expect(!rim.bandPath.contains(CGPoint(x: 80, y: 50), using: .winding))
+    }
+
     @Test func `The light uses the outline's own normal, as in custom mode`() throws {
         let fixture = Fixture(size: CGSize(width: 300, height: 60))
         let view = fixture.view

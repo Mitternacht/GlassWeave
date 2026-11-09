@@ -12,11 +12,13 @@ import UIKit
 /// Native mode draws two parts of a ``GlassGlow`` around Apple's glass,
 /// never inside its material:
 ///
-/// - **Rim:** a band just inside the outline, `rimWidth` deep. With
-///   `rimSoftness` `s > 0` the band is extended by `s / 2` on both sides and
-///   blurred by a shadow of `s / 4`, then clipped at the outline, so its
-///   inner edge fades over about `s` (half intensity at depth
-///   `rimWidth + s / 2`, as in custom mode). With `s = 0` it is a crisp band.
+/// - **Rim:** a band just inside the outline, `rimWidth` deep, filled
+///   crisply. With `rimSoftness` `s > 0` a shadow of `s / 4` of the band
+///   extended by `s / 2` on both sides is added under it, and both are
+///   clipped at the outline, so the rim is fully opaque to `rimWidth` and
+///   its inner edge then fades over about `s` (half intensity at depth
+///   `rimWidth + s / 2`, as in custom mode). With `s = 0` it is the crisp
+///   band alone.
 /// - **Halo:** outside the outline only (a mask removes it everywhere inside
 ///   the outline but its outermost pixel, so the glass never samples it
 ///   under its middle). It is a Core Animation shadow of the outline grown
@@ -79,10 +81,13 @@ struct NativeGlowLayout {
     struct Rim {
         /// The outline of the glass: the rim is clipped to it.
         var clipPath: CGPath
-        /// The band, filled with the non-zero rule.
+        /// The band from the outline to `rimWidth`, filled crisply with the
+        /// non-zero rule (empty for a rim of softness only).
         var bandPath: CGPath
-        /// The blur of the band's edges (a shadow radius), 0 for a crisp
-        /// band.
+        /// The band extended by half the softness on both sides, whose
+        /// shadow softens the rim; the same as ``bandPath`` without softness.
+        var softBandPath: CGPath
+        /// The blur of the soft band (a shadow radius), 0 for a crisp band.
         var softnessRadius: CGFloat
         var gradient: Gradient
     }
@@ -154,17 +159,11 @@ struct NativeGlowLayout {
         let hasRim = glow.rimIntensity > 0 && (glow.rimWidth > 0 || glow.rimSoftness > 0)
         if hasRim {
             let width = CGFloat(glow.rimWidth), softness = CGFloat(glow.rimSoftness)
-            let outer = softness > 0 ? Self.roundedRect(bounds.insetBy(dx: -softness / 2, dy: -softness / 2), radii: radii.offset(by: softness / 2)) : outline
-            let innerDepth = width + softness / 2
-            let innerRect = bounds.insetBy(dx: innerDepth, dy: innerDepth)
-            let band = CGMutablePath()
-            band.addPath(outer)
-            if innerRect.width > 0, innerRect.height > 0 {
-                band.addPath(Self.roundedRect(innerRect, radii: radii.offset(by: -innerDepth), clockwise: false))
-            }
+            let band = Self.band(in: bounds, radii: radii, from: 0, to: width)
             rim = Rim(
                 clipPath: outline,
                 bandPath: band,
+                softBandPath: softness > 0 ? Self.band(in: bounds, radii: radii, from: -softness / 2, to: width + softness / 2) : band,
                 softnessRadius: softness / 4,
                 gradient: Self.gradient(stops: stops, intensity: glow.rimIntensity, light: light) { $0 }
             )
@@ -327,6 +326,20 @@ struct NativeGlowLayout {
     }
 
     // MARK: Paths
+
+    /// The region between the depths `outer` and `inner` (points inside the
+    /// outline; negative is outside), for the non-zero rule. Empty when the
+    /// band has no width.
+    static func band(in bounds: CGRect, radii: CornerRadii, from outer: CGFloat, to inner: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        guard inner > outer else { return path }
+        path.addPath(roundedRect(bounds.insetBy(dx: outer, dy: outer), radii: radii.offset(by: -outer)))
+        let innerRect = bounds.insetBy(dx: inner, dy: inner)
+        if innerRect.width > 0, innerRect.height > 0 {
+            path.addPath(roundedRect(innerRect, radii: radii.offset(by: -inner), clockwise: false))
+        }
+        return path
+    }
 
     /// A rounded rectangle with per-corner circular corners, starting at the
     /// top edge, clockwise on screen (or counterclockwise, for a hole under
