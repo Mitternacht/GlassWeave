@@ -57,9 +57,11 @@ final class OffscreenStage {
 
     // MARK: Ticks
 
-    /// One display-link tick.
+    /// One display-link tick: content time and the renderer's effect time
+    /// (which a glow's pulse follows) both advance by one tick.
     func tick() {
         ticks += 1
+        try? renderer.setEffectTime(Double(ticks) / Double(Workload.ticksPerSecond))
         requestFrame()
     }
 

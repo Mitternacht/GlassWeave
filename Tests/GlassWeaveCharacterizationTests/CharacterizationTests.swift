@@ -12,8 +12,11 @@ import Testing
 /// clocks, memory, thermals, display, and compositor all differ, and the
 /// native reference glass (composited by the system) is not part of an
 /// offscreen render. The modes compared are the laboratory's mode 1 (the
-/// owned moving background alone) and the GlassWeave share of mode 3 (the
-/// same background plus one custom panel).
+/// owned moving background alone), the GlassWeave share of mode 3 (the
+/// same background plus one custom panel), and, for GW-18, that panel with
+/// a glow: rim, inner glow, a 28-point halo, and a pulse whose effect time
+/// advances with the ticks (the laboratory's `energy` preset with fixed
+/// stand-in colors). The glow mode has no laboratory benchmark counterpart.
 ///
 /// The workload follows the laboratory's benchmark scenario (version 2): a
 /// full-screen 402 × 874 point surface at display scale 3 (1206 × 2622
@@ -72,6 +75,28 @@ struct CharacterizationTests {
                 tint: GlassTint(red: 0.97, green: 0.98, blue: 1.0, strength: 0.45)
             )
         )
+        /// The same panel with the GW-18 glow: the laboratory's `energy`
+        /// preset's lengths, intensities, 28-point halo, and 1.8 s pulse,
+        /// with a fixed cyan and purple standing in for its system colors
+        /// (the colors do not change the work done).
+        static let glowPanel = GlassPanel(
+            frame: panel.frame,
+            parameters: {
+                var parameters = panel.parameters
+                parameters.glow = GlassGlow(
+                    colors: [
+                        .init(red: 0.39, green: 0.82, blue: 1, angle: 0),
+                        .init(red: 0.86, green: 0.34, blue: 0.98, angle: 180),
+                    ],
+                    rimWidth: 2, rimSoftness: 2.5, rimIntensity: 1,
+                    innerGlowRadius: 22, innerGlowIntensity: 0.75,
+                    centerOpacity: 0, lightAngle: 0, directionality: 0.2,
+                    haloRadius: 28, haloIntensity: 0.9,
+                    pulsePeriod: 1.8, pulseDepth: 0.55
+                )
+                return parameters
+            }()
+        )
         static let ticksPerSecond = 60
         static let tickInterval = Duration.nanoseconds(1_000_000_000 / Int64(ticksPerSecond))
         static let renderTargets = 3
@@ -84,6 +109,17 @@ struct CharacterizationTests {
         /// The GlassWeave share of laboratory mode 3: the same background
         /// and one custom panel.
         case panel
+        /// The same panel with the GW-18 glow (rim, inner glow, halo, and
+        /// pulse); no laboratory benchmark mode corresponds to it.
+        case glow
+
+        var drawnPanel: GlassPanel? {
+            switch self {
+            case .background: nil
+            case .panel: Workload.panel
+            case .glow: Workload.glowPanel
+            }
+        }
     }
 
     /// One measured run of one mode.
@@ -106,12 +142,13 @@ struct CharacterizationTests {
         let stage = try OffscreenStage()
         var results: [RunResult] = []
 
-        // Interleave the modes and alternate which goes first, so neither
-        // always runs warmer or later.
+        // Interleave the modes and rotate which goes first, so none always
+        // runs warmer or later.
         for run in 1...settings.runs {
-            let order: [Mode] = run.isMultiple(of: 2) ? [.panel, .background] : [.background, .panel]
+            let modes = Mode.allCases
+            let order = (0..<modes.count).map { modes[($0 + run - 1) % modes.count] }
             for mode in order {
-                try stage.renderer.setPanel(mode == .panel ? Workload.panel : nil)
+                try stage.renderer.setPanel(mode.drawnPanel)
                 try await stage.tick(for: .seconds(settings.warmUpSeconds))
                 await stage.awaitIdle()
                 let metrics = RenderMetrics()

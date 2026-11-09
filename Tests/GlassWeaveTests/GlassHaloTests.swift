@@ -449,6 +449,51 @@ struct GlassHaloRenderTests {
         #expect(changedBeyond == 0)
     }
 
+    /// The same with a scaled, cropped presentation (aspect fill of a
+    /// larger source), where the panel pass resamples the background with
+    /// the background pass's mapping: from the halo's radius on, the panel
+    /// pass writes the background pass's bytes.
+    @Test func `Pixels beyond the halo keep the background pass's bytes in a scaled presentation`() async throws {
+        let gpu = try GPUContext()
+        let source = Fixture.coordinateGradient(width: 256, height: 200)
+        let target = (width: 231, height: 197)
+        let glow = GlassGlow(
+            colors: [.init(red: 1, green: 0.5, blue: 0.1, angle: 0), .init(red: 0.3, green: 0.4, blue: 1, angle: 180)],
+            rimWidth: 2, rimSoftness: 2, innerGlowRadius: 18, innerGlowIntensity: 0.6,
+            lightAngle: 300, directionality: 0.5, haloRadius: 30, haloIntensity: 1
+        )
+        let panel = GlassPanel(frame: CGRect(x: 30.5, y: 22.25, width: 75, height: 60), parameters: GlassParameters(
+            cornerRadius: 18, bezelWidth: 12, refraction: 0.8, edgeHighlight: 0.5, glow: glow
+        ))
+        func draw(_ panel: GlassPanel?) async throws -> RenderedImage {
+            let renderer = try GlassRenderer(commandQueue: gpu.queue)
+            try renderer.setSource(gpu.makeLease(bgra: source.bgra, width: source.width, height: source.height))
+            try renderer.setPanel(panel)
+            let drawTarget = try gpu.makeTarget(width: target.width, height: target.height)
+            #expect(renderer.draw(targetPixelSize: target, displayScale: 1.5) { drawTarget } == .submitted(frameID: 1))
+            return try await gpu.readBack(try #require(drawTarget.renderPassDescriptor.colorAttachments[0].texture))
+        }
+        let image = try await draw(panel)
+        let backgroundOnly = try await draw(nil)
+        let g = try geometry(panel, scale: 1.5)
+        var beyond = 0, changedBeyond = 0, haloChanged = 0
+        for y in 0..<target.height {
+            for x in 0..<target.width {
+                let distance = g.signedDistance(at: SIMD2(Double(x) + 0.5, Double(y) + 0.5))
+                let same = image.channels(x: x, y: y) == backgroundOnly.channels(x: x, y: y)
+                if distance >= 45 {
+                    beyond += 1
+                    if !same { changedBeyond += 1 }
+                } else if distance > 1, distance < 30, !same {
+                    haloChanged += 1
+                }
+            }
+        }
+        #expect(beyond > 12_000)
+        #expect(changedBeyond == 0)
+        #expect(haloChanged > 5_000)
+    }
+
     // MARK: Blending
 
     /// The halo adds light: over a dark background no channel of any pixel

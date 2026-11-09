@@ -125,10 +125,11 @@ static float3 gw_glow_color(float turn, constant GWGlassUniforms &uniforms) {
 static float4 gw_glow_shade(float2 q, constant GWGlassUniforms &uniforms) {
     // The angle around the center with the panel scaled to a square. The
     // precise atan2: on the axis through the center `-p.y` is a signed
-    // zero, which the fast-math atan2 puts in the wrong half-plane.
+    // zero, which the fast-math atan2 puts in the wrong half-plane. One
+    // color needs no angle.
     const float2 p = q / uniforms.panelHalfSize;
     float turn = 0.0;
-    if (p.x != 0.0 || p.y != 0.0) {
+    if (uniforms.glowStopCount > 1u && (p.x != 0.0 || p.y != 0.0)) {
         turn = precise::atan2(p.x, -p.y) * (0.5 / M_PI_F);
         turn = turn - floor(turn);
     }
@@ -193,9 +194,18 @@ static float4 gw_glow(float2 q, float depth, constant GWGlassUniforms &uniforms)
 /// * light` at distance `s` outside the outline (zero from the radius on).
 /// A halo therefore never darkens any channel of the background and never
 /// exceeds 1; over black it is exactly `L`. The antialiased outline mixes
-/// that with the glass, so rim and halo meet without a gap. A pixel entirely
-/// outside the outline with no halo to draw is discarded and keeps the
-/// background pass's bytes. Halo pixels are dithered like the glow.
+/// that with the glass, so rim and halo meet without a gap. The halo is
+/// exactly zero from its radius on: such pixels skip it and write the
+/// background sample, like the one-pixel ring around a panel without a
+/// halo. Nothing is discarded, so the GPU's hidden-surface removal still
+/// skips the background fragments the panel's opaque quad covers. Halo
+/// pixels are dithered like the glow.
+///
+/// The glow's color and light (an angle by `precise::atan2`) are evaluated
+/// only where the glow layer can be non-zero: inside the outline, within
+/// the rim's and inner glow's reach or wherever a center fill is set;
+/// outside it, within the halo radius. Elsewhere the layer is exactly
+/// transparent, so skipping it changes no byte.
 fragment float4 gw_glass_fragment(
     GWGlassVertexOut in [[stage_in]],
     constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]],
@@ -210,18 +220,15 @@ fragment float4 gw_glass_fragment(
     // The halo, for the part of the pixel outside the outline.
     float haloAlpha = 0.0;
     float3 outside = background;
-    if (uniforms.glowHaloRadius > 0.0 && coverage < 1.0) {
+    if (uniforms.glowHaloRadius > 0.0 && coverage < 1.0 && distance < uniforms.glowHaloRadius) {
         const float4 shade = gw_glow_shade(q, uniforms);
         const float t = saturate(max(distance, 0.0) / uniforms.glowHaloRadius);
         haloAlpha = uniforms.glowHaloIntensity * (1.0 - t) * (1.0 - t) * shade.w;
         outside = background + shade.xyz * haloAlpha * (1.0 - background);
     }
     if (coverage <= 0.0) {
-        if (uniforms.glowHaloRadius <= 0.0) {
-            return float4(gw_glass_encode_srgb(background), 1.0);
-        }
         if (haloAlpha <= 0.0) {
-            discard_fragment();
+            return float4(gw_glass_encode_srgb(background), 1.0);
         }
         const uint2 cell = uint2(pixel) & 3u;
         const float3 encoded = saturate(gw_glass_encode_srgb(outside) + ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0);
@@ -240,7 +247,13 @@ fragment float4 gw_glass_fragment(
     glass = glass + (1.0 - glass) * highlight;
 
     float glowAlpha = 0.0;
-    if (uniforms.glowStopCount > 0u) {
+    // Beyond the rim band and the inner glow's radius, with no center fill,
+    // the glow layer's opacity is exactly zero. The 0.01 px margin keeps
+    // pixels where approximate division might leave a residue in the
+    // computed path, so the result is the same as always evaluating it.
+    const float rimReach = uniforms.glowRimIntensity > 0.0 ? uniforms.glowRimWidth + uniforms.glowRimFeather : 0.0;
+    const float glowReach = max(rimReach, uniforms.glowInnerRadius) + 0.01;
+    if (uniforms.glowStopCount > 0u && (uniforms.glowCenterOpacity > 0.0 || depth < glowReach)) {
         const float4 glow = gw_glow(q, depth, uniforms);
         glowAlpha = glow.w;
         glass = mix(glass, glow.xyz, glowAlpha);

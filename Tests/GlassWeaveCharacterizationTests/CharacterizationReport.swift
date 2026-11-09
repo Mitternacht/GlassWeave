@@ -46,6 +46,8 @@ struct Report {
         lines.append("Conditions: thermal state \(Self.describe(thermalStates.start)) at start, \(Self.describe(thermalStates.end)) at end; Low Power Mode \(ProcessInfo.processInfo.isLowPowerModeEnabled ? "on" : "off")")
         lines.append("Settings: \(settings)")
         lines.append("Workload: target \(Workload.portrait.width)×\(Workload.portrait.height) px at scale \(Workload.displayScale); panel 320×180 pt = \(Int(320 * Workload.displayScale))×\(Int(180 * Workload.displayScale)) px; \(Workload.ticksPerSecond) Hz requests; in-flight bound \(FrameStatistics.boundForCharacterization); pool \(Workload.poolCapacity); frame-ID strip off")
+        let glow = Workload.glowPanel.parameters.glow
+        lines.append("Glow mode (GW-18): the panel plus \(glow.colors.count) colors, rim \(glow.rimWidth) + \(glow.rimSoftness) pt, inner glow \(glow.innerGlowRadius) pt × \(glow.innerGlowIntensity), halo \(glow.haloRadius) pt × \(glow.haloIntensity) (quad \(Int((320 + 2 * glow.haloRadius) * Workload.displayScale) + 2)×\(Int((180 + 2 * glow.haloRadius) * Workload.displayScale) + 2) px), pulse \(glow.pulsePeriod) s × \(glow.pulseDepth), effect time advancing 1/\(Workload.ticksPerSecond) s per tick")
         lines.append("")
         lines.append("Per run (ms; nearest-rank percentiles p50/p95/p99/max):")
         for result in results {
@@ -71,13 +73,15 @@ struct Report {
             lines.append("    acquire \(Self.describe(RenderMetrics.Distribution(frames.map(\.targetAcquisitionDuration))))")
         }
         lines.append("")
-        lines.append("Comparative GPU statistic, p95(panel) − p95(background):")
-        for run in Set(results.map(\.run)).sorted() {
-            let background = results.first { $0.run == run && $0.mode == .background }?.summary.gpu
-            let panel = results.first { $0.run == run && $0.mode == .panel }?.summary.gpu
-            lines.append("  run \(run): \(Self.difference(panel?.p95, background?.p95))")
+        for (mode, baseline) in [(Mode.panel, Mode.background), (.glow, .panel), (.glow, .background)] {
+            lines.append("Comparative GPU statistic, p95(\(mode.rawValue)) − p95(\(baseline.rawValue)):")
+            for run in Set(results.map(\.run)).sorted() {
+                let base = results.first { $0.run == run && $0.mode == baseline }?.summary.gpu
+                let measured = results.first { $0.run == run && $0.mode == mode }?.summary.gpu
+                lines.append("  run \(run): \(Self.difference(measured?.p95, base?.p95))")
+            }
+            lines.append("  pooled: \(Self.difference(pooledGPU[mode]?.p95, pooledGPU[baseline]?.p95))")
         }
-        lines.append("  pooled: \(Self.difference(pooledGPU[.panel]?.p95, pooledGPU[.background]?.p95))")
         lines.append("")
         lines.append("Idle: \(idle.passes) display passes in \(idle.seconds) s with nothing requested: \(idle.submissions) submissions, \(idle.productions) frames produced")
         lines.append("Lifecycle: \(settings.lifecycleCycles) cycles of hide (trim) / 2 hidden ticks / show / rotate / 4 ticks")
