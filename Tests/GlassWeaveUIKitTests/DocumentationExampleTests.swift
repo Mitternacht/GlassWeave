@@ -37,6 +37,35 @@ struct DocumentationExampleTests {
         #expect(!glass.subviews.contains { $0 is MTKView })
     }
 
+    @Test func `The native glow example puts a rim and halo around actionable Apple glass, with no renderer`() throws {
+        var taps = 0
+        let action = UIAction { _ in taps += 1 }
+        let (host, created) = try RendererCensus.counting {
+            let host = try makeGlowingNativeButton(title: "Glowing action", action: action)
+            host.traitOverrides.displayScale = 3
+            host.frame = CGRect(x: 0, y: 0, width: 220, height: 56)
+            host.layoutIfNeeded()
+            return host
+        }
+        #expect(created == 0, "Enhanced-native mode created a GlassWeave renderer")
+        #expect(host.glass.effect is UIGlassEffect)
+        #expect(host.glass.configuration == NativeGlassView.Configuration(tintColor: nil, isInteractive: true))
+        let button = try #require(host.glass.contentView.subviews.first as? UIButton)
+        #expect(button.configuration?.title == "Glowing action")
+        button.sendActions(for: .primaryActionTriggered)
+        #expect(taps == 1)
+        // A warm rim lit from the top and a 24-point halo outside the glass.
+        let glow = host.presentedGlow
+        #expect(glow.rimWidth == 2 && glow.directionality == 0.7 && glow.haloRadius == 24)
+        #expect(!host.rimLayer.isHidden && !host.haloLayer.isHidden)
+        #expect(host.layout.radii.topLeft == 28)
+        #expect(host.haloLayer.frame.minY < 0 && host.haloLayer.frame.maxX > 220)
+        let rim = try #require(host.layout.rim).gradient
+        #expect(rim.colors.first?.w == 1)
+        #expect(abs((rim.colors[rim.locations.firstIndex { $0 >= 0.5 }!].w) - 0.3) < 1e-9)
+        #expect(!host.subviews.contains { $0 is MTKView })
+    }
+
     @Test func `The custom example produces each frame and draws it with the panel`() async throws {
         let stage = try GlassStage(commandQueue: queue)
         let surface = stage.surface

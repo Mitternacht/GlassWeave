@@ -171,8 +171,9 @@ values.
 ## Accessibility mapping
 
 Implemented for the GW-17 and GW-18 rows. `GlassAccessibilityPolicy` applies
-these to the presented panel (the app's panel is kept unchanged); the GW-19
-row is the plan:
+these to the presented panel (the app's panel is kept unchanged) and, through
+the same function, to the rim and halo of `EnhancedNativeGlassView` (GW-14);
+the GW-19 row is the plan:
 
 | Feature | Reduce Transparency | Increase Contrast | Reduce Motion |
 | --- | --- | --- | --- |
@@ -366,20 +367,169 @@ overlap; merging shapes optically is GW-13's subject, not this one. The faint
 floor reflection under the element capsules is part of the laboratory's own
 background producer, which the app owns anyway.
 
-## Enhanced-native glow (GW-14)
+## Enhanced-native glow (GW-14, implemented)
 
 Genuine native glass cannot carry this glow inside itself: `UIGlassEffect`
 exposes a `tintColor` for the whole material and `isInteractive`, and no
 public API recolors its edge separately, makes its middle transparent, or
-injects a shader. GW-14 therefore draws the colored rim and halo *around*
-the native view with Core Animation and no Metal: a ring (`CAShapeLayer`
-path from the native view's corner configuration) filled by a
-`CAGradientLayer` of type `.conic` for the angular gradient, and a halo from
-a shadow or blurred layer behind the glass. The native glass keeps its own
-material and optional tint; a pulse is a Core Animation opacity animation
-that is removed under Reduce Motion, so a settled native glow runs no
-animation at all. It uses the same `GlassGlow` color model so one value can
-style both modes.
+injects a shader. GW-14 therefore draws the colored rim and halo *around* the
+native view, with Core Animation only.
+
+### API
+
+`EnhancedNativeGlassView` (GlassWeaveUIKit) is one new public view; it adds
+no new value type. It holds a `NativeGlassView` (`glass`, the genuine
+`UIVisualEffectView` with a public `UIGlassEffect`) pinned to its bounds.
+The app configures the glass as before (`glass.configuration`,
+`glass.cornerConfiguration`, controls in `glass.contentView`) and sets the
+glow with `setGlow(_:)`, which takes the same `GlassGlow` as a custom panel
+and follows the same normalization rule (a non-finite value throws naming
+its field and keeps the current glow; finite values are clamped). `glow`
+reports the normalized glow, `presentedGlow` the glow drawn (after
+`GlassAccessibilityPolicy`, with the parts native mode does not draw at 0
+and the rim's lengths limited to half the shorter side of the bounds),
+`accessibilitySettingsSource` and `accessibilitySettings` work as on
+`GlassSurfaceView` (the same `AccessibilitySettingsSource` type), and
+`isAnimating` reports whether the pulse animation is attached. An option on
+`NativeGlassView` was rejected: a `UIVisualEffectView` should not get
+sublayers of its own, and a halo must not be clipped by, or sampled under,
+the glass, so the glow lives in a container beside it.
+
+### What is drawn
+
+| `GlassGlow` field | Native mode |
+| --- | --- |
+| `colors` | The color model of custom mode (`GlowColorModel`, shared with `GlassPanelGeometry`): one color, or the stops interpolated in linear light around the center with the shape scaled to a square, 0° at the top, clockwise. Sampled every 2° (and on both sides of every stop) into conic `CAGradientLayer`s, whose angle runs in the layer's unit square like custom mode's. The halo's layer is larger than the glass, so its samples are placed at the angle of the same ray in its own square; a ray's color is the same in the rim and the halo. |
+| `lightAngle`, `directionality` | Custom mode's light, `(1 − k) + k((1 + n·L)/2)²`, with `n` the outward normal of the outline point on each ray from the center (found in closed form: the rectangle's edge, or the corner's circle), on custom mode's normal field (corners at least `rimWidth + max(rimSoftness, 1 px)` round). Exact for the rim on every shape; along each ray for the halo. |
+| `rimWidth`, `rimIntensity` | A band from the outline to `rimWidth` inside it, over the glass's edge, filled crisply (opacity `rimIntensity × light`), clipped to the outline. |
+| `rimSoftness` | Under the band, a Core Animation shadow (radius `s/4`) of the band extended by `s/2` on both sides, clipped at the outline: the rim is opaque to `rimWidth` and fades over about `s` beyond it (half at `rimWidth + s/2`, as in custom mode). |
+| `haloRadius`, `haloIntensity` | A Core Animation shadow of the outline grown by `0.355 R`, with `shadowRadius` `0.216 R` (`R` the halo radius), as the mask of a conic gradient (opacity `haloIntensity × light`). It is a Gaussian stand-in for custom mode's `(1 − s/R)²`: `Φ((0.355 R − s)/0.216 R)`, which is 0.95 at the outline, 0.25 at `R/2`, and 0.0014 at `R`. A second mask removes it everywhere inside the outline but its outermost pixel, so it never lies under the glass's middle. Its layers reach `ceil(1.22 R + 1)` points beyond the bounds. |
+| `pulsePeriod`, `pulseDepth` | One `CABasicAnimation` of `opacity` per layer (rim and halo), from 1 to `1 − depth` over half a period and back (autoreversing, repeating), eased with the sine curve `(0.37, 0, 0.63, 1)`, which follows `(1 − cos πx)/2` within 0.5 %: the level is custom mode's `1 − depth(1 − cos 2πt/period)/2`. |
+| `innerGlowRadius`, `innerGlowIntensity`, `centerOpacity` | Not drawn: the inside is Apple's material. `presentedGlow` reports them as 0. |
+
+Layers: below the glass, the halo (a layer masked by the outline's
+complement, holding the conic gradient masked by the shadow); above the
+glass, the rim (a layer clipped to the outline, holding the conic gradient
+masked by the band and its shadow). They are sublayers of the container,
+not of the glass, and not views: they take no touches and add no
+accessibility element. Core Animation composites them source-over in the
+window's color space, as every layer; GlassWeave picks their colors in linear
+light, not the blend (custom mode screens its halo in linear light). A halo
+therefore shows best on darker backgrounds; over a light one a color darkens
+the channels it lacks.
+
+What "the middle stays Apple's glass" means here: GlassWeave draws nothing
+inside the outline but the rim band. Apple's glass blurs and lenses its own
+backdrop, which now includes the halo beside it, so with a halo the glass's
+middle picks up a little of that light by itself (measured below); with a
+rim-only glow it is unchanged.
+
+### Layout, animation, and visibility
+
+- **Geometry.** At every layout pass the view lays the glass out first,
+  then reads its resolved corners with `effectiveRadius(corner:)` (fixed,
+  per-corner, capsule, or container-concentric), so the glow matches the
+  frame just set; reading them in `layoutSubviews` also lays the view out
+  again when only the glass's `cornerConfiguration` changes. A pass that
+  changes nothing the glow depends on (frame, corners, display scale,
+  presented glow) rebuilds nothing.
+- **Animated frames.** When the glass's frame is animated (a `UIView`
+  animation, rotation), the glow's bounds, positions, and paths get
+  animations with the glass's own `bounds.size` timing (duration, begin
+  time, curve, or spring parameters).
+- **Scale and traits.** Every layer renders at `traitCollection.displayScale`
+  (the halo's one-pixel overlap follows it); Increase Contrast is re-applied
+  on its trait change. Colors are sRGB values the app sets; to follow light
+  and dark with dynamic colors, set the glow again from
+  `registerForTraitChanges` (the laboratory does).
+- **No clipping.** The container does not clip. Callers keep about
+  `haloRadius` (the layers reach `1.22 × haloRadius + 1`) of unclipped space
+  around it; a scroll view or a view with `clipsToBounds` cuts the halo.
+- **Pulse only while visible.** The pulse is attached only while the view is
+  in a window, neither it nor an ancestor is hidden or transparent, and its
+  window scene is in the foreground, by `GlassSurfaceView`'s rule
+  (`SurfaceVisibility`); it is removed when the pulse goes, the glow
+  settles, Reduce Motion is on, the view is hidden, its scene goes to the
+  background, or it leaves its window, and it resumes where it stopped
+  (`timeOffset`). The view looks again on window, `isHidden`, `alpha`, and
+  scene changes and at every layout pass; UIKit reports no change to an
+  ancestor's `isHidden`, so after hiding an ancestor the app lays the view
+  out (`setNeedsLayout()`, `layoutIfNeeded()`), as the laboratory's Stage
+  switch does. No display link, update link, renderer, Metal device, or
+  `MTKView` exists on this path.
+
+### Accessibility
+
+The glow rows of the [mapping](#accessibility-mapping) apply through the
+same `GlassAccessibilityPolicy` function as the custom panel's: Reduce
+Transparency keeps a crisp, evenly lit rim at most 2 points wide and removes
+the halo and pulse; Increase Contrast keeps the rim (evenly lit), the halo,
+and the pulse; Reduce Motion holds the rim and halo at the pulse's mean
+level, `1 − pulseDepth/2`, with no animation. The glass applies the system's
+own settings to its material.
+
+### Laboratory
+
+`-lab.nativeGlow <preset>` (`amber`, `aurora`, `ember`, `energy`, the custom
+panel's presets) gives the native reference glass the same glow; without it
+the reference is plain native glass in a host that draws nothing. A Native
+glow switch (`lab.nativeGlowEnabled`) turns it off for comparison, the Pulse
+switch settles `energy`, and the diagnostics' `Native glow:` line reports
+what is drawn and whether its animation runs. The stack spacing grows by the
+halo radius so the halo clears the caption and the custom panel.
+
+### Measured (iPhone 18 Pro simulator on an Apple M5 Mac, not device evidence)
+
+- **Halo profile**, read from screenshots over the still pattern (the
+  `energy` preset, pulse settled, opacity from the blue channel over yellow):
+  0.819, 0.625, 0.233, 0.032, 0.000 at 2, 7, 14, 21, 28 points outside the
+  top edge, against 0.815, 0.618, 0.226, 0.030, 0.001 documented (dark;
+  light within 0.007 as well); no change from the layers' reach on.
+- **The glass's middle**, glow on versus off: with the rim-only `aurora`
+  glow at most 2 steps from 6 points in (the rim band and its soft edge
+  cover 0 to about 4.5 points); with the `energy` halo, 20, 14, 10 steps
+  (dark) and 43, 32, 24 steps (light) from 6, 12, 18 points in, which is
+  Apple's glass picking up the halo beside it; a halo left under the glass
+  (a deliberate mutation) changed it by 192 to 195 steps.
+- **Rim colors**: within 2 steps of the gradient at the pixel's angle on a
+  straight edge, and within 9 next to a stop whose neighbour differs steeply
+  in an encoded channel (Core Animation's conic gradient).
+- **Layout cost** (Debug build, simulator): a resizing layout pass takes
+  0.10 ms without a glow and about 0.55 ms with a two-color rim and halo;
+  unchanged passes rebuild nothing.
+- **Composition cost** (CPU time over 10 s, still pattern, three runs each):
+  no glow and a static glow (`ember`) 0.00 to 0.01 s for both the app and
+  the simulator's render server (`backboardd`); the pulsing `energy` glow
+  1.35 to 1.37 s in the render server and 0.00 s in the app; under Reduce
+  Motion 0.00 to 0.01 s. For context, the same preset on the custom panel
+  (GW-18, Metal) used 1.70 to 1.74 s in the render server and 0.90 to 0.92 s
+  in the app. GPU time of the composition is not reported by the simulator.
+  Device GPU, display, and energy cost are not measured.
+
+## Testing strategy (GW-14)
+
+- UIKit tests on the iPhone 18 Pro simulator (`EnhancedNativeGlassViewTests`):
+  the layers' frames, paths, shadow radii, and masks against the glass's
+  frame and resolved corners (capsule, fixed, per-corner) through resizes,
+  corner-configuration changes, an animated frame change (matching
+  animations with the glass's timing), and display-scale changes; gradient
+  colors and alphas against the color model and the light (including the
+  outline's own normal on a wide capsule, and the halo's remapped angles);
+  rim pixels rendered on the CPU with `CALayer.render(in:)` (which draws
+  masks and gradients but no shadows); the glass's effect, tint, and layer
+  order; hit testing through the halo to a view behind and onto the native
+  button; the renderer census and no `MTKView`; the pulse animation, when it
+  is attached and removed, and where it resumes; the accessibility mapping;
+  the normalization rule; the cost of a resizing layout pass and the skip of
+  unchanged passes.
+- Laboratory UI tests (`EnhancedNativeGlowUITests`) reading screenshots of
+  the running app over the still pattern, glow on versus off: rim colors at
+  four angles and the unchanged middle (rim-only), the halo's profile and its
+  reach, the middle's change with a halo (bounded, against a mutation), the
+  rim through rotation and the largest text size, taps during the pulse with
+  no custom submissions, settling (Pulse switch, hidden stage, background,
+  Reduce Motion, Reduce Transparency), and the accessibility audit in light
+  and dark.
 
 ## Testing strategy (GW-18)
 

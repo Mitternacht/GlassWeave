@@ -9,11 +9,11 @@ import UIKit
 /// a `UIVisualEffectView` with a public `UIGlassEffect`. Apple's glass keeps
 /// its material, its backdrop, and its own tint (``NativeGlassView/configuration``);
 /// GlassWeave never recolors the inside of it. Around it, layers draw the
-/// rim and halo of a ``GlassGlow`` in one color or an angular gradient of up
+/// rim and halo of a `GlassGlow` in one color or an angular gradient of up
 /// to four stops, the same color model as a custom panel's glow, so one
 /// value can style both modes:
 ///
-/// | ``GlassGlow`` field | In native mode |
+/// | `GlassGlow` field | In native mode |
 /// | --- | --- |
 /// | `colors`, `lightAngle`, `directionality` | As in custom mode: the gradient around the center (the shape scaled to a square, 0° at the top, clockwise), interpolated in linear light, and the light of the outline point on each ray from the center. Sampled every 2° into conic gradients. |
 /// | `rimWidth`, `rimSoftness`, `rimIntensity` | A band `rimWidth` deep just inside the outline, over the glass's edge, fully opaque (times `rimIntensity` and the light). With a softness `s` its inner edge then fades over about `s` (half intensity at `rimWidth + s/2`, from a Core Animation shadow of `s/4`); with `s = 0` it is crisp. Both lengths are limited to half the shorter side of the bounds. |
@@ -71,7 +71,7 @@ public final class EnhancedNativeGlassView: UIView {
     public let glass: NativeGlassView
 
     /// The glow the app set, after the normalization rule (lengths are not
-    /// yet limited by the bounds); ``GlassGlow/none`` draws nothing.
+    /// yet limited by the bounds); `GlassGlow.none` draws nothing.
     public private(set) var glow: GlassGlow = .none
 
     /// The glow drawn: ``glow`` after ``GlassAccessibilityPolicy`` for the
@@ -198,9 +198,9 @@ public final class EnhancedNativeGlassView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// Sets the glow and redraws the rim and halo. A non-finite value
-    /// throws ``GlassParameterError/nonFinite(_:)`` naming its field and
+    /// throws `GlassParameterError.nonFinite(_:)` naming its field and
     /// leaves the current glow in place; finite values out of range are
-    /// clamped by the ``GlassGlow`` normalization rule.
+    /// clamped by the `GlassGlow` normalization rule.
     public func setGlow(_ glow: GlassGlow) throws(GlassParameterError) {
         self.glow = try glow.normalized(maximumLength: .infinity)
         updateGlow()

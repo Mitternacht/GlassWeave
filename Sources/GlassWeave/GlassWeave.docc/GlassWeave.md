@@ -239,6 +239,54 @@ func pulsingOrb(frame: CGRect) -> GlassPanel {
 }
 ```
 
+### Native glass with a glow (experimental)
+
+> Note: Added after the v0.1 candidate at the user's request (GW-14, pulled
+> forward with the glow work). Experimental and not part of the v0.1 scope.
+
+Apple's glass cannot be recolored at its edge, so `EnhancedNativeGlassView`
+in GlassWeaveUIKit draws a glow's rim and halo *around* a genuine
+`NativeGlassView` with Core Animation layers: no renderer, Metal device, or
+display link. The glass keeps its own material and tint, and its middle stays
+Apple's glass. The same ``GlassGlow`` styles both modes: its colors, light,
+rim, halo, and pulse are drawn; its inner glow and center fill are not,
+because the inside belongs to Apple's material. The view does not clip, so
+leave about ``GlassGlow/haloRadius`` of unclipped space around it. A pulse is
+a Core Animation opacity animation that runs only while the view is visible;
+Reduce Motion holds it at its mean level, Reduce Transparency keeps a thin
+crisp rim, and Increase Contrast keeps the rim evenly lit.
+
+```swift
+import GlassWeave
+import GlassWeaveUIKit
+import UIKit
+
+/// Genuine Apple glass around a button, with a warm rim lit from the top and
+/// a soft halo. Creates no GlassWeave renderer.
+@MainActor
+func makeGlowingNativeButton(title: String, action: UIAction) throws -> EnhancedNativeGlassView {
+    let host = EnhancedNativeGlassView(configuration: .init(isInteractive: true))
+    host.glass.cornerConfiguration = .capsule()
+    let button = UIButton(configuration: .plain(), primaryAction: action)
+    button.configuration?.title = title
+    button.translatesAutoresizingMaskIntoConstraints = false
+    host.glass.contentView.addSubview(button)
+    NSLayoutConstraint.activate([
+        button.leadingAnchor.constraint(equalTo: host.glass.contentView.leadingAnchor, constant: 20),
+        button.trailingAnchor.constraint(equalTo: host.glass.contentView.trailingAnchor, constant: -20),
+        button.topAnchor.constraint(equalTo: host.glass.contentView.topAnchor, constant: 8),
+        button.bottomAnchor.constraint(equalTo: host.glass.contentView.bottomAnchor, constant: -8),
+    ])
+    try host.setGlow(GlassGlow(
+        colors: [.init(red: 1, green: 0.62, blue: 0.25)],
+        rimWidth: 2, rimSoftness: 2,
+        lightAngle: 0, directionality: 0.7,
+        haloRadius: 24, haloIntensity: 0.8
+    ))
+    return host
+}
+```
+
 ### Source ownership
 
 A ``BackgroundFrame`` states everything the renderer needs and nothing it

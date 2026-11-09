@@ -53,11 +53,14 @@ performance budget is met or failed; see
 ### What is planned, not built
 
 Physical-device qualification (GW-09), a Metal 4 backend experiment (GW-11),
-a touch-driven ripple (GW-12), merging of two custom surfaces (GW-13), one
-enhanced-native effect (GW-14), a SwiftUI adapter (GW-15), and external
-texture interoperability (GW-16). None of these is part of v0.1. The glow
-work continues with animated interiors (GW-19), a colored glow around native
-glass (GW-14, pulled forward), and a laboratory gallery (GW-20). See [the task list](tasks/todo.md).
+a touch-driven ripple (GW-12), merging of two custom surfaces (GW-13), a
+SwiftUI adapter (GW-15), and external texture interoperability (GW-16). None
+of these is part of v0.1. The glow work (experimental, after v0.1) has a
+colored rim, inner glow, halo, and pulse on the custom panel (GW-17, GW-18)
+and a colored rim and halo around genuine native glass,
+`EnhancedNativeGlassView` (GW-14, pulled forward; simulator and Mac evidence
+only); it continues with animated interiors (GW-19) and a laboratory gallery
+(GW-20). See [the task list](tasks/todo.md).
 
 ## Modes
 
@@ -67,6 +70,10 @@ glass (GW-14, pulled forward), and a laboratory gallery (GW-20). See [the task l
   texture the app produces and hands over explicitly. A transparent Metal
   view cannot read arbitrary UI behind it, and GlassWeave does not capture
   the screen.
+- **Enhanced-native (experimental, GW-14):** genuine Apple glass with a
+  colored rim and halo that Core Animation layers draw around it
+  (`EnhancedNativeGlassView`); no GlassWeave Metal work, and the glass keeps
+  its own material.
 
 The two are separate materials: GlassWeave does not merge its panel optically
 with Apple's glass.

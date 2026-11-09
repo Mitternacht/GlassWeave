@@ -142,4 +142,33 @@ func legibleTint(for traits: UITraitCollection) -> GlassTint {
     }
     return tint
 }
+
+import GlassWeave
+import GlassWeaveUIKit
+import UIKit
+
+/// Genuine Apple glass around a button, with a warm rim lit from the top and
+/// a soft halo. Creates no GlassWeave renderer.
+@MainActor
+func makeGlowingNativeButton(title: String, action: UIAction) throws -> EnhancedNativeGlassView {
+    let host = EnhancedNativeGlassView(configuration: .init(isInteractive: true))
+    host.glass.cornerConfiguration = .capsule()
+    let button = UIButton(configuration: .plain(), primaryAction: action)
+    button.configuration?.title = title
+    button.translatesAutoresizingMaskIntoConstraints = false
+    host.glass.contentView.addSubview(button)
+    NSLayoutConstraint.activate([
+        button.leadingAnchor.constraint(equalTo: host.glass.contentView.leadingAnchor, constant: 20),
+        button.trailingAnchor.constraint(equalTo: host.glass.contentView.trailingAnchor, constant: -20),
+        button.topAnchor.constraint(equalTo: host.glass.contentView.topAnchor, constant: 8),
+        button.bottomAnchor.constraint(equalTo: host.glass.contentView.bottomAnchor, constant: -8),
+    ])
+    try host.setGlow(GlassGlow(
+        colors: [.init(red: 1, green: 0.62, blue: 0.25)],
+        rimWidth: 2, rimSoftness: 2,
+        lightAngle: 0, directionality: 0.7,
+        haloRadius: 24, haloIntensity: 0.8
+    ))
+    return host
+}
 #endif

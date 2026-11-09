@@ -33,6 +33,9 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 
 /// What a glass surface draws under the accessibility settings.
 ///
+/// The glow rows below also apply to the rim and halo that
+/// ``EnhancedNativeGlassView`` draws around native glass.
+///
 /// | Setting | Behavior |
 /// | --- | --- |
 /// | VoiceOver | The surface is decorative: it and its Metal view expose no accessibility elements, so VoiceOver reaches only the native content placed above it. |
