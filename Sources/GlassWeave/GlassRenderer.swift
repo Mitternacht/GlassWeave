@@ -33,6 +33,19 @@ public final class GlassRenderer {
 
     private let background: BackgroundRenderer
     private let panelPipeline: any MTLRenderPipelineState
+    /// The frost pyramids and what builds them (GW-24a); see `GlassRenderer+Frost.swift`.
+    let frostPyramids: FrostPyramidRing
+    /// The frost the renderer prepares a pyramid for, or `nil` for none.
+    var frostRequest: FrostRequest?
+    /// Whether the host presents every frost as none (the accessibility
+    /// policy under Reduce Transparency, whose body is opaque, so there is
+    /// nothing to see through and no pyramid is built). Turning it on
+    /// releases the pyramids.
+    package var isFrostSuppressed = false {
+        didSet {
+            if isFrostSuppressed { frostPyramids.trim() }
+        }
+    }
 
     /// The most panels one draw renders. ``setPanels(_:)`` keeps the first
     /// this many, which bounds the work of a draw: each panel is one quad
@@ -99,6 +112,7 @@ public final class GlassRenderer {
             vertex: panelVertex, fragment: panelFragment
         )
         background = try BackgroundRenderer(commandQueue: commandQueue, library: library)
+        frostPyramids = try FrostPyramidRing(commandQueue: commandQueue, library: library)
         self.device = commandQueue.device
         self.commandQueue = commandQueue
     }
@@ -170,7 +184,7 @@ public final class GlassRenderer {
         acquireTarget: () -> BackgroundDrawTarget?,
         onCommit: (any MTLCommandBuffer) -> Void
     ) -> BackgroundRenderOutcome {
-        let timer = DrawTimer(metrics: metrics)
+        let timer = DrawTimer(metrics: metrics, frost: frostPyramids)
         let outcome = draw(
             targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: nil,
             acquireTarget: { timer.acquire(acquireTarget) },
@@ -230,7 +244,7 @@ public final class GlassRenderer {
         acquireTarget: () -> BackgroundDrawTarget?,
         onCommit: (any MTLCommandBuffer) -> Void
     ) throws(BackgroundSourceError) -> BackgroundRenderOutcome {
-        let timer = DrawTimer(metrics: metrics)
+        let timer = DrawTimer(metrics: metrics, frost: frostPyramids)
         do throws(BackgroundSourceError) {
             let outcome = try produceAndDraw(
                 targetPixelSize: targetPixelSize, displayScale: displayScale,
@@ -289,7 +303,7 @@ public final class GlassRenderer {
     ) -> BackgroundRenderOutcome {
         let panels = panels
         let effectTime = effectTime
-        return background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline] encoder, frame, backgroundUniforms, targetSize in
+        return background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, preRender: frostPreRender(displayScale: displayScale), overlay: { [panelPipeline] encoder, frame, backgroundUniforms, targetSize in
             // Converted only once a target exists, so the skips that run
             // before (including a zero display scale's zero-size target)
             // never see the scale.

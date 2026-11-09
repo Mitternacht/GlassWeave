@@ -16,6 +16,11 @@ public enum BackgroundRenderSkipReason: Hashable, Sendable {
     case sourceReleased
     /// Metal could not create a command buffer or render encoder.
     case encoderUnavailable
+    /// Every frost pyramid the renderer owns is still in use by a draw that
+    /// has not completed, so a draw that needs a new one cannot take it
+    /// (GW-24a). The renderer never waits for one: the host asks again after
+    /// an earlier frame completes.
+    case frostUnavailable
 }
 
 /// The result of one draw request.
@@ -218,6 +223,21 @@ public final class BackgroundRenderer {
         _ targetSize: (width: Int, height: Int)
     ) -> Void
 
+    /// Work a composing renderer does around the render pass for frost
+    /// (GW-24a). `admit` runs before the target is requested and may refuse
+    /// the draw (a defined skip, never a wait); `encode` runs after the
+    /// command buffer exists and before the render pass, so the pyramid is
+    /// built in the same command buffer that reads it. When `encode` returns
+    /// `true` it has attached a completion handler to the command buffer,
+    /// which must therefore be committed.
+    struct PreRender {
+        var admit: (_ frame: BackgroundFrame, _ targetSize: (width: Int, height: Int)) -> Bool
+        var encode: (
+            _ commandBuffer: any MTLCommandBuffer, _ frame: BackgroundFrame,
+            _ background: GWBackgroundUniforms, _ targetSize: (width: Int, height: Int)
+        ) -> Bool
+    }
+
     /// Draws the background, then `overlay`, into one render pass.
     ///
     /// - Parameter provided: A command buffer that already carries the
@@ -235,6 +255,7 @@ public final class BackgroundRenderer {
         commandBuffer provided: (any MTLCommandBuffer)? = nil,
         acquireTarget: () -> BackgroundDrawTarget?,
         onCommit: (_ commandBuffer: any MTLCommandBuffer, _ frameID: UInt64, _ drewFrame: Bool) -> Void = { _, _, _ in },
+        preRender: PreRender? = nil,
         overlay: Overlay?
     ) -> BackgroundRenderOutcome {
         guard let source else { return .skipped(.missingSource) }
@@ -254,6 +275,10 @@ public final class BackgroundRenderer {
             onCommit(provided, source.lease.frame.frameID, false)
             provided.commit()
         }
+        if let preRender, !preRender.admit(source.lease.frame, targetPixelSize) {
+            endWithoutDrawing(.skipped)
+            return .skipped(.frostUnavailable)
+        }
         guard let target = acquireTarget(),
               let colorTexture = target.renderPassDescriptor.colorAttachments[0].texture
         else {
@@ -270,19 +295,37 @@ public final class BackgroundRenderer {
             endWithoutDrawing(.cancelled)
             return .skipped(.encoderUnavailable)
         }
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: target.renderPassDescriptor) else {
-            endWithoutDrawing(.cancelled)
-            return .skipped(.encoderUnavailable)
-        }
         let frame = source.lease.frame
-        if provided == nil {
-            commandBuffer.label = "GlassWeave background frame \(frame.frameID)"
-        }
         var uniforms = SourceUVTransform(
             destinationWidth: colorTexture.width,
             destinationHeight: colorTexture.height,
             frame: frame
         ).uniforms
+        // Frost: the pyramid is encoded here, before the render encoder, in
+        // the command buffer that reads it.
+        var preRendered = false
+        if let preRender {
+            guard preRender.encode(commandBuffer, frame, uniforms, (colorTexture.width, colorTexture.height)) else {
+                endWithoutDrawing(.cancelled)
+                return .skipped(.encoderUnavailable)
+            }
+            preRendered = true
+        }
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: target.renderPassDescriptor) else {
+            if preRendered, provided == nil {
+                // The pyramid's completion handler is attached to this
+                // command buffer, so it runs rather than being dropped.
+                commandBuffer.addCompletedHandler { _ in submission.end(.cancelled) }
+                onCommit(commandBuffer, frame.frameID, false)
+                commandBuffer.commit()
+            } else {
+                endWithoutDrawing(.cancelled)
+            }
+            return .skipped(.encoderUnavailable)
+        }
+        if provided == nil {
+            commandBuffer.label = "GlassWeave background frame \(frame.frameID)"
+        }
         encoder.label = "GlassWeave background"
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentBytes(

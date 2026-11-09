@@ -21,9 +21,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         default: break
         }
         // `-lab.presentation YES` opens GW-27's presentation screen.
-        window.rootViewController = UserDefaults.standard.bool(forKey: "lab.presentation")
-            ? PresentationLabViewController()
-            : LabViewController()
+        // `-lab.frost YES` opens GW-24a's frost pyramid screen.
+        window.rootViewController = if UserDefaults.standard.bool(forKey: "lab.frost") {
+            FrostLabViewController()
+        } else if UserDefaults.standard.bool(forKey: "lab.presentation") {
+            PresentationLabViewController()
+        } else {
+            LabViewController()
+        }
         window.makeKeyAndVisible()
         self.window = window
     }

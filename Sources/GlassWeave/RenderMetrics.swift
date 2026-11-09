@@ -103,6 +103,13 @@ public final class RenderMetrics: Sendable {
         public var commandBuffersCompleted = 0
         /// Committed command buffers that finished with an error.
         public var commandBuffersFailed = 0
+        /// Frost pyramids built (GW-24a). Zero while no frost is requested,
+        /// and zero in a window where a static source is drawn again and
+        /// again: an unchanged source frame reuses its pyramid.
+        public var pyramidBuilds = 0
+        /// Draws that read a pyramid that was already built, instead of
+        /// building one.
+        public var pyramidReuses = 0
 
         public init() {}
     }
@@ -176,6 +183,12 @@ public final class RenderMetrics: Sendable {
     }
 
     private let state: Mutex<State>
+    private let frostMemory = Atomic<Int>(0)
+
+    /// The bytes of frost pyramids the renderer owned after its latest draw
+    /// (GW-24a; ``GlassRenderer/frostMemoryBytes``). Zero while no frost has
+    /// been requested. A gauge, not a count: ``reset()`` keeps it.
+    public var frostMemoryBytes: Int { frostMemory.load(ordering: .relaxed) }
 
     /// - Parameter capacity: The most samples kept, at least one. The
     ///   default holds five minutes of frames at 60 Hz.
@@ -237,6 +250,17 @@ public final class RenderMetrics: Sendable {
             if declinedProduction {
                 state.counts.declinedProductions += 1
             }
+        }
+    }
+
+    /// Records the frost pyramids one draw built and reused, and the memory
+    /// the renderer owns for them afterwards.
+    func didFrost(builds: Int, reuses: Int, memoryBytes: Int) {
+        frostMemory.store(memoryBytes, ordering: .relaxed)
+        guard builds > 0 || reuses > 0 else { return }
+        state.withLock { state in
+            state.counts.pyramidBuilds += builds
+            state.counts.pyramidReuses += reuses
         }
     }
 
@@ -303,9 +327,13 @@ final class DrawTimer {
     private var produce = Duration.zero
     private var targetAcquisition = Duration.zero
     private var declinedProduction = false
+    private let frost: FrostPyramidRing?
+    private let frostBefore: FrostPyramidRing.Counters
 
-    init(metrics: RenderMetrics?) {
+    init(metrics: RenderMetrics?, frost: FrostPyramidRing? = nil) {
         self.metrics = metrics
+        self.frost = frost
+        frostBefore = metrics == nil ? FrostPyramidRing.Counters() : frost?.counters ?? FrostPyramidRing.Counters()
         start = metrics == nil ? nil : clock.now
     }
 
@@ -346,5 +374,12 @@ final class DrawTimer {
     /// Records the draw's outcome; `nil` when the produced frame was rejected.
     func finish(_ outcome: BackgroundRenderOutcome?) {
         metrics?.didDraw(outcome, declinedProduction: declinedProduction)
+        if let metrics, let frost {
+            let after = frost.counters
+            metrics.didFrost(
+                builds: after.builds - frostBefore.builds, reuses: after.reuses - frostBefore.reuses,
+                memoryBytes: frost.memoryBytes
+            )
+        }
     }
 }

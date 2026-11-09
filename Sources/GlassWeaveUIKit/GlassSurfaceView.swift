@@ -378,6 +378,10 @@ public final class GlassSurfaceView: UIView {
         let presented = requestedPanels.map {
             GlassAccessibilityPolicy.presentedPanel(for: tier.reduced($0), settings: accessibilitySettings, traits: traitCollection)
         }
+        // Reduce Transparency presents any frost as none: its body is opaque,
+        // so no pyramid is built. Increase Contrast and Reduce Motion leave
+        // the frost as it is (it is static and has no text scrim yet).
+        renderer.isFrostSuppressed = accessibilitySettings.reduceTransparency
         if presented != renderer.panels {
             // A presented panel derives from a normalized one and keeps every
             // value in range, so the renderer never rejects it.
@@ -790,7 +794,10 @@ public final class GlassSurfaceView: UIView {
             requestDisplayPass()
         }
         updateEffectClock()
-        // Hiding frees nothing here: `MTKView.releaseDrawables()` releases
+        // A hidden surface gives back its frost pyramids (none exist
+        // unless frost was requested); the next draw builds them again.
+        if !visible { renderer.trimFrostResources() }
+        // Hiding frees nothing else here: `MTKView.releaseDrawables()` releases
         // only depth/stencil and multisample textures, which this view does
         // not create, and the layer keeps its drawable pool. Memory a hidden
         // surface can give back is the app's (see `visibilityHandler`).

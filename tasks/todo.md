@@ -514,24 +514,28 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 **Dependencies:** GW-21, GW-27; wired to GW-22. **Scope:** L, about 9 files plus tests.
 
 **Acceptance criteria:**
-- [ ] `.none` is byte-identical with `frostMemoryBytes == 0`; the same under Reduce Transparency.
-- [ ] Uniform source stays uniform; mean luminance on noise (away from valid-rect edges) within 1/255.
-- [ ] Dot: anisotropy < 1.15, fitted σ within 15%; step-edge spread monotonic in radius.
-- [ ] `.clearCenter` deep pixels byte-identical to unfrosted.
-- [ ] No magenta from outside the valid rect.
-- [ ] Static source plus pulsing glow: 0 rebuilds in 120 ticks after the first; a new frame ID causes exactly 1. A producer returning `nil` causes 0.
-- [ ] Red/blue alternating `.encoded(in:)` frames show their own frame in the frost.
-- [ ] A host ignoring the bound (10 draws, none completed) never waits and never writes a pyramid in use (completion-handler audit).
-- [ ] A target-unavailable skip commits nothing for a non-produced draw.
-- [ ] Scrim on 1,000 backgrounds meets the ratio with all light terms on; outside pixels unchanged.
-- [ ] White stays neutral with `.sixTap` plus frost.
-- [ ] No texture allocation in the draw path after warm-up (internal counter; the simulator reports 0 for allocation sizes [V: milestone-1.md]).
-- [ ] Memory: `frostMemoryBytes` equals the computed bound. GW-09 panel plus full-screen sheet totals stay within the ≤ 64 MiB budget [V: validation.md:117], or the overage is recorded with a reason.
-- [ ] Temporal stability on the Mac over a sub-pixel-scrolling source, recorded per radius.
-- [ ] M5: pyramid build ≤ +0.15 ms (moving), 0 when static; sampling ≤ +0.30 ms; full-screen sheet recorded.
+- [x] `.none` builds nothing: `frostMemoryBytes == 0`, no pyramid, and (while the shader does not read the pyramid) a draw with a frost request is byte-identical to one without. Tested (`GlassFrostTests`).
+- [ ] The same under Reduce Transparency. Fast pass: not tested (implemented: the surface sets `GlassRenderer.isFrostSuppressed` from the accessibility settings, which builds no pyramid and releases the existing ones).
+- [x] Uniform source stays uniform through every level and between two, inside the region, past its edge and far outside it. Tested.
+- [ ] Mean luminance on noise (away from valid-rect edges) within 1/255. Fast pass: not tested.
+- [ ] Dot: anisotropy < 1.15, fitted σ within 15%; step-edge spread monotonic in radius. Fast pass: not tested (the pyramid is calibrated by arithmetic in `docs/frost.md`; needs the shader, GW-24b).
+- [ ] `.clearCenter` deep pixels byte-identical to unfrosted. GW-24b (needs the shader).
+- [ ] No magenta from outside the valid rect. Fast pass: not tested (level 0 clamps every tap to the valid rect; the lab pyramid tiles show no stray color at their edges).
+- [x] Static source plus pulsing glow: no rebuild after the first; a new frame ID causes exactly 1. Shown by the lab's counters, not a test: 237 draws, `builds=1`; two new frames, `builds=3` ([captures](docs/evidence/captures/gw-24a-frost-pyramid-sigma4-iphone18pro-sim.png), [second](docs/evidence/captures/gw-24a-frost-pyramid-sigma8-iphone18pro-sim.png)).
+- [ ] A producer returning `nil` causes 0 builds. Fast pass: not tested (the same code path as the static source: the frame ID does not change).
+- [ ] Red/blue alternating `.encoded(in:)` frames show their own frame in the frost. Fast pass: not tested (implemented: the pyramid is encoded after the producer's writes in the same command buffer).
+- [ ] A host ignoring the bound (10 draws, none completed) never waits and never writes a pyramid in use (completion-handler audit). Fast pass: not tested (implemented: the ring of 3, `.skipped(.frostUnavailable)`).
+- [ ] A target-unavailable skip commits nothing for a non-produced draw. Fast pass: not tested (by construction: the pyramid is encoded after the target is acquired).
+- [ ] Scrim on 1,000 backgrounds meets the ratio with all light terms on; outside pixels unchanged. GW-24b.
+- [ ] White stays neutral with `.sixTap` plus frost. GW-24b.
+- [ ] No texture allocation in the draw path after warm-up (internal counter). Fast pass: not tested (the counter, `FrostPyramidRing.Counters.allocations`, exists; the safety test asserts one allocation for a build and a reuse).
+- [x] Memory: `frostMemoryBytes` equals the computed bound (5 levels, 8 bytes a texel): 40,920 bytes in the test, 1,909,600 and 1,615,680 in the lab captures.
+- [ ] GW-09 panel plus full-screen sheet totals within the ≤ 64 MiB budget. Fast pass: not measured. By arithmetic one full-screen 1206 x 2622 pyramid is 8,500,448 bytes (8.1 MiB), a full ring of three 24.3 MiB.
+- [ ] Temporal stability on the Mac over a sub-pixel-scrolling source, recorded per radius. GW-24b.
+- [ ] M5: pyramid build ≤ +0.15 ms (moving), 0 when static; sampling ≤ +0.30 ms; full-screen sheet recorded. Fast pass: one combined M5 run at the end.
 - [ ] **Device only:** cost at 60 Hz; shimmer sign-off.
 
-**Evidence:** not started.
+**Evidence, GW-24a (pyramid infrastructure) (2026-11-09, fast pass):** What exists: `GlassFrost` (profile uniform / clearCenter / clearRim / verticalRamp, sigma, transition, ramp, grain; `normalized()`; default `.none`) with `GlassFrostError`; `FrostPyramid.swift` and `Shaders/Frost.metal` (4 or 5 level `rgba16Float` pyramid at 1/2 to 1/32, 13-tap downsample through the source mapping and valid-rect clamp, one compute encoder per level); a renderer-owned ring of 3 with completion handlers, a non-waiting skip (`.skipped(.frostUnavailable)`, taken before the drawable is requested), a cache keyed by frame ID, region, target size and level count, a trim (the surface calls it when hidden), the Reduce Transparency policy row, `pyramidBuilds`, `pyramidReuses`, `frostMemoryBytes`, and the pre-render step that encodes the pyramid after the command buffer exists and before the render encoder; `Shaders/GlassFrost.h` (`gw_frost_sample`, `gw_frost_sigma`, `gw_frost_lod`) and the `GWFrost*` records in `GlassWeaveFrostTypes.h` for the later wiring. Glass.metal, GlassParameters.swift and `GWGlassUniforms` are untouched; no pixel changes on screen yet. Design and limits: [docs/frost.md](docs/frost.md). The one test, `GlassFrostTests` "Frost none builds nothing and a uniform source stays uniform through the pyramid": My Mac: the first full run 199 passed, 0 failed (`xcresulttool`); after the simulator fixes below, a second full run had 198 passed and 1 failed, `FrameLifecycleTests` "100 hide and show cycles" (the known GW-27 flake, unrelated to frost), and two reruns of just that suite and the frost test passed 4 of 4 each; iPhone 18 Pro simulator, last full run: 281 passed, 0 failed. A first simulator run crashed on `dispatchThreads` and on a compute `memoryBarrier` (neither is supported on that device under Metal validation); both are gone. Captures (simulator, inspected): [8 pt, two new frames](docs/evidence/captures/gw-24a-frost-pyramid-sigma8-iphone18pro-sim.png) and [4 pt, static source](docs/evidence/captures/gw-24a-frost-pyramid-sigma4-iphone18pro-sim.png) show the lab's pyramid tiles (each level blurrier than the last, the grid and word still crisp at level 0), the four profiles' blur maps and the counters. Limits: the Xcode MCP bridge could not open a workspace, so `xcodebuild` was used; simulator and My Mac only; the fitted-sigma calibration is arithmetic; the `-lab.frost` screen has no UI test (the task allowed one safety test).
 
 **Verification:** As in GW-21; property tests for the pyramid.
 
