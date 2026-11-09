@@ -95,7 +95,10 @@ struct GlassPanelGeometry: Equatable {
             parameters.glow, displayScale: displayScale, effectTime: effectTime,
             cornerRadius: cornerRadius, halfSize: halfSize
         )
-        interior = Interior(parameters.interior, displayScale: displayScale, effectTime: effectTime)
+        interior = Interior(
+            parameters.interior, displayScale: displayScale, effectTime: effectTime,
+            halfSize: halfSize / displayScale, exitHeight: (glow?.haloRadius ?? 0) / displayScale
+        )
     }
 
     /// Converts a normalized glow, or returns `nil` when it draws nothing.
@@ -326,8 +329,18 @@ struct GlassPanelGeometry: Equatable {
             interiorPhase: interior?.phase ?? 0,
             interiorCenterFade: Float(interior?.centerFade ?? 0),
             interiorPixelsPerPoint: Float(interior?.pixelsPerPoint ?? 0),
-            padding6: 0
+            padding6: 0,
+            interiorSparks: sparkLanes
         )
+    }
+
+    /// The twelve uploaded sparks (embers only; zero otherwise).
+    private var sparkLanes: (
+        SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
+        SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>
+    ) {
+        let s = (interior?.sparks ?? []) + Array(repeating: .zero, count: 12)
+        return (s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11])
     }
 
     /// One interior ramp color for upload: linear RGB with `w` zero, or zero

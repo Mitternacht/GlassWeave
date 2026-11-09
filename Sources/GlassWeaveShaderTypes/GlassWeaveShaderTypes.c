@@ -13,7 +13,7 @@ _Static_assert(offsetof(GWBackgroundUniforms, uvOrigin) == 16, "uvOrigin offset"
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMin) == 24, "sampleClampMin offset");
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMax) == 32, "sampleClampMax offset");
 
-_Static_assert(sizeof(GWGlassUniforms) == 336, "GWGlassUniforms size");
+_Static_assert(sizeof(GWGlassUniforms) == 528, "GWGlassUniforms size");
 _Static_assert(_Alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 _Static_assert(offsetof(GWGlassUniforms, background) == 0, "background offset");
 _Static_assert(offsetof(GWGlassUniforms, targetSize) == 40, "targetSize offset");
@@ -56,4 +56,5 @@ _Static_assert(offsetof(GWGlassUniforms, interiorPhase) == 320, "interiorPhase o
 _Static_assert(offsetof(GWGlassUniforms, interiorCenterFade) == 324, "interiorCenterFade offset");
 _Static_assert(offsetof(GWGlassUniforms, interiorPixelsPerPoint) == 328, "interiorPixelsPerPoint offset");
 _Static_assert(offsetof(GWGlassUniforms, padding6) == 332, "padding6 offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorSparks) == 336, "interiorSparks offset");
 _Static_assert(GWInteriorEffectNone == 0 && GWInteriorEffectEnergy == 1 && GWInteriorEffectRays == 2 && GWInteriorEffectEmbers == 3, "GWInteriorEffect values");

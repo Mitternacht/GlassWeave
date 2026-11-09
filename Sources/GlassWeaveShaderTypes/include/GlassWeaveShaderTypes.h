@@ -134,6 +134,10 @@ typedef enum GWInteriorEffect {
 ///   middle.
 /// - `interiorPixelsPerPoint`: the display scale, so the pattern is sized in
 ///   points.
+/// - `interiorSparks`: embers only, the twelve sparks at this interior time,
+///   computed on the CPU from the seed: center x and y in points from the
+///   panel's center (y down), radius in points, and brightness 0...1 (0 is
+///   not drawn). Zero for the other effects.
 ///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
@@ -148,8 +152,9 @@ typedef enum GWInteriorEffect {
 /// interiorColor0 256, interiorColor1 272, interiorColor2 288,
 /// interiorEffect 304, interiorColorCount 308, interiorSeed 312,
 /// interiorIntensity 316, interiorPhase 320, interiorCenterFade 324,
-/// interiorPixelsPerPoint 328, explicit padding 332 (set to zero).
-/// Size 336, alignment 16, stride 336.
+/// interiorPixelsPerPoint 328, explicit padding 332 (set to zero),
+/// interiorSparks 336 (12 × 16 bytes).
+/// Size 528, alignment 16, stride 528.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
     simd_float2 targetSize;
@@ -195,6 +200,7 @@ typedef struct GWGlassUniforms {
     float interiorCenterFade;
     float interiorPixelsPerPoint;
     float padding6;
+    simd_float4 interiorSparks[12];
 } GWGlassUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

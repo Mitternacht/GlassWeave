@@ -15,10 +15,17 @@ extension GlassPanelGeometry {
         var centerFade: Double
         /// The display scale: the pattern is laid out in points.
         var pixelsPerPoint: Double
+        /// Embers only: the twelve sparks at this phase, as uploaded: center
+        /// x and y in points from the panel's center (y down), radius in
+        /// points, and brightness (0 is not drawn). Empty for the other
+        /// effects.
+        var sparks: [SIMD4<Float>] = []
 
         /// Converts a normalized interior at `effectTime`, or returns `nil`
-        /// when it draws nothing.
-        init?(_ interior: GlassInterior, displayScale: Double, effectTime: Double) {
+        /// when it draws nothing. Embers' sparks rise to `exitHeight` points
+        /// above the top edge (the glow's halo radius) of a panel whose half
+        /// size in points is `halfSize`.
+        init?(_ interior: GlassInterior, displayScale: Double, effectTime: Double, halfSize: SIMD2<Double>, exitHeight: Double) {
             guard interior.isVisible else { return nil }
             effect = interior.effect
             colorsLinear = interior.colors.map {
@@ -32,6 +39,11 @@ extension GlassPanelGeometry {
             seed = interior.seed
             centerFade = interior.centerFade
             pixelsPerPoint = displayScale
+            if effect == .embers {
+                sparks = InteriorPattern.sparkStates(
+                    half: halfSize, exitHeight: exitHeight, phase: Double(self.phase), seed: seed
+                ).map { SIMD4<Float>($0) }
+            }
         }
 
         /// The record's `interiorEffect` value.
@@ -79,7 +91,7 @@ extension GlassPanelGeometry {
         case .embers:
             return max(
                 InteriorPattern.flames(u, half: half, phase: phase, seed: interior.seed),
-                InteriorPattern.sparks(u, half: half, exitHeight: (glow?.haloRadius ?? 0) / scale, phase: phase, seed: interior.seed)
+                InteriorPattern.spark(at: u, sparks: interior.sparks)
             )
         }
     }
@@ -119,11 +131,7 @@ extension GlassPanelGeometry {
         }
         let distance = signedDistance(at: pixel)
         guard coverage(at: pixel) < 1, pixel.y - center.y < 0, distance < haloRadius else { return (.zero, 0) }
-        let scale = interior.pixelsPerPoint
-        let e = InteriorPattern.sparks(
-            (pixel - center) / scale, half: halfSize / scale, exitHeight: haloRadius / scale,
-            phase: Double(interior.phase), seed: interior.seed
-        )
+        let e = InteriorPattern.spark(at: (pixel - center) / interior.pixelsPerPoint, sparks: interior.sparks)
         let t = min(max(distance, 0) / haloRadius, 1)
         return (interiorRamp(e), e * interior.intensity * (1 - t) * (1 - t))
     }
@@ -154,13 +162,24 @@ enum InteriorPattern {
         return r < 0 ? r + period : r
     }
 
+    /// Both axes wrap with power-of-two periods (0: none).
     static func lattice2(_ x: Int, _ y: Int, _ period: SIMD2<Int>, _ seed: UInt32) -> Double {
-        let wx = UInt32(wrap(x, period.x)), wy = UInt32(wrap(y, period.y))
+        let wx = UInt32(truncatingIfNeeded: wrapPow2(x, period.x))
+        let wy = UInt32(truncatingIfNeeded: wrapPow2(y, period.y))
         return unit(hash(wx &* 0x8da6_b343 &+ wy &* 0xd816_3841 &+ seed))
     }
 
-    static func lattice3(_ x: Int, _ y: Int, _ z: Int, _ period: SIMD3<Int>, _ seed: UInt32) -> Double {
-        let wx = UInt32(wrap(x, period.x)), wy = UInt32(wrap(y, period.y)), wz = UInt32(wrap(z, period.z))
+    /// A coordinate wrapped by a power-of-two period (a mask), or unchanged
+    /// for period 0.
+    static func wrapPow2(_ i: Int, _ period: Int) -> Int {
+        period == 0 ? i : i & (period - 1)
+    }
+
+    /// x never wraps; y and z wrap with the power-of-two periods (0: none).
+    static func lattice3(_ x: Int, _ y: Int, _ z: Int, _ period: SIMD2<Int>, _ seed: UInt32) -> Double {
+        let wx = UInt32(truncatingIfNeeded: x)
+        let wy = UInt32(truncatingIfNeeded: wrapPow2(y, period.x))
+        let wz = UInt32(truncatingIfNeeded: wrapPow2(z, period.y))
         return unit(hash(wx &* 0x8da6_b343 &+ wy &* 0xd816_3841 &+ wz &* 0xcb1a_b31f &+ seed))
     }
 
@@ -178,7 +197,7 @@ enum InteriorPattern {
         return x0 + (x1 - x0) * s.y
     }
 
-    static func noise3(_ p: SIMD3<Double>, _ period: SIMD3<Int>, _ seed: UInt32) -> Double {
+    static func noise3(_ p: SIMD3<Double>, _ period: SIMD2<Int>, _ seed: UInt32) -> Double {
         let base = SIMD3(p.x.rounded(.down), p.y.rounded(.down), p.z.rounded(.down))
         let cx = Int(base.x), cy = Int(base.y), cz = Int(base.z)
         let f = p - base
@@ -200,7 +219,7 @@ enum InteriorPattern {
         return y0 + (y1 - y0) * s.z
     }
 
-    static func fbm3(_ p: SIMD3<Double>, _ period: SIMD3<Int>, _ seed: UInt32) -> Double {
+    static func fbm3(_ p: SIMD3<Double>, _ period: SIMD2<Int>, _ seed: UInt32) -> Double {
         var p = p, period = period
         var sum = 0.0, amplitude = 0.5
         for octave in 0..<UInt32(3) {
@@ -236,9 +255,9 @@ enum InteriorPattern {
         let c = Foundation.cos(angle), s = Foundation.sin(angle)
         let p = SIMD2(c * p0.x - s * p0.y, s * p0.x + c * p0.y) * 2.2
         let z = phase * 0.5
-        let period = SIMD3(4096, 4096, 32)
-        let wx = fbm3(SIMD3(p.x, p.y, z), period, seed)
-        let wy = fbm3(SIMD3(p.x + 19, p.y + 7, z), period, seed &+ 0x51ed_270b)
+        let period = SIMD2(0, 32)
+        let wx = noise3(SIMD3(p.x, p.y, z), period, seed)
+        let wy = noise3(SIMD3(p.x + 19, p.y + 7, z), period, seed &+ 0x51ed_270b)
         let warped = p + 1.4 * (SIMD2(wx, wy) - 0.5)
         let n = fbm3(SIMD3(warped.x, warped.y, z + 11), period, seed &+ 0xa3c5_9ac3)
         let offset = abs(n - 0.5)
@@ -258,7 +277,13 @@ enum InteriorPattern {
         let cellPoints = max(r * (2 * .pi) / Double(count), 0.001)
         let drawn = min(max(width, 0.75 / cellPoints), 0.28)
         let profile = 1 - smoothstep(0, drawn, abs(f - center))
-        let twinkle = noise2(SIMD2(Double(cell), z), SIMD2(count, 32), seed &+ 0x3c6e_f372)
+        let zBase = z.rounded(.down)
+        let zCell = Int(zBase)
+        let zf = z - zBase
+        let key = UInt32(cell) &* 0x8da6_b343 &+ seed &+ 0x3c6e_f372
+        let t0 = unit(hash(key &+ UInt32(zCell & 31) &* 0xd816_3841))
+        let t1 = unit(hash(key &+ UInt32((zCell + 1) & 31) &* 0xd816_3841))
+        let twinkle = t0 + (t1 - t0) * (zf * zf * (3 - 2 * zf))
         return profile * profile * (width / drawn) * (0.35 + 0.65 * twinkle)
     }
 
@@ -270,7 +295,7 @@ enum InteriorPattern {
         let z = phase * 0.5
         let beams = rayLayer(turn + 2 * phase / 64, r: r, count: 13, minWidth: 0.1, maxWidth: 0.28, z: z, seed: seed)
         let rays = rayLayer(turn - phase / 64, r: r, count: 29, minWidth: 0.03, maxWidth: 0.09, z: z + 7, seed: seed &+ 0x68e3_1da4)
-        let flow = noise2(SIMD2(turn * 7, r / size * 2.5 - phase * 0.75), SIMD2(7, 48), seed &+ 0xb529_7a4d)
+        let flow = noise2(SIMD2(turn * 8, r / size * 2.5 - phase * 0.5), SIMD2(8, 32), seed &+ 0xb529_7a4d)
         let resolved = smoothstep(1.5, 4.5, r * (2 * .pi / 29))
         return saturate((0.55 * beams + rays) * (0.4 + 0.6 * flow)) * resolved
     }
@@ -278,32 +303,48 @@ enum InteriorPattern {
     static func flames(_ u: SIMD2<Double>, half: SIMD2<Double>, phase: Double, seed: UInt32) -> Double {
         let above = half.y - u.y
         let y = above / (1.3 * half.y)
-        let n = fbm3(SIMD3(u.x / 9, above / 22 - phase * 0.75, phase * 0.5), SIMD3(4096, 48, 32), seed)
-        let tongues = noise2(SIMD2(u.x / 16, phase * 0.25), SIMD2(4096, 16), seed &+ 0x2545_f491)
-        let v = (1 - y / (0.45 + 0.9 * tongues)) + (n - 0.5) * 0.8
+        let top = 0.45 + 0.9 * noise2(SIMD2(u.x / 16, phase * 0.25), SIMD2(0, 16), seed &+ 0x2545_f491)
+        guard y < 1.4 * top else { return 0 }
+        let n = fbm3(SIMD3(u.x / 9, above / 30 - phase * 0.5, phase * 0.5), SIMD2(32, 32), seed)
+        let v = (1 - y / top) + (n - 0.5) * 0.8
         return smoothstep(0, 1.25, v)
     }
 
-    static func sparks(_ u: SIMD2<Double>, half: SIMD2<Double>, exitHeight: Double, phase: Double, seed: UInt32) -> Double {
+    /// The twelve sparks of embers at `phase` (CPU only; uploaded): each
+    /// rises from 8 % of the panel's height above the bottom edge to
+    /// `exitHeight` points above the top edge a whole number of times (12 to
+    /// 32) per 64 s, sways, and fades in over the first 5 % and out over the
+    /// last 30 % of its rise. Center x and y in points from the panel's
+    /// center (y down), radius in points, brightness.
+    static func sparkStates(half: SIMD2<Double>, exitHeight: Double, phase: Double, seed: UInt32) -> [SIMD4<Double>] {
         let start = 0.16 * half.y
         let travel = 2 * half.y + exitHeight - start
-        var spark = 0.0
-        for i in UInt32(0)..<12 {
+        return (UInt32(0)..<12).map { i in
             let h = hash(seed &+ 0x9e37_79b9 &* (i + 1))
-            let r0 = unit(hash(h &+ 1)), r1 = unit(hash(h &+ 2)), r2 = unit(hash(h &+ 3)), r3 = unit(hash(h &+ 4))
+            let g = hash(h &+ 1), k = hash(h &+ 2)
+            let r1 = Double(g & 0xffff) / 65536, r3 = Double(g >> 16) / 65536
+            let r0 = Double(k & 0xffff) / 65536, r2 = Double(k >> 16) / 65536
             var life = r1 + phase * Double(12 + h % 21) / 64
             life -= life.rounded(.down)
             let above = start + life * travel
             let sway = (2 + 4 * r2) * wave(above / (16 + 14 * r2) + r3)
-            let center = SIMD2((r0 * 2 - 1) * max(half.x - 3, 0) + sway, half.y - above)
-            let radius = 1.6 + 1.2 * r3
-            let d = u - center
-            let dd = (d.x * d.x + d.y * d.y) / (radius * radius)
+            let fade = smoothstep(0, 0.05, life) * (1 - smoothstep(0.7, 1, life))
+            return SIMD4((r0 * 2 - 1) * max(half.x - 3, 0) + sway, half.y - above, 1.6 + 1.2 * r3, fade)
+        }
+    }
+
+    /// The brightest uploaded spark at `u` (points from the panel's center),
+    /// mirroring `gw_interior_sparks`.
+    static func spark(at u: SIMD2<Double>, sparks: [SIMD4<Float>]) -> Double {
+        var spark = 0.0
+        for state in sparks where state.w > 0 {
+            let s = SIMD4<Double>(state)
+            let dx = u.x - s.x, dy = u.y - s.y
+            let dd = (dx * dx + dy * dy) / (s.z * s.z)
             if dd < 9 {
                 let core = dd < 1 ? (1 - dd) * (1 - dd) : 0
                 let glow = (1 - dd / 9) * (1 - dd / 9)
-                let fade = smoothstep(0, 0.05, life) * (1 - smoothstep(0.7, 1, life))
-                spark = max(spark, max(core, 0.45 * glow) * fade)
+                spark = max(spark, max(core, 0.45 * glow) * s.w)
             }
         }
         return spark

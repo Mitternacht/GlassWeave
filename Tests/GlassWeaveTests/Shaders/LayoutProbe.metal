@@ -107,6 +107,12 @@ kernel void gw_test_glass_uniforms_probe(
     values[73] = record.interiorPhase;
     values[74] = record.interiorCenterFade;
     values[75] = record.interiorPixelsPerPoint;
+    for (uint i = 0; i < 12; ++i) {
+        values[76 + 4 * i] = record.interiorSparks[i].x;
+        values[77 + 4 * i] = record.interiorSparks[i].y;
+        values[78 + 4 * i] = record.interiorSparks[i].z;
+        values[79 + 4 * i] = record.interiorSparks[i].w;
+    }
     seed[0] = record.interiorSeed;
 
     layout[0] = sizeof(GWGlassUniforms);
@@ -152,4 +158,5 @@ kernel void gw_test_glass_uniforms_probe(
     // Must stay 0: the effect codes the shader switches on.
     layout[40] = (GWInteriorEffectNone == 0u && GWInteriorEffectEnergy == 1u
                   && GWInteriorEffectRays == 2u && GWInteriorEffectEmbers == 3u) ? 0u : 1u;
+    layout[41] = __builtin_offsetof(GWGlassUniforms, interiorSparks);
 }

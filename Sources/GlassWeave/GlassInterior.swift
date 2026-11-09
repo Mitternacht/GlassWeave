@@ -59,7 +59,7 @@ public struct GlassInterior: Hashable, Sendable {
     public enum Effect: Hashable, Sendable, CaseIterable {
         /// Nothing.
         case none
-        /// Thin filaments of domain-warped noise with a faint haze around
+        /// Thin filaments of warped noise with a faint haze around
         /// them, turning slowly around the center (once per
         /// ``GlassInterior/loopDuration`` of interior time) and evolving,
         /// brighter toward the rim, like a plasma orb.
@@ -108,8 +108,8 @@ public struct GlassInterior: Hashable, Sendable {
     public static let maximumColors = 3
 
     /// The fastest interior, as a multiple of each effect's own pace. At
-    /// speed 1 each effect's noise moves through at most 0.75 lattice cells
-    /// a second, so at this maximum at most 2.25: below the three flashes a
+    /// speed 1 each effect's noise moves through at most 0.5 lattice cells a
+    /// second, so at this maximum at most 1.5: below the three flashes a
     /// second that accessibility guidance (WCAG 2.3.1) treats as a risk.
     public static let maximumSpeed = 3.0
 

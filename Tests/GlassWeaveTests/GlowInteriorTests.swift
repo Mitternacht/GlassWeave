@@ -130,6 +130,21 @@ struct GlassInteriorParameterTests {
         #expect(uniforms.interiorPixelsPerPoint == 3)
         #expect(uniforms.interiorColor2 == SIMD4<Float>(1, 1, 1, 0))
         #expect(uniforms.padding6 == 0)
+        // Embers upload their twelve sparks, computed on the CPU at the
+        // drawn phase; every spark has a positive radius.
+        #expect(drawn.sparks.count == 12)
+        #expect(drawn.sparks.allSatisfy { $0.z >= 1.6 && $0.z <= 2.8 && $0.w >= 0 && $0.w <= 1 })
+        #expect(drawn.sparks == InteriorPattern.sparkStates(
+            half: SIMD2(60, 40), exitHeight: 0, phase: 16, seed: 0xfeed_beef
+        ).map { SIMD4<Float>($0) })
+        #expect(uniforms.interiorSparks.0 == drawn.sparks[0] && uniforms.interiorSparks.11 == drawn.sparks[11])
+        // Other effects upload no sparks.
+        let energy = GlassPanelGeometry(
+            panel: try GlassPanel(frame: Self.frame, parameters: GlassParameters(interior: GlassInterior(effect: .energy, colors: Self.ramp))).normalized(),
+            displayScale: 3, effectTime: 40
+        )
+        #expect(energy.interior?.sparks.isEmpty == true)
+        #expect(energy.uniforms(background: GWBackgroundUniformsForTests.zero, targetWidth: 10, targetHeight: 10).interiorSparks.5 == .zero)
         // Without an interior (or one that draws nothing) every interior
         // field is zero, so the shader skips it.
         for none in [GlassInterior.none, GlassInterior(effect: .energy, colors: Self.ramp, intensity: 0)] {

@@ -57,9 +57,9 @@ struct ShaderLayoutTests {
     }
 
     @Test func `Host layout of the glass uniforms matches the documented record`() {
-        #expect(MemoryLayout<GWGlassUniforms>.size == 336)
+        #expect(MemoryLayout<GWGlassUniforms>.size == 528)
         #expect(MemoryLayout<GWGlassUniforms>.alignment == 16)
-        #expect(MemoryLayout<GWGlassUniforms>.stride == 336)
+        #expect(MemoryLayout<GWGlassUniforms>.stride == 528)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.background) == 0)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.targetSize) == 40)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.panelCenter) == 48)
@@ -104,9 +104,16 @@ struct ShaderLayoutTests {
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorCenterFade) == 324)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorPixelsPerPoint) == 328)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding6) == 332)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorSparks) == 336)
         // The effect codes the shader switches on.
         #expect(GWInteriorEffectNone.rawValue == 0 && GWInteriorEffectEnergy.rawValue == 1)
         #expect(GWInteriorEffectRays.rawValue == 2 && GWInteriorEffectEmbers.rawValue == 3)
+    }
+
+    /// A distinctive, exactly representable spark for lane `index`.
+    private static func spark(_ index: Int) -> SIMD4<Float> {
+        let i = Float(index)
+        return SIMD4(-40.5 + i * 7.25, 12.125 - i * 3.5, 1.75 + i * 0.0625, 0.03125 * (i + 1))
     }
 
     @Test func `Shader reads every glass uniform field at the host's offsets`() async throws {
@@ -164,7 +171,11 @@ struct ShaderLayoutTests {
             interiorPhase: 41.25,
             interiorCenterFade: 0.671875,
             interiorPixelsPerPoint: 2.5,
-            padding6: -993
+            padding6: -993,
+            interiorSparks: (
+                Self.spark(0), Self.spark(1), Self.spark(2), Self.spark(3), Self.spark(4), Self.spark(5),
+                Self.spark(6), Self.spark(7), Self.spark(8), Self.spark(9), Self.spark(10), Self.spark(11)
+            )
         )
         let expected: [Float] = [
             1.5, -2.25, 3.125, -4.0625, 5.5, -6.75, 0.03125, 0.0625, 7.875, -8.5,
@@ -177,10 +188,13 @@ struct ShaderLayoutTests {
             36.75, 0.34375,
             0.21875, 0.84375, 0.46875, -5, 0.71875, 0.09375, 0.53125, -6, 0.28125, 0.96875, 0.015625, -7,
             3, 2, 0.828125, 41.25, 0.671875, 2.5,
-        ]
+        ] + (0..<12).flatMap { index in
+            let spark = Self.spark(index)
+            return [spark.x, spark.y, spark.z, spark.w]
+        }
         let recordBuffer = try #require(gpu.device.makeBuffer(bytes: &record, length: MemoryLayout<GWGlassUniforms>.stride, options: .storageModeShared))
         let values = try #require(gpu.device.makeBuffer(length: expected.count * MemoryLayout<Float>.stride, options: .storageModeShared))
-        let layout = try #require(gpu.device.makeBuffer(length: 41 * MemoryLayout<UInt32>.stride, options: .storageModeShared))
+        let layout = try #require(gpu.device.makeBuffer(length: 42 * MemoryLayout<UInt32>.stride, options: .storageModeShared))
         let seed = try #require(gpu.device.makeBuffer(length: MemoryLayout<UInt32>.stride, options: .storageModeShared))
 
         let commandBuffer = try #require(gpu.queue.makeCommandBuffer())
@@ -199,13 +213,13 @@ struct ShaderLayoutTests {
         #expect(readValues == expected)
         // The seed is read as an integer, all 32 bits.
         #expect(seed.contents().load(as: UInt32.self) == 0xdeadbeef)
-        let readLayout = Array(UnsafeBufferPointer(start: layout.contents().assumingMemoryBound(to: UInt32.self), count: 41))
+        let readLayout = Array(UnsafeBufferPointer(start: layout.contents().assumingMemoryBound(to: UInt32.self), count: 42))
         #expect(readLayout == [
-            336, 16, 0, 40, 48, 56, 64, 68, 72, 76, 80, 96,
+            528, 16, 0, 40, 48, 56, 64, 68, 72, 76, 80, 96,
             112, 128, 144, 160, 176, 192, 200, 204, 208, 212, 216, 220, 224, 228, 232,
             240, 244,
             256, 272, 288, 304, 308, 312, 316, 320, 324, 328, 332,
-            0,
+            0, 336,
         ])
     }
 }

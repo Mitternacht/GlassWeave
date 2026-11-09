@@ -5,7 +5,7 @@ using namespace metal;
 
 // The shader's view of the shared record must match the host layout asserted
 // in GlassWeaveShaderTypes.c.
-static_assert(sizeof(GWGlassUniforms) == 336, "GWGlassUniforms size");
+static_assert(sizeof(GWGlassUniforms) == 528, "GWGlassUniforms size");
 static_assert(alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 
 // The optical model below is mirrored on the CPU by `GlassPanelGeometry`
@@ -176,7 +176,8 @@ static float4 gw_glow(float2 q, float depth, constant GWGlassUniforms &uniforms)
 // 64 s of interior time (`interiorPhase` is reduced into [0, 64) on the CPU):
 // time enters only through lattice axes whose period is the number of cells
 // the pattern moves in 64 s, through turns that complete a whole number of
-// times in 64 s, and through sparks that rise a whole number of times in 64 s.
+// times in 64 s, and through sparks that rise a whole number of times in 64 s
+// (their positions are computed on the CPU and uploaded).
 
 /// The lowbias32 integer hash (C. Wellons): a well-mixed 32-bit value.
 static uint gw_hash(uint x) {
@@ -199,23 +200,31 @@ static int gw_wrap(int i, int period) {
     return r < 0 ? r + period : r;
 }
 
-/// The value at a 2D lattice point, periodic per axis, in [0, 1).
-static float gw_lattice2(int2 cell, int2 period, uint seed) {
-    const uint x = uint(gw_wrap(cell.x, period.x));
-    const uint y = uint(gw_wrap(cell.y, period.y));
-    return gw_unit(gw_hash(x * 0x8da6b343u + y * 0xd8163841u + seed));
+/// A lattice coordinate wrapped into [0, period) for a power-of-two
+/// period, by a mask (no integer division), or unchanged for period 0.
+static int gw_wrap_pow2(int i, int period) {
+    return period == 0 ? i : (i & (period - 1));
 }
 
-/// The value at a 3D lattice point, periodic per axis, in [0, 1).
-static float gw_lattice3(int3 cell, int3 period, uint seed) {
-    const uint x = uint(gw_wrap(cell.x, period.x));
-    const uint y = uint(gw_wrap(cell.y, period.y));
-    const uint z = uint(gw_wrap(cell.z, period.z));
+/// The value at a 3D lattice point, in [0, 1). The x axis does not wrap;
+/// y and z wrap with the power-of-two periods in `period` (0 for none).
+static float gw_lattice3(int3 cell, int2 period, uint seed) {
+    const uint x = uint(cell.x);
+    const uint y = uint(gw_wrap_pow2(cell.y, period.x));
+    const uint z = uint(gw_wrap_pow2(cell.z, period.y));
     return gw_unit(gw_hash(x * 0x8da6b343u + y * 0xd8163841u + z * 0xcb1ab31fu + seed));
 }
 
-/// 2D value noise with smoothstep interpolation, periodic with `period`
-/// cells per axis, in [0, 1).
+/// The value at a 2D lattice point, in [0, 1), periodic per axis with the
+/// power-of-two periods in `period` (0 for none).
+static float gw_lattice2(int2 cell, int2 period, uint seed) {
+    const uint x = uint(gw_wrap_pow2(cell.x, period.x));
+    const uint y = uint(gw_wrap_pow2(cell.y, period.y));
+    return gw_unit(gw_hash(x * 0x8da6b343u + y * 0xd8163841u + seed));
+}
+
+/// 2D value noise with smoothstep interpolation, in [0, 1), periodic per
+/// axis with the power-of-two periods in `period` (0 for none).
 static float gw_noise2(float2 p, int2 period, uint seed) {
     const float2 base = floor(p);
     const int2 c = int2(base);
@@ -230,9 +239,9 @@ static float gw_noise2(float2 p, int2 period, uint seed) {
     return x0 + (x1 - x0) * s.y;
 }
 
-/// 3D value noise with smoothstep interpolation, periodic with `period`
-/// cells per axis, in [0, 1).
-static float gw_noise3(float3 p, int3 period, uint seed) {
+/// 3D value noise with smoothstep interpolation, in [0, 1), periodic in y
+/// and z with the power-of-two periods in `period` (0 for none).
+static float gw_noise3(float3 p, int2 period, uint seed) {
     const float3 base = floor(p);
     const int3 c = int3(base);
     const float3 f = p - base;
@@ -257,7 +266,7 @@ static float gw_noise3(float3 p, int3 period, uint seed) {
 /// Three octaves of 3D value noise (amplitudes 1/2, 1/4, 1/8, normalized),
 /// each at twice the frequency and twice the period of the one before, so
 /// the sum keeps the first octave's period. In [0, 1).
-static float gw_fbm3(float3 p, int3 period, uint seed) {
+static float gw_fbm3(float3 p, int2 period, uint seed) {
     float sum = 0.0;
     float amplitude = 0.5;
     for (uint octave = 0u; octave < 3u; ++octave) {
@@ -269,12 +278,6 @@ static float gw_fbm3(float3 p, int3 period, uint seed) {
     return sum / 0.875;
 }
 
-/// A smooth wave in [-1, 1] with period 1, without trigonometry.
-static float gw_wave(float x) {
-    const float t = abs(2.0 * (x - floor(x)) - 1.0);
-    return 2.0 * t * t * (3.0 - 2.0 * t) - 1.0;
-}
-
 /// The length the energy and rays patterns scale with: half the panel's
 /// shorter side, but at least 12 points, so a small or thin panel never gets
 /// filaments or bands finer than the pixels that show them.
@@ -282,8 +285,8 @@ static float gw_interior_size(float2 halfSize) {
     return max(min(halfSize.x, halfSize.y), 12.0);
 }
 
-/// Energy: filaments where domain-warped noise crosses one half, with a
-/// faint haze around them, turning once per 64 s around the center (twisted
+/// Energy: filaments where noise, warped by two more noise fields, crosses
+/// one half, with a faint haze around them, turning once per 64 s around the center (twisted
 /// by up to 0.9 rad out to `size` from it) and evolving with time, brighter
 /// toward the rim. `u` in points from the center (y down), `size` from
 /// `gw_interior_size`, `w` the depth fraction (0 at the outline).
@@ -294,9 +297,9 @@ static float gw_interior_energy(float2 u, float size, float w, float phase, uint
     const float s = precise::sin(angle);
     const float2 p = float2(c * p0.x - s * p0.y, s * p0.x + c * p0.y) * 2.2;
     const float z = phase * 0.5;
-    const int3 period = int3(4096, 4096, 32);
-    const float wx = gw_fbm3(float3(p, z), period, seed);
-    const float wy = gw_fbm3(float3(p.x + 19.0, p.y + 7.0, z), period, seed + 0x51ed270bu);
+    const int2 period = int2(0, 32);
+    const float wx = gw_noise3(float3(p, z), period, seed);
+    const float wy = gw_noise3(float3(p.x + 19.0, p.y + 7.0, z), period, seed + 0x51ed270bu);
     const float2 warped = p + 1.4 * (float2(wx, wy) - 0.5);
     const float n = gw_fbm3(float3(warped, z + 11.0), period, seed + 0xa3c59ac3u);
     const float offset = abs(n - 0.5);
@@ -322,7 +325,14 @@ static float gw_ray_layer(float turn, float r, int count, float minWidth, float 
     const float cellPoints = max(r * (2.0 * M_PI_F) / float(count), 0.001);
     const float drawn = min(max(width, 0.75 / cellPoints), 0.28);
     const float profile = 1.0 - smoothstep(0.0, drawn, abs(f - center));
-    const float twinkle = gw_noise2(float2(float(cell), z), int2(count, 32), seed + 0x3c6ef372u);
+    // The ray's own brightness over time: 1D value noise in z, period 32.
+    const float zBase = floor(z);
+    const int zCell = int(zBase);
+    const float zf = z - zBase;
+    const uint key = uint(cell) * 0x8da6b343u + seed + 0x3c6ef372u;
+    const float t0 = gw_unit(gw_hash(key + uint(zCell & 31) * 0xd8163841u));
+    const float t1 = gw_unit(gw_hash(key + uint((zCell + 1) & 31) * 0xd8163841u));
+    const float twinkle = t0 + (t1 - t0) * (zf * zf * (3.0 - 2.0 * zf));
     return profile * profile * (width / drawn) * (0.35 + 0.65 * twinkle);
 }
 
@@ -340,52 +350,49 @@ static float gw_interior_rays(float2 u, float size, float phase, uint seed) {
     const float z = phase * 0.5;
     const float beams = gw_ray_layer(turn + 2.0 * phase / 64.0, r, 13, 0.1, 0.28, z, seed);
     const float rays = gw_ray_layer(turn - phase / 64.0, r, 29, 0.03, 0.09, z + 7.0, seed + 0x68e31da4u);
-    const float flow = gw_noise2(float2(turn * 7.0, r / size * 2.5 - phase * 0.75), int2(7, 48), seed + 0xb5297a4du);
+    const float flow = gw_noise2(float2(turn * 8.0, r / size * 2.5 - phase * 0.5), int2(8, 32), seed + 0xb5297a4du);
     const float resolved = smoothstep(1.5, 4.5, r * (2.0 * M_PI_F / 29.0));
     return saturate((0.55 * beams + rays) * (0.4 + 0.6 * flow)) * resolved;
 }
 
 /// Embers: flame tongues rising from the bottom edge, as heat 0...1: rising
-/// turbulence (tall cells, 0.75 cells a second upward) shapes the top of a
+/// turbulence (tall cells, 0.5 cells a second upward) shapes the top of a
 /// flame whose height varies along the bottom edge; heat is highest at the
-/// base and falls to 0 at a tongue's ragged top. `halfSize` in points.
+/// base and falls to 0 at a tongue's ragged top. Above 1.4 times a tongue's
+/// height the turbulence cannot lift the flame, so it is not evaluated
+/// there (the heat is exactly 0 either way). `halfSize` in points.
 static float gw_interior_flames(float2 u, float2 halfSize, float phase, uint seed) {
     const float above = halfSize.y - u.y;
     const float y = above / (1.3 * halfSize.y);
-    const float n = gw_fbm3(float3(u.x / 9.0, above / 22.0 - phase * 0.75, phase * 0.5), int3(4096, 48, 32), seed);
-    const float tongues = gw_noise2(float2(u.x / 16.0, phase * 0.25), int2(4096, 16), seed + 0x2545f491u);
-    const float v = (1.0 - y / (0.45 + 0.9 * tongues)) + (n - 0.5) * 0.8;
+    const float top = 0.45 + 0.9 * gw_noise2(float2(u.x / 16.0, phase * 0.25), int2(0, 16), seed + 0x2545f491u);
+    if (y >= 1.4 * top) {
+        return 0.0;
+    }
+    const float n = gw_fbm3(float3(u.x / 9.0, above / 30.0 - phase * 0.5, phase * 0.5), int2(32, 32), seed);
+    const float v = (1.0 - y / top) + (n - 0.5) * 0.8;
     return smoothstep(0.0, 1.25, v);
 }
 
-/// Embers: twelve sparks rising from near the bottom edge to `exitHeight`
-/// points above the top edge (each a whole number of times per 64 s),
-/// swaying, each a bright core with a faint glow three times its radius,
-/// fading out over the last 30 % of the rise; the brightest spark at a
-/// point, 0...1.
-static float gw_interior_sparks(float2 u, float2 halfSize, float exitHeight, float phase, uint seed) {
-    const float start = 0.16 * halfSize.y;
-    const float travel = 2.0 * halfSize.y + exitHeight - start;
+/// Embers: the brightest of the twelve uploaded sparks at a point `u` in
+/// points from the panel's center, 0...1. Each is a bright core
+/// `(1 - d^2 / r^2)^2` with a faint glow three times its radius,
+/// `0.45 (1 - d^2 / 9 r^2)^2`, times its brightness. The sparks' paths (they
+/// rise from near the bottom edge to the halo's radius above the top edge, a
+/// whole number of times per 64 s, swaying, and fade over the last 30 % of
+/// their rise) are computed on the CPU, once per draw.
+static float gw_interior_sparks(float2 u, constant GWGlassUniforms &uniforms) {
     float spark = 0.0;
     for (uint i = 0u; i < 12u; ++i) {
-        const uint h = gw_hash(seed + 0x9e3779b9u * (i + 1u));
-        const float r0 = gw_unit(gw_hash(h + 1u));
-        const float r1 = gw_unit(gw_hash(h + 2u));
-        const float r2 = gw_unit(gw_hash(h + 3u));
-        const float r3 = gw_unit(gw_hash(h + 4u));
-        float life = r1 + phase * float(12u + h % 21u) / 64.0;
-        life = life - floor(life);
-        const float above = start + life * travel;
-        const float sway = (2.0 + 4.0 * r2) * gw_wave(above / (16.0 + 14.0 * r2) + r3);
-        const float2 center = float2((r0 * 2.0 - 1.0) * max(halfSize.x - 3.0, 0.0) + sway, halfSize.y - above);
-        const float radius = 1.6 + 1.2 * r3;
-        const float2 d = u - center;
-        const float dd = dot(d, d) / (radius * radius);
+        const float4 s = uniforms.interiorSparks[i];
+        if (s.w <= 0.0) {
+            continue;
+        }
+        const float2 d = u - s.xy;
+        const float dd = dot(d, d) / (s.z * s.z);
         if (dd < 9.0) {
             const float core = dd < 1.0 ? (1.0 - dd) * (1.0 - dd) : 0.0;
             const float glow = (1.0 - dd / 9.0) * (1.0 - dd / 9.0);
-            const float fade = smoothstep(0.0, 0.05, life) * (1.0 - smoothstep(0.7, 1.0, life));
-            spark = max(spark, max(core, 0.45 * glow) * fade);
+            spark = max(spark, max(core, 0.45 * glow) * s.w);
         }
     }
     return spark;
@@ -404,8 +411,7 @@ static float gw_interior_value(float2 q, float w, constant GWGlassUniforms &unif
     case GWInteriorEffectRays:
         return gw_interior_rays(u, gw_interior_size(halfSize), phase, seed);
     case GWInteriorEffectEmbers:
-        return max(gw_interior_flames(u, halfSize, phase, seed),
-                   gw_interior_sparks(u, halfSize, uniforms.glowHaloRadius / scale, phase, seed));
+        return max(gw_interior_flames(u, halfSize, phase, seed), gw_interior_sparks(u, uniforms));
     default:
         return 0.0;
     }
@@ -503,9 +509,7 @@ fragment float4 gw_glass_fragment(
     float sparkAlpha = 0.0;
     if (uniforms.interiorEffect == GWInteriorEffectEmbers && uniforms.glowHaloRadius > 0.0
         && coverage < 1.0 && q.y < 0.0 && distance < uniforms.glowHaloRadius) {
-        const float scale = uniforms.interiorPixelsPerPoint;
-        const float e = gw_interior_sparks(q / scale, uniforms.panelHalfSize / scale,
-                                           uniforms.glowHaloRadius / scale, uniforms.interiorPhase, uniforms.interiorSeed);
+        const float e = gw_interior_sparks(q / uniforms.interiorPixelsPerPoint, uniforms);
         const float t = saturate(max(distance, 0.0) / uniforms.glowHaloRadius);
         sparkAlpha = e * uniforms.interiorIntensity * (1.0 - t) * (1.0 - t);
         if (sparkAlpha > 0.0) {
