@@ -1,6 +1,6 @@
 # GlassWeave task checklist
 
-GW-01 through GW-08 and GW-10 have code in this repository. GW-09 has its measurement instrument (the laboratory's benchmark scenario, `RenderMetrics`, and a Mac characterization) but its device qualification has not been done, so none of its items is checked; GW-10 was carried out ahead of that GW-09 dependency, and its device-dependent item stays open. GW-11 through GW-16 are planned. Check an acceptance item only after its evidence exists; each task's evidence paragraph says why any box is still open. The **Likely files** lines are the original proposals, not a record: the evidence paragraphs name the files actually created, the laboratory's sources live in `Examples/GlassWeaveLab/GlassWeaveLab/`, and some proposed files (for example `Sources/GlassWeave/GlassWeave.swift` and `Tests/GlassWeaveTests/BackgroundFrameTests.swift`) were never created.
+GW-01 through GW-08 and GW-10 have code in this repository. GW-09 has its measurement instrument (the laboratory's benchmark scenario, `RenderMetrics`, and a Mac characterization) but its device qualification has not been done, so none of its items is checked; GW-10 was carried out ahead of that GW-09 dependency, and its device-dependent item stays open. GW-11 through GW-16 are planned. GW-17 through GW-20 (glow effects, requested by the user on 2026-11-09, experimental and post-v0.1) are listed after Checkpoint F; GW-14 is pulled forward with them. Check an acceptance item only after its evidence exists; each task's evidence paragraph says why any box is still open. The **Likely files** lines are the original proposals, not a record: the evidence paragraphs name the files actually created, the laboratory's sources live in `Examples/GlassWeaveLab/GlassWeaveLab/`, and some proposed files (for example `Sources/GlassWeave/GlassWeave.swift` and `Tests/GlassWeaveTests/BackgroundFrameTests.swift`) were never created.
 
 Use the native Xcode MCP tools for project edits, builds, tests, diagnostics, and device interaction when working in this environment, after loading the relevant Apple skills. Add meaningful Swift Testing coverage with the first testable behavior. CI can use equivalent Xcode command-line build and test actions.
 
@@ -274,6 +274,11 @@ Checkpoint D evidence (2026-11-08): the consumer check exercises `NativeGlassVie
 - [ ] Native control interaction, clipping, and layout remain correct during the effect.
 - [ ] Disabled/settled behavior incurs no continuous custom rendering, and the incremental cost is recorded.
 
+**Pulled forward (2026-11-09):** The user-requested glow work (see [Glow effects](#glow-effects-user-requested-2026-11-09)) pulls this task forward and extends it with color. `UIGlassEffect` offers a tint for the whole material and interactivity, but no way to recolor its edge separately or to make its middle transparent, so the colored rim and halo are drawn around the native glass with Core Animation, using the GW-17 color model; [the glow design](../docs/glow.md#enhanced-native-glow-gw-14) has the details. The criteria above stay; these are added:
+- [ ] A rim and a halo in any SDR color, or an angular gradient of up to four stops (the `GlassGlow` color model), surround a genuine `UIGlassEffect` view; the glass interior is still Apple's material, and its own `tintColor` stays the app's choice.
+- [ ] The rim and halo follow the native view's corner configuration and frame through layout, rotation, and Dynamic Type changes, and add no accessibility element or touch target.
+- [ ] Reduce Transparency, Increase Contrast, and Reduce Motion follow the mapping in the glow design; a pulse runs only while requested and visible, and a settled glow runs no animation.
+
 **Verification:** Device comparison with native-only mode; appearance/rotation checks; submission and GPU metrics under the GW-09 workload.
 
 **Likely files:** `Sources/GlassWeaveUIKit/EnhancedNativeGlassView.swift`, `Sources/GlassWeave/EdgeIllumination.swift`, `Examples/GlassWeaveLab/EnhancedNativeViewController.swift`, `docs/evidence/enhanced-native.md`.
@@ -313,3 +318,69 @@ Checkpoint D evidence (2026-11-08): the consumer check exercises `NativeGlassVie
 - [ ] UIKit and SwiftUI consumers retain native control behavior.
 - [ ] Texture interoperability introduces no library dependency on Frostfield scenes.
 - [ ] Later features have their own measured costs and documented support, independent of v0.1 evidence.
+
+## Glow effects (user-requested, 2026-11-09)
+
+The user asked for glass that takes tints and glows at its edges in any color while the middle stays see-through or fades. These tasks are experimental and post-v0.1: they do not change the v0.1 candidate's scope, and no simulator or Mac result here is device evidence. The design, units, and accessibility mapping are in [the glow design](../docs/glow.md). The demos are original; no third-party artwork, icon, name, text, or layout is copied.
+
+## GW-17: Colored rim, inner glow, and center fade (custom mode)
+
+**Description:** Give a custom panel a glow in any SDR color or an angular gradient of up to four stops: a bright rim at the outline, an inner glow that fades toward the middle, and an optional center fill whose opacity sets how see-through the middle stays, lit from a chosen direction.
+
+**Dependencies:** GW-05 (panel), GW-08 (accessibility policy). Post-v0.1; it does not wait for GW-09's device run. **Scope:** Medium, six files plus tests.
+
+**Acceptance criteria:**
+- [ ] `GlassParameters.glow` (`GlassGlow`, default `.none`) documents the unit, range, and default of every field (rim width, softness, and intensity; inner glow radius and intensity; center opacity; light angle and directionality; color stops) and follows the normalization rule: a non-finite value is rejected with an error naming its field, finite out-of-range values are clamped, angles are reduced modulo 360°, at most four stops are kept, and `GlassRenderer.panel` reports the glow actually drawn.
+- [ ] Any SDR rim color, and each stop of a four-stop angular gradient at its documented angle, lands on the rim with the requested color within the documented tolerance (offscreen readback for several colors), blended in linear light, with an ordered dither on soft glow and no NaN or infinite output.
+- [ ] With center opacity 0, every pixel deeper than the rim and the inner glow equals the glow-off output exactly; rim width, softness, and intensity, the inner glow radius, the light angle, and directionality match the CPU model and their documented behavior (readback); no pixel outside the outline's antialiasing band changes.
+- [ ] Default parameters render byte-identical output to the pre-glow (GW-05) shader, kept as a frozen copy in the tests; the extended GPU record has C, MSL, and Swift layout checks and a distinctive-value GPU round trip.
+- [ ] Reduce Transparency presents an opaque, legible body with at most a thin uniform rim; Increase Contrast removes the inner glow and center fill, so the GW-08 legibility rule still holds for text in the interior (UIKit tests); a laboratory launch argument shows a colored rim on the custom panel (simulator capture).
+
+**Verification:** Swift Testing with offscreen render and readback on My Mac (Apple M5) under Metal API Validation, compared with a CPU model; a deliberate mutation per key test, reverted; UIKit tests on the iPhone 18 Pro simulator; a simulator capture of the laboratory panel, inspected.
+
+**Likely files:** `Sources/GlassWeave/GlassGlow.swift`, `Sources/GlassWeave/GlassParameters.swift`, `Sources/GlassWeave/GlassPanelGeometry.swift`, `Sources/GlassWeave/Shaders/Glass.metal`, `Sources/GlassWeaveShaderTypes/include/GlassWeaveShaderTypes.h`, `Sources/GlassWeaveUIKit/GlassAccessibilityPolicy.swift`, `Tests/GlassWeaveTests/GlassGlowTests.swift`, `Examples/GlassWeaveLab/GlassWeaveLab/LabViewController.swift`.
+
+## GW-18: Outer halo and pulse (custom mode)
+
+**Description:** Let the glow spill outside the shape as a soft halo within the surface, and let rim, inner glow, and halo pulse from one shared effect clock that runs only while something animates.
+
+**Dependencies:** GW-17, GW-07 (scheduling). **Scope:** Medium, five files plus tests.
+
+**Acceptance criteria:**
+- [ ] A halo in the glow colors extends outside the outline by a documented radius and falloff, shaped by the light direction, and is composited in linear light over the background inside the surface; pixels beyond the halo are unchanged, and a halo of radius zero leaves the GW-17 output byte-identical (readback).
+- [ ] A pulse modulates the glow with a documented period and depth from one shared effect clock; the surface requests frames only while a pulse runs and the surface is visible, and none when the pulse is removed, while hidden or backgrounded, or under Reduce Motion, which shows a steady glow at the documented level (submission counts while pulsing versus idle).
+- [ ] The in-flight bound and on-demand policy are unchanged while pulsing (peak in flight at most two, coalesced ticks counted, `FrameLedgerTests` unchanged); Reduce Transparency removes the halo, and Increase Contrast keeps text legible.
+
+**Verification:** GPU readback on My Mac; UIKit scheduling tests with a controlled clock on the iPhone 18 Pro simulator; a laboratory UI test counting submissions while pulsing, settled, hidden, and under Reduce Motion; `RenderMetrics` GPU time against the GW-17 panel on My Mac (characterization, not device evidence).
+
+**Likely files:** `Sources/GlassWeave/GlassGlow.swift`, `Sources/GlassWeave/GlassRenderer.swift`, `Sources/GlassWeave/Shaders/Glass.metal`, `Sources/GlassWeaveUIKit/GlassSurfaceView.swift`, `Tests/GlassWeaveUIKitTests/GlowAnimationTests.swift`.
+
+## GW-19: Animated interiors (custom mode)
+
+**Description:** Add three procedural interiors that animate inside the glass in the glow colors: energy filaments, radial rays, and rising embers.
+
+**Dependencies:** GW-18 (shared clock). **Scope:** Medium, four files plus tests.
+
+**Acceptance criteria:**
+- [ ] Energy filaments, radial rays, and rising embers draw only inside the outline, in the glow colors, under the documented center fade, as deterministic functions of the effect time and a seed (the same time and seed give identical bytes; different times differ).
+- [ ] Interiors animate on the GW-18 clock and frame policy: frames only while animating and visible, none when settled or hidden, and a documented still frame under Reduce Motion (submission counts).
+- [ ] Cost is bounded (fixed loop counts, no texture reads beyond the source) and measured with `RenderMetrics` against the GW-17 panel on My Mac; Reduce Transparency and Increase Contrast remove the interiors behind text.
+
+**Verification:** GPU readback and determinism tests on My Mac; scheduling tests on the iPhone 18 Pro simulator; captures inspected for seams, banding, and clipping.
+
+**Likely files:** `Sources/GlassWeave/GlassGlow.swift`, `Sources/GlassWeave/Shaders/Glass.metal`, `Tests/GlassWeaveTests/GlowInteriorTests.swift`, `docs/glow.md`.
+
+## GW-20: Glow gallery in the laboratory
+
+**Description:** A laboratory screen of original demos built from GW-14 and GW-17 to GW-19: a glowing light/dark theme toggle, three element capsules, and an energy-orb button, all with native controls.
+
+**Dependencies:** GW-14, GW-17, GW-18, GW-19, GW-08. **Scope:** Medium, four files plus UI tests.
+
+**Acceptance criteria:**
+- [ ] The gallery shows original designs: a theme toggle with a soft glass knob, a warm top rim light, a halo, and a smooth transition between themes; three element capsules with their own edge colors, where the selected one brightens with a fill, a bloom, and its animated interior over a faint floor reflection; and an energy-orb button with filaments, a pulsing glow, and a bright rim on a dark bar.
+- [ ] Every control is a native UIKit control with a VoiceOver label, value, and traits; the decorative surface adds no element; the accessibility audit passes in light and dark; the largest text size keeps content and targets; Reduce Motion, Reduce Transparency, and Increase Contrast follow the glow design.
+- [ ] The shapes are drawn as the design specifies (one surface, several panels in one pass), with halos unclipped; the screen submits nothing when settled, hidden, or backgrounded; captures on the iPhone 18 Pro simulator are inspected and committed.
+
+**Verification:** Laboratory UI tests (interaction, audits, submission counts) on the iPhone 18 Pro simulator; simulator captures; a live VoiceOver pass and device presentation stay open until a device run.
+
+**Likely files:** `Examples/GlassWeaveLab/GlassWeaveLab/GlowGalleryViewController.swift`, `Sources/GlassWeave/GlassRenderer.swift`, `Examples/GlassWeaveLab/GlassWeaveLabUITests/GlowGalleryUITests.swift`, `docs/evidence/captures/`.

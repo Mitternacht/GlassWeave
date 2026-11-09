@@ -53,6 +53,19 @@ See [architecture](../docs/architecture.md) for frame contracts and links to App
 
 GW-11 is an experiment with a recorded decision, not a commitment to ship two backends. A small capability survey belongs in GW-01, but a second submission backend need not block v0.1. Do not delay the coexistence proof to build an abstract render graph or material graph.
 
+## Scope change (2026-11-09): glow effects
+
+The user explicitly asked for glass that can take tints and glows at its edges in any color, while the middle stays see-through or fades. This adds four experimental tasks, GW-17 to GW-20 in [the checklist](todo.md#glow-effects-user-requested-2026-11-09): a colored rim, inner glow, and center fade for custom glass (GW-17); an outer halo and a pulse (GW-18); animated interiors (GW-19); and a laboratory gallery of original demos (GW-20). The design is in [docs/glow.md](../docs/glow.md).
+
+- The work is experimental and post-v0.1. It does not change the v0.1 candidate's scope, its release notes, or its open device items, and nothing in it counts as GW-09 device evidence.
+- Glow is off by default, and the default panel must render exactly what it rendered before the change.
+- It pulls GW-14 (enhanced-native) forward and extends it with color: a colored halo and rim drawn around genuine native glass, because `UIGlassEffect` cannot be recolored at its edge or made transparent in the middle.
+- GW-11, GW-12, GW-13, GW-15, and GW-16 keep their order and remain unstarted.
+
+| Stage | Tasks | Result |
+| --- | --- | --- |
+| Glow effects (user-requested) | GW-17–GW-20, with GW-14 | Colored rims and halos in custom and enhanced-native modes, animated glow on demand, and a laboratory gallery. |
+
 ## Dependency map
 
 ```mermaid
@@ -74,6 +87,14 @@ flowchart TD
     GW10 --> GW14[GW-14 Enhanced native]
     GW10 --> GW15[GW-15 SwiftUI adapter]
     GW11 --> GW16[GW-16 Texture interoperability]
+    GW05 --> GW17[GW-17 Colored rim and center fade]
+    GW08 --> GW17
+    GW17 --> GW18[GW-18 Halo and pulse]
+    GW07 --> GW18
+    GW18 --> GW19[GW-19 Animated interiors]
+    GW17 --> GW14
+    GW14 --> GW20[GW-20 Glow gallery]
+    GW19 --> GW20
 ```
 
 ## Relationship to Frostfield
