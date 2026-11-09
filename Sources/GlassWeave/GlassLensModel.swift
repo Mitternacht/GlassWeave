@@ -121,20 +121,26 @@ extension GlassPanelGeometry {
         var offsetScale: Double
         var profileA: Double
         var profileB: Double
+        /// 0...1; 0 for no dispersion.
+        var dispersion: Double
+        /// 0 (no dispersion), 3, or 6.
+        var tapCount: UInt32
 
-        /// Resolves a normalized lens, or returns `nil` when it is the
-        /// original rim (and, with it, nothing else to draw).
+        /// Resolves a normalized lens, or returns `nil` when it changes
+        /// nothing (the original rim without dispersion).
         init?(
             _ lens: GlassLens, displayScale: Double, cornerRadius: Double, bezelWidth: Double,
             halfSize: SIMD2<Double>
         ) {
+            guard lens.isActive else { return nil }
             let inscribed = min(halfSize.x, halfSize.y)
             var code: UInt32
             var bevel = bezelWidth
             var a = 0.0, b = 0.0
             switch lens.profile {
             case .rim:
-                return nil
+                // The original rim, with dispersion: no height field.
+                code = GWLensProfileRim.rawValue
             case .circular:
                 code = GWLensProfileCircular.rawValue
             case let .squircle(exponent):
@@ -155,14 +161,16 @@ extension GlassPanelGeometry {
                 b = widthPixels / 2 / bevel
             }
             profileCode = code
-            thickness = lens.thickness * displayScale
+            thickness = code == GWLensProfileRim.rawValue ? 0 : lens.thickness * displayScale
             self.bevel = min(bevel, inscribed)
             fieldRadius = min(max(cornerRadius, self.bevel), inscribed)
             indexOfRefraction = lens.indexOfRefraction
             maximumOffset = lens.maximumOffset * displayScale
             profileA = a
             profileB = b
-            offsetScale = lens.allowsFold ? 1 : GlassLensModel.foldFreeScale(
+            dispersion = lens.dispersion
+            tapCount = lens.dispersion > 0 ? (lens.dispersionTaps == .sixTap ? 6 : 3) : 0
+            offsetScale = lens.allowsFold || code == GWLensProfileRim.rawValue ? 1 : GlassLensModel.foldFreeScale(
                 profile: code, a: a, b: b, thickness: thickness, bevel: self.bevel,
                 indexOfRefraction: indexOfRefraction, maximumOffset: maximumOffset
             )

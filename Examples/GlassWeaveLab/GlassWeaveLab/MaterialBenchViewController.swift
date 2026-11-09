@@ -20,6 +20,9 @@ enum BenchPage: Int, CaseIterable {
     case charcoal
     /// Warm white with fine grain.
     case paper
+    /// Soft shaded spheres on a dusk gradient (GW-22): strong colored edges
+    /// and fine structure, so a lens's magnification and dispersion show.
+    case orbs
 
     /// The name used on the command line and in accessibility identifiers.
     var identifier: String {
@@ -29,6 +32,7 @@ enum BenchPage: Int, CaseIterable {
         case .ribbons: "ribbons"
         case .charcoal: "charcoal"
         case .paper: "paper"
+        case .orbs: "orbs"
         }
     }
 
@@ -39,6 +43,7 @@ enum BenchPage: Int, CaseIterable {
         case .ribbons: String(localized: "Ribbons")
         case .charcoal: String(localized: "Charcoal")
         case .paper: String(localized: "Paper")
+        case .orbs: String(localized: "Orbs")
         }
     }
 
@@ -156,8 +161,8 @@ final class BenchBackground {
 /// - **Lens** (`-lab.lens YES`, or the lab's "Thick lens" button): the thick
 ///   lens of `GlassLens` on a wide pill with an inlaid dome button, a dome
 ///   marble, a ring, and a fold pair, over a bench page
-///   (`-lab.lensBackdrop <page>`, default the dot grid, to see the
-///   magnification and the bending; the ribbons show the dispersion).
+///   (`-lab.lensBackdrop <page>`, default the orbs, whose colored edges show
+///   the dispersion; the dot grid shows the magnification and the bending).
 ///
 /// - **Bench** (`-lab.bench <page>`): one bench page full screen with a few
 ///   plain glass panels over it, and a control to switch pages, so a look is
@@ -219,7 +224,7 @@ final class MaterialBenchViewController: UIViewController {
         switch mode {
         case .bench: pages = BenchPage.allCases
         case .lightFields: pages = [.charcoal, .ribbons, .paper]
-        case .lens: pages = [.dotGrid, .checkerboard, .ribbons, .charcoal]
+        case .lens: pages = [.orbs, .dotGrid, .checkerboard, .ribbons]
         }
         pageControl = UISegmentedControl(items: pages.map(\.title))
         stillTime = UserDefaults.standard.object(forKey: "lab.lightTime") == nil
@@ -254,17 +259,17 @@ final class MaterialBenchViewController: UIViewController {
     /// The lens page's panels: a thick pill, a dome marble, a ring, and a
     /// fold pair.
     private static let lensDemos: [Demo] = [
-        Demo(caption: String(localized: "Thick lens pill: circular bevel, IOR 1.5"), parameters: GlassParameters(
-            cornerRadius: 999, bezelWidth: 34, refraction: 0.6, edgeHighlight: 0.6,
-            lens: GlassLens(profile: .circular, thickness: 34, indexOfRefraction: 1.5, maximumOffset: 80, allowsFold: true)
+        Demo(caption: String(localized: "Thick lens pill: circular bevel, IOR 1.5, six-tap dispersion"), parameters: GlassParameters(
+            cornerRadius: 999, bezelWidth: 46, refraction: 0.6, edgeHighlight: 0.8,
+            lens: GlassLens(profile: .squircle(exponent: 3), thickness: 40, indexOfRefraction: 1.5, maximumOffset: 80, allowsFold: true, dispersion: 1, dispersionTaps: .sixTap)
         )),
-        Demo(caption: String(localized: "Dome"), parameters: GlassParameters(
+        Demo(caption: String(localized: "Dome, three-tap"), parameters: GlassParameters(
             cornerRadius: 999, bezelWidth: 60, refraction: 0.6, edgeHighlight: 0.6,
-            lens: GlassLens(profile: .dome, thickness: 48, indexOfRefraction: 1.5, maximumOffset: 80)
+            lens: GlassLens(profile: .dome, thickness: 48, indexOfRefraction: 1.5, maximumOffset: 80, dispersion: 0.8)
         )),
-        Demo(caption: String(localized: "Ring"), parameters: GlassParameters(
+        Demo(caption: String(localized: "Ring, six-tap"), parameters: GlassParameters(
             cornerRadius: 999, bezelWidth: 20, refraction: 0.6, edgeHighlight: 0.6,
-            lens: GlassLens(profile: .ring(center: 13, width: 14), thickness: 26, indexOfRefraction: 1.6, maximumOffset: 80, allowsFold: true)
+            lens: GlassLens(profile: .ring(center: 13, width: 14), thickness: 26, indexOfRefraction: 1.6, maximumOffset: 80, allowsFold: true, dispersion: 1, dispersionTaps: .sixTap)
         )),
         Demo(caption: String(localized: "Fold off: magnified, never mirrored"), parameters: GlassParameters(
             cornerRadius: 28, bezelWidth: 32, refraction: 0.6, edgeHighlight: 0.5,

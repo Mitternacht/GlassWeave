@@ -374,7 +374,9 @@ struct GlassPanelGeometry: Equatable {
             lensOffsetScale: Float(lens?.offsetScale ?? 0),
             lensProfileA: Float(lens?.profileA ?? 0),
             lensProfileB: Float(lens?.profileB ?? 0),
-            padding9: 0, padding10: 0, padding11: 0
+            lensDispersion: Float(lens?.dispersion ?? 0),
+            lensTapCount: lens?.tapCount ?? 0,
+            padding11: 0
         )
     }
 

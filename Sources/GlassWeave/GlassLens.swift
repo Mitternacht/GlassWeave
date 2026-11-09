@@ -25,6 +25,8 @@ import Foundation
 /// | ``thickness`` | points | 0 to ``maximumThickness`` | 24 | The glass height at its thickest. The thicker the glass, the harder it bends. |
 /// | ``indexOfRefraction`` | ratio | 1 to ``maximumIndexOfRefraction`` | 1.5 | 1 shows the background unbent. Glass is about 1.5. |
 /// | ``maximumOffset`` | points | 0 to ``maximumMaximumOffset`` | 48 | The longest any sample moves. |
+/// | ``dispersion`` | normalized | 0...1 | 0 | Chromatic dispersion: how far the index of refraction differs between red and blue light. Where the glass bends hard (its bevel), the background splits into colored fringes; white and gray stay neutral. 0 draws none. |
+/// | ``dispersionTaps`` | ``DispersionTaps`` | — | ``DispersionTaps/threeTap`` | How the spectrum is sampled: one sample each for red, green, and blue, or six wavelengths blended into smooth rainbows. Both keep the weights of every channel summing to 1 in linear light, so white stays white. |
 /// | ``allowsFold`` | `Bool` | — | `false` | When `false`, the offsets are scaled down just enough that the sampled position never turns back along the bevel, so content is magnified but never mirrored. When `true`, a thick bevel folds the content over, as a real glass edge can. |
 ///
 /// **The math** (see `docs/glass-optics.md`). The height is
@@ -62,6 +64,16 @@ public struct GlassLens: Hashable, Sendable {
         case ring(center: Double, width: Double)
     }
 
+    /// How the spectrum is sampled for ``dispersion``.
+    public enum DispersionTaps: Hashable, Sendable {
+        /// Three samples: red, green, and blue each from their own
+        /// wavelength. The cheapest; the fringes are three-colored.
+        case threeTap
+        /// Six samples across the spectrum, blended into red, green, and
+        /// blue with weights that sum to 1 per channel: a smooth rainbow.
+        case sixTap
+    }
+
     /// The height profile of the glass.
     public var profile: Profile
     /// The glass height at its thickest, in points.
@@ -72,6 +84,10 @@ public struct GlassLens: Hashable, Sendable {
     public var maximumOffset: Double
     /// Whether the content may fold over where the glass bends hardest.
     public var allowsFold: Bool
+    /// Chromatic dispersion, 0...1.
+    public var dispersion: Double
+    /// How the spectrum is sampled where the colors separate.
+    public var dispersionTaps: DispersionTaps
 
     /// The thickest glass: 64 points.
     public static let maximumThickness = 64.0
@@ -85,22 +101,28 @@ public struct GlassLens: Hashable, Sendable {
         thickness: Double = 24,
         indexOfRefraction: Double = 1.5,
         maximumOffset: Double = 48,
-        allowsFold: Bool = false
+        allowsFold: Bool = false,
+        dispersion: Double = 0,
+        dispersionTaps: DispersionTaps = .threeTap
     ) {
         self.profile = profile
         self.thickness = thickness
         self.indexOfRefraction = indexOfRefraction
         self.maximumOffset = maximumOffset
         self.allowsFold = allowsFold
+        self.dispersion = dispersion
+        self.dispersionTaps = dispersionTaps
     }
 
     /// No lens: the panel's original rim refraction.
     public static let none = GlassLens()
 
     /// Whether the lens changes the picture: a profile other than
-    /// ``Profile/rim``. A panel without it is drawn by the base pipeline.
+    /// ``Profile/rim``, or dispersion above 0 (on the rim profile it splits
+    /// the rim's displacement by wavelength). A panel without it is drawn by
+    /// the base pipeline.
     public var isActive: Bool {
-        profile != .rim
+        profile != .rim || dispersion > 0
     }
 
     /// The lens parameter that held a rejected value.
@@ -108,6 +130,7 @@ public struct GlassLens: Hashable, Sendable {
         case thickness
         case indexOfRefraction
         case maximumOffset
+        case dispersion
         case squircleExponent
         case ringCenter
         case ringWidth
@@ -119,6 +142,7 @@ public struct GlassLens: Hashable, Sendable {
     package func normalized(maximumLength: Double) throws(GlassParameterError) -> GlassLens {
         var checks: [(Field, Double)] = [
             (.thickness, thickness), (.indexOfRefraction, indexOfRefraction), (.maximumOffset, maximumOffset),
+            (.dispersion, dispersion),
         ]
         switch profile {
         case let .squircle(exponent): checks.append((.squircleExponent, exponent))
@@ -133,6 +157,7 @@ public struct GlassLens: Hashable, Sendable {
         lens.thickness = clamp(thickness, 0, Self.maximumThickness)
         lens.indexOfRefraction = clamp(indexOfRefraction, 1, Self.maximumIndexOfRefraction)
         lens.maximumOffset = clamp(maximumOffset, 0, Self.maximumMaximumOffset)
+        lens.dispersion = clamp(dispersion, 0, 1)
         switch profile {
         case let .squircle(exponent): lens.profile = .squircle(exponent: clamp(exponent, 1, 8))
         case let .ring(center, width):

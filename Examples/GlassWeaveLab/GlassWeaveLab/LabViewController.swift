@@ -190,7 +190,7 @@ final class LabViewController: UIViewController {
                 openBench(.bench, page: page, animated: false)
             } else if defaults.bool(forKey: "lab.lens") {
                 openedBenchAtLaunch = true
-                openBench(.lens, page: BenchPage.named(defaults.string(forKey: "lab.lensBackdrop")) ?? .dotGrid, animated: false)
+                openBench(.lens, page: BenchPage.named(defaults.string(forKey: "lab.lensBackdrop")) ?? .orbs, animated: false)
             } else if defaults.bool(forKey: "lab.lightFields") {
                 openedBenchAtLaunch = true
                 openBench(.lightFields, page: BenchPage.named(defaults.string(forKey: "lab.lightBackdrop")) ?? .charcoal, animated: false)
@@ -515,7 +515,7 @@ final class LabViewController: UIViewController {
         lightFieldsButton.isHidden = benchmark != nil
         lensButton.configuration?.title = String(localized: "Thick lens")
         lensButton.accessibilityIdentifier = "lab.openLens"
-        lensButton.addAction(UIAction { [weak self] _ in self?.openBench(.lens, page: .dotGrid, animated: true) }, for: .primaryActionTriggered)
+        lensButton.addAction(UIAction { [weak self] _ in self?.openBench(.lens, page: .orbs, animated: true) }, for: .primaryActionTriggered)
         lensButton.isHidden = benchmark != nil
 
         let tintRow = Self.row([tintControl, UIView(), Self.caption(String(localized: "Enabled")), enabledSwitch])

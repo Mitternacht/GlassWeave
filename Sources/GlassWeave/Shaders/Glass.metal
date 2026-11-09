@@ -695,15 +695,79 @@ static float2 gw_lens_offset(GWLensField field, float ior, constant GWGlassUnifo
     return offset;
 }
 
-/// The glass color at a pixel under a lens, in linear light.
+/// How far the index of refraction of red and blue light differs from the
+/// base index at dispersion 1.
+constant float gw_lens_ior_spread = 0.12;
+/// How far the original rim's displacement differs between red and blue
+/// light at dispersion 1, as a fraction of it.
+constant float gw_lens_rim_spread = 0.35;
+/// The smallest red-to-blue separation, in pixels, that is worth separate
+/// samples; below it the colors are not split.
+constant float gw_lens_min_separation = 0.25;
+/// The six wavelengths of the six-tap spectrum, -1 (red) to 1 (blue).
+constant float gw_lens_tap_x[6] = {-1.0, -0.6, -0.2, 0.2, 0.6, 1.0};
+/// Each tap's weights in red, green, and blue: triangles centered on
+/// -1, 0, and 1, normalized so every channel's weights sum to 1 (a white
+/// source stays white).
+constant float3 gw_lens_tap_weight[6] = {
+    float3(11.0 / 21.0, 0.0, 0.0),
+    float3(7.0 / 21.0, 0.15, 0.0),
+    float3(3.0 / 21.0, 0.35, 0.0),
+    float3(0.0, 0.35, 3.0 / 21.0),
+    float3(0.0, 0.15, 7.0 / 21.0),
+    float3(0.0, 0.0, 11.0 / 21.0),
+};
+
+/// Whether the thick-lens path draws the panel: a lens profile, or
+/// dispersion on the original rim.
+static bool gw_lens_active(constant GWGlassUniforms &uniforms) {
+    return uniforms.lensProfile != GWLensProfileRim || uniforms.lensTapCount > 0u;
+}
+
+/// The glass color at a pixel under a lens, in linear light. `rimNormal` and
+/// `rimDisplacement` are the original rim's, used when the host profile is
+/// the rim (with dispersion).
+///
+/// Dispersion: a wavelength `x` (-1 red, 0 green, 1 blue) sees the index
+/// `ior + x * dispersion * 0.12`, and the rim's displacement scaled by
+/// `1 + x * dispersion * 0.35`. Where red and blue land less than a quarter
+/// pixel apart there is one sample, as without dispersion; elsewhere three
+/// samples give red, green, and blue their own wavelength, or six wavelengths
+/// are blended with weights that sum to 1 per channel. Every sample keeps the
+/// valid-rectangle clamp.
 static float3 gw_lens_glass(
-    float2 pixel, float2 q, constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
+    float2 pixel, float2 q, float2 rimNormal, float rimDisplacement,
+    constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
 {
     const GWShapeSample shape = gw_shape_rounded_rect(q, uniforms);
     const GWLensField field = gw_lens_host(shape, uniforms);
-    return gw_glass_sample(pixel + gw_lens_offset(field, uniforms.lensIOR, uniforms), uniforms, source);
+    const float2 rim = uniforms.lensProfile == GWLensProfileRim ? -rimNormal * rimDisplacement : float2(0.0);
+    const float ior = uniforms.lensIOR;
+    const float2 center = rim + gw_lens_offset(field, ior, uniforms);
+    if (uniforms.lensTapCount == 0u || uniforms.lensDispersion <= 0.0) {
+        return gw_glass_sample(pixel + center, uniforms, source);
+    }
+    const float spread = uniforms.lensDispersion * gw_lens_ior_spread;
+    const float rimSpread = uniforms.lensDispersion * gw_lens_rim_spread;
+    const float2 red = rim * (1.0 - rimSpread) + gw_lens_offset(field, max(ior - spread, 1.0), uniforms);
+    const float2 blue = rim * (1.0 + rimSpread) + gw_lens_offset(field, ior + spread, uniforms);
+    const float2 separation = blue - red;
+    if (dot(separation, separation) < gw_lens_min_separation * gw_lens_min_separation) {
+        return gw_glass_sample(pixel + center, uniforms, source);
+    }
+    if (uniforms.lensTapCount == 3u) {
+        return float3(gw_glass_sample(pixel + red, uniforms, source).r,
+                      gw_glass_sample(pixel + center, uniforms, source).g,
+                      gw_glass_sample(pixel + blue, uniforms, source).b);
+    }
+    float3 color = float3(0.0);
+    for (uint tap = 0u; tap < 6u; ++tap) {
+        const float x = gw_lens_tap_x[tap];
+        const float2 offset = rim * (1.0 + x * rimSpread) + gw_lens_offset(field, max(ior + x * spread, 1.0), uniforms);
+        color += gw_lens_tap_weight[tap] * gw_glass_sample(pixel + offset, uniforms, source);
+    }
+    return color;
 }
-
 
 /// One rounded glass panel over the background.
 ///
@@ -812,9 +876,9 @@ fragment float4 gw_glass_fragment(
     const float2 normal = gw_rounded_rect_normal(q, uniforms.panelHalfSize, uniforms.normalRadius);
     const float displacement = uniforms.maxDisplacement * rim * rim;
     float3 glass;
-    if (gw_optics && uniforms.lensProfile != GWLensProfileRim) {
+    if (gw_optics && gw_lens_active(uniforms)) {
         // The thick lens (GW-22) replaces the rim refraction.
-        glass = gw_lens_glass(pixel, q, uniforms, source);
+        glass = gw_lens_glass(pixel, q, normal, displacement, uniforms, source);
     } else {
         glass = gw_glass_sample(pixel - normal * displacement, uniforms, source);
     }

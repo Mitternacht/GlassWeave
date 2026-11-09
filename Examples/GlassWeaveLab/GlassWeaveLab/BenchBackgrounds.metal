@@ -10,10 +10,12 @@ using namespace metal;
 // `bgra8Unorm_srgb` view of the same texture.
 //
 // Parameters (`constant float4 *`, one block):
-//   x pixels per point, y page (0...4), z width in points, w height in points
+//   x pixels per point, y page (0...5), z width in points, w height in points
 //
 // Pages: 0 dot grid, 1 checkerboard, 2 color ribbons, 3 charcoal stage,
-// 4 light paper.
+// 4 light paper, 5 orbs (GW-22: soft shaded spheres on a dusk gradient, an
+// original backdrop with strong colored edges and fine structure, to show a
+// lens's magnification and dispersion).
 
 struct BenchVertexOut {
     float4 position [[position]];
@@ -41,6 +43,28 @@ static float3 bench_hue(float t) {
     const float3 phase = float3(0.0, 0.33, 0.67);
     return saturate(0.5 + 0.5 * cos(6.2831853 * (t + phase)) * 1.1 - 0.05);
 }
+
+/// One orb of page 5: `x`, `y` the center and `z` the radius, in units of the
+/// page width, and `w` the hue position on the palette below.
+constant float4 bench_orbs[18] = {
+    float4(0.10, 0.20, 0.26, 1.0), float4(0.52, 0.12, 0.22, 5.0), float4(0.92, 0.25, 0.28, 2.0),
+    float4(0.30, 0.45, 0.20, 0.0), float4(0.70, 0.52, 0.24, 4.0), float4(0.05, 0.75, 0.22, 3.0),
+    float4(0.45, 0.80, 0.28, 1.0), float4(0.88, 0.82, 0.20, 0.0), float4(0.22, 1.10, 0.25, 4.0),
+    float4(0.62, 1.12, 0.22, 2.0), float4(0.98, 1.15, 0.26, 5.0), float4(0.08, 1.45, 0.27, 0.0),
+    float4(0.48, 1.42, 0.24, 3.0), float4(0.85, 1.50, 0.28, 1.0), float4(0.30, 1.80, 0.30, 2.0),
+    float4(0.75, 1.85, 0.30, 4.0), float4(0.50, 2.10, 0.30, 0.0), float4(0.05, 2.05, 0.26, 5.0),
+};
+
+/// The orbs' base colors, in sRGB-encoded values: mauve pink, steel blue,
+/// periwinkle, violet, orange-magenta, and cyan.
+constant float3 bench_orb_colors[6] = {
+    float3(0.80, 0.50, 0.70),
+    float3(0.40, 0.55, 0.86),
+    float3(0.55, 0.52, 0.92),
+    float3(0.62, 0.34, 0.80),
+    float3(0.95, 0.40, 0.45),
+    float3(0.30, 0.78, 0.92),
+};
 
 fragment float4 bench_background_fragment(
     BenchVertexOut in [[stage_in]],
@@ -92,6 +116,31 @@ fragment float4 bench_background_fragment(
         const float onFloor = smoothstep(horizon - 0.5, horizon + 0.5, p.y);
         color = float3(mix(wall, floorShade, onFloor)) * float3(1.0, 1.02, 1.08);
         color += float3(0.10, 0.105, 0.12) * exp(-abs(p.y - horizon) / 1.1);
+        break;
+    }
+    case 5: {
+        // Orbs: a dusk gradient from steel blue to deep violet with soft
+        // spheres lit from the upper left, each with a fine grain like felt,
+        // painted back to front with antialiased edges.
+        const float unit = max(size.x, 320.0);
+        const float2 u = p / unit;
+        color = mix(float3(0.36, 0.52, 0.70), float3(0.20, 0.09, 0.30), saturate(p.y / max(size.y, 1.0)));
+        const float grain = bench_hash(floor(p * 0.75)) - 0.5;
+        for (uint i = 0; i < 18; ++i) {
+            const float4 orb = bench_orbs[i];
+            const float2 offset = (u - orb.xy) / orb.z;
+            const float r = length(offset);
+            const float edge = bench_fill((r - 1.0) * orb.z * unit, pixel);
+            if (edge > 0.0) {
+                const float3 normal = float3(offset, sqrt(max(1.0 - r * r, 0.0)));
+                const float light = saturate(dot(normal, normalize(float3(-0.5, -0.65, 0.6))));
+                const float limb = 0.55 + 0.45 * pow(saturate(normal.z), 0.6);
+                float3 base = bench_orb_colors[uint(orb.w + 0.5)];
+                float3 shaded = base * (0.30 + 0.85 * light) * limb + float3(0.05) * pow(light, 6.0);
+                shaded *= 1.0 + 0.22 * grain;
+                color = mix(color, shaded, edge);
+            }
+        }
         break;
     }
     default: {

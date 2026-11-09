@@ -124,7 +124,8 @@ struct ShaderLayoutTests {
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensOffsetScale) == 1032)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensProfileA) == 1036)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensProfileB) == 1040)
-        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding9) == 1044)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensDispersion) == 1044)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensTapCount) == 1048)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding11) == 1052)
         #expect(MemoryLayout<GWLightEmitter>.size == 112)
         #expect(MemoryLayout<GWLightEmitter>.alignment == 16)
@@ -239,7 +240,7 @@ struct ShaderLayoutTests {
             lensOffsetScale: 0.8125,
             lensProfileA: 0.4375,
             lensProfileB: 0.0625,
-            padding9: -990, padding10: -989, padding11: -988
+            lensDispersion: 0.1875, lensTapCount: 6, padding11: -988
         )
         let expected: [Float] = [
             1.5, -2.25, 3.125, -4.0625, 5.5, -6.75, 0.03125, 0.0625, 7.875, -8.5,

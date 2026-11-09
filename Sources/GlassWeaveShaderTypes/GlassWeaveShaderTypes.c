@@ -76,8 +76,8 @@ _Static_assert(offsetof(GWGlassUniforms, lensMaximumOffset) == 1028, "lensMaximu
 _Static_assert(offsetof(GWGlassUniforms, lensOffsetScale) == 1032, "lensOffsetScale offset");
 _Static_assert(offsetof(GWGlassUniforms, lensProfileA) == 1036, "lensProfileA offset");
 _Static_assert(offsetof(GWGlassUniforms, lensProfileB) == 1040, "lensProfileB offset");
-_Static_assert(offsetof(GWGlassUniforms, padding9) == 1044, "padding9 offset");
-_Static_assert(offsetof(GWGlassUniforms, padding10) == 1048, "padding10 offset");
+_Static_assert(offsetof(GWGlassUniforms, lensDispersion) == 1044, "lensDispersion offset");
+_Static_assert(offsetof(GWGlassUniforms, lensTapCount) == 1048, "lensTapCount offset");
 _Static_assert(offsetof(GWGlassUniforms, padding11) == 1052, "padding11 offset");
 _Static_assert(GWLensProfileRim == 0 && GWLensProfileCircular == 1 && GWLensProfileSquircle == 2 && GWLensProfileChamfer == 3 && GWLensProfileDome == 4 && GWLensProfileRing == 5, "GWLensProfile values");
 

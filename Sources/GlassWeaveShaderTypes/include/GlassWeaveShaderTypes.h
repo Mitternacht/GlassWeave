@@ -257,6 +257,11 @@ typedef struct GWLightEmitter {
 ///   lens may not fold (see `GlassLens.allowsFold`).
 /// - `lensProfileA`, `lensProfileB`: the profile's parameters (see
 ///   `GWLensProfile`).
+/// - `lensDispersion`: 0...1, how far the wavelengths' indices of refraction
+///   spread (and, for the rim profile, how far their displacements spread);
+///   0 draws no dispersion.
+/// - `lensTapCount`: the wavelength samples per pixel where the colors
+///   separate: 0 (no dispersion), 3 or 6.
 ///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
@@ -278,7 +283,8 @@ typedef struct GWLightEmitter {
 /// to zero), lightEmitters 560 (4 × 112 bytes); lensProfile 1008,
 /// lensThickness 1012, lensBevel 1016, lensFieldRadius 1020, lensIOR 1024,
 /// lensMaximumOffset 1028, lensOffsetScale 1032, lensProfileA 1036,
-/// lensProfileB 1040, explicit padding 1044, 1048, 1052 (set to zero).
+/// lensProfileB 1040, lensDispersion 1044, lensTapCount 1048, explicit padding
+/// 1052 (set to zero).
 /// Size 1056, alignment 16, stride 1056.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
@@ -344,8 +350,8 @@ typedef struct GWGlassUniforms {
     float lensOffsetScale;
     float lensProfileA;
     float lensProfileB;
-    float padding9;
-    float padding10;
+    float lensDispersion;
+    uint32_t lensTapCount;
     float padding11;
 } GWGlassUniforms;
 
