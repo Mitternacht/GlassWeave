@@ -111,7 +111,9 @@ struct FrameLifecycleTests {
                     }
                 }
             )
-            if !committed { scheduler.drawSkipped() }
+            // Nothing here requests during a draw, so a skip never leaves
+            // a frame to wake up for.
+            if !committed { #expect(!scheduler.drawSkipped()) }
             #expect(outcome != .skipped(.encoderUnavailable))
             return decision
         }

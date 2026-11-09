@@ -44,6 +44,10 @@ package enum FrameDrawDecision: Hashable, Sendable {
     /// ``FrameLedger/maxFramesInFlight`` frames are in flight. The frame stays
     /// pending and is drawn when one completes.
     case deferredAtLimit
+    /// No frame was requested since the last draw, so the pass draws
+    /// nothing: a display pass the host did not ask for, or a second pass
+    /// for a request an earlier pass already drew.
+    case nothingPending
 }
 
 /// The scheduling state machine of one host, separate from locking so tests
@@ -51,7 +55,8 @@ package enum FrameDrawDecision: Hashable, Sendable {
 ///
 /// The policy:
 /// - **On demand.** Nothing is drawn unless something requested a frame.
-///   A stationary source with a settled surface therefore submits nothing.
+///   A display pass with no pending request draws nothing, so a stationary
+///   source with a settled surface submits nothing however many passes run.
 /// - **Coalesced.** Any number of requests before the next permitted draw
 ///   become one pending draw.
 /// - **Visibility.** While the host is not visible, requests and draws are
@@ -92,16 +97,18 @@ package struct FrameLedger: Hashable, Sendable {
     }
 
     /// Decides whether a display pass may draw. A permitted draw reserves an
-    /// in-flight slot and consumes the pending request.
+    /// in-flight slot and consumes the pending request; a pass with nothing
+    /// pending draws nothing and changes nothing.
     package mutating func beginDraw() -> FrameDrawDecision {
         precondition(!drawInProgress, "A draw began before the previous one ended")
+        guard hasPendingFrame else {
+            return .nothingPending
+        }
         guard isVisible else {
-            hasPendingFrame = true
             statistics.deferredWhileHidden += 1
             return .deferredWhileHidden
         }
         guard statistics.framesInFlight < maxFramesInFlight else {
-            hasPendingFrame = true
             statistics.deferredAtLimit += 1
             return .deferredAtLimit
         }
@@ -121,11 +128,19 @@ package struct FrameLedger: Hashable, Sendable {
     }
 
     /// The permitted draw committed nothing; its slot is free again.
-    package mutating func drawSkipped() {
+    ///
+    /// Returns `true` when a frame is pending and can be drawn now, so the
+    /// host should schedule a display pass. That happens when a request
+    /// arrived during the draw (from the producer or an observer) and found
+    /// the slot this draw had reserved, or a completion arrived during the
+    /// draw: both left the wake-up to the end of the draw, and a skipped
+    /// draw has no completion of its own to deliver it.
+    package mutating func drawSkipped() -> Bool {
         precondition(drawInProgress, "No draw is in progress")
         drawInProgress = false
         statistics.skipped += 1
         statistics.framesInFlight -= 1
+        return hasPendingFrame && isVisible && statistics.framesInFlight < maxFramesInFlight
     }
 
     /// A committed frame's GPU work completed. Returns `true` when a pending
@@ -183,7 +198,9 @@ package final class FrameScheduler: Sendable {
         ledger.withLock { $0.beginDraw() }
     }
 
-    package func drawSkipped() {
+    /// The permitted draw committed nothing. Returns `true` when a pending
+    /// frame can be drawn now: schedule a display pass.
+    package func drawSkipped() -> Bool {
         ledger.withLock { $0.drawSkipped() }
     }
 

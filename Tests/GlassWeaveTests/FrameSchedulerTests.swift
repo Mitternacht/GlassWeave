@@ -12,6 +12,12 @@ struct FrameLedgerTests {
         ledger.drawCommitted()
     }
 
+    /// Requests a frame and draws it, committing GPU work.
+    private func requestAndCommit(_ ledger: inout FrameLedger) {
+        _ = ledger.request()
+        drawAndCommit(&ledger)
+    }
+
     @Test func `A request asks for one draw, which consumes it`() {
         var ledger = FrameLedger(maxFramesInFlight: 2, isVisible: true)
         #expect(!ledger.hasPendingFrame)
@@ -26,6 +32,38 @@ struct FrameLedgerTests {
         #expect(ledger.statistics.submitted == 1)
         #expect(ledger.statistics.completed == 1)
         #expect(ledger.statistics.framesInFlight == 0)
+    }
+
+    @Test func `A display pass with nothing requested draws nothing`() {
+        var ledger = FrameLedger(maxFramesInFlight: 2, isVisible: true)
+        #expect(ledger.beginDraw() == .nothingPending)
+        #expect(ledger.statistics == FrameStatistics(), "Nothing is counted or reserved")
+        requestAndCommit(&ledger)
+        #expect(ledger.beginDraw() == .nothingPending, "The request was already drawn")
+        _ = ledger.frameCompleted()
+        #expect(ledger.beginDraw() == .nothingPending)
+        // A pass while hidden with nothing requested leaves nothing to draw
+        // when the host is shown again.
+        _ = ledger.setVisible(false)
+        #expect(ledger.beginDraw() == .nothingPending)
+        #expect(!ledger.hasPendingFrame)
+        let drawOnShow = ledger.setVisible(true)
+        #expect(!drawOnShow)
+        #expect(ledger.statistics.submitted == 1)
+        #expect(ledger.statistics.deferredWhileHidden == 0)
+    }
+
+    @Test func `A completion racing a scheduled pass adds no frame`() {
+        var ledger = FrameLedger(maxFramesInFlight: 2, isVisible: true)
+        requestAndCommit(&ledger)
+        // A new request schedules a pass; before that pass runs, the frame
+        // in flight completes and schedules a second one.
+        let scheduledByRequest = ledger.request()
+        let scheduledByCompletion = ledger.frameCompleted()
+        #expect(scheduledByRequest && scheduledByCompletion)
+        drawAndCommit(&ledger)
+        #expect(ledger.beginDraw() == .nothingPending, "The second pass finds the request drawn")
+        #expect(ledger.statistics.submitted == 2)
     }
 
     @Test func `Requests before the next draw coalesce into one`() {
@@ -64,8 +102,8 @@ struct FrameLedgerTests {
 
     @Test func `The in-flight bound defers a draw until a frame completes`() {
         var ledger = FrameLedger(maxFramesInFlight: 2, isVisible: true)
-        drawAndCommit(&ledger)
-        drawAndCommit(&ledger)
+        requestAndCommit(&ledger)
+        requestAndCommit(&ledger)
         #expect(ledger.statistics.framesInFlight == 2)
         let schedule = ledger.request()
         #expect(!schedule, "At the bound, a request waits for a completion")
@@ -82,17 +120,56 @@ struct FrameLedgerTests {
 
     @Test func `A skipped draw frees its slot without a completion`() {
         var ledger = FrameLedger(maxFramesInFlight: 1, isVisible: true)
+        _ = ledger.request()
         #expect(ledger.beginDraw() == .draw)
-        ledger.drawSkipped()
+        let wake = ledger.drawSkipped()
+        #expect(!wake, "The skipped draw consumed the only request")
         #expect(ledger.statistics.framesInFlight == 0)
         #expect(ledger.statistics.skipped == 1)
+        _ = ledger.request()
         #expect(ledger.beginDraw() == .draw)
+    }
+
+    /// A request made during a draw (by the producer or an observer) finds
+    /// that draw's slot reserved. If the draw then commits nothing, no
+    /// completion will come for it, so the skip itself must wake the host.
+    @Test(arguments: [1, 2])
+    func `A request during a skipped draw is woken by the skip`(maxFramesInFlight: Int) {
+        var ledger = FrameLedger(maxFramesInFlight: maxFramesInFlight, isVisible: true)
+        // With a bound of 2, one frame is already in flight.
+        if maxFramesInFlight == 2 { requestAndCommit(&ledger) }
+        _ = ledger.request()
+        #expect(ledger.beginDraw() == .draw)
+        let scheduledByRequest = ledger.request()
+        #expect(!scheduledByRequest, "The draw in progress holds the last slot")
+        if maxFramesInFlight == 2 {
+            let scheduledByCompletion = ledger.frameCompleted()
+            #expect(!scheduledByCompletion, "A completion during a draw leaves the wake-up to the draw's end")
+        }
+        let wake = ledger.drawSkipped()
+        #expect(wake)
+        #expect(ledger.statistics.framesInFlight == 0)
+        #expect(ledger.beginDraw() == .draw)
+        ledger.drawCommitted()
+        #expect(!ledger.hasPendingFrame)
+    }
+
+    @Test func `A skip with the request still unable to draw leaves the wake-up to visibility`() {
+        var ledger = FrameLedger(maxFramesInFlight: 1, isVisible: true)
+        _ = ledger.request()
+        #expect(ledger.beginDraw() == .draw)
+        _ = ledger.request()
+        _ = ledger.setVisible(false)
+        let wake = ledger.drawSkipped()
+        #expect(!wake, "Hidden: nothing to draw yet")
+        let drawOnShow = ledger.setVisible(true)
+        #expect(drawOnShow)
     }
 
     @Test func `Completions while hidden keep the frame pending until shown`() {
         var ledger = FrameLedger(maxFramesInFlight: 2, isVisible: true)
-        drawAndCommit(&ledger)
-        drawAndCommit(&ledger)
+        requestAndCommit(&ledger)
+        requestAndCommit(&ledger)
         _ = ledger.request()
         _ = ledger.setVisible(false)
         let first = ledger.frameCompleted()
@@ -105,7 +182,7 @@ struct FrameLedgerTests {
 
     @Test func `Showing a host at the bound leaves the draw to the next completion`() {
         var ledger = FrameLedger(maxFramesInFlight: 1, isVisible: true)
-        drawAndCommit(&ledger)
+        requestAndCommit(&ledger)
         _ = ledger.setVisible(false)
         _ = ledger.request()
         let drawOnShow = ledger.setVisible(true)
@@ -114,42 +191,80 @@ struct FrameLedgerTests {
         #expect(drawAfterCompletion)
     }
 
-    /// A long seeded sequence of every operation keeps the invariants: never
-    /// more than the bound in flight, every submitted frame either completed
-    /// or still in flight, and a pending frame never lost.
+    /// A long seeded sequence of every operation, with requests, completions,
+    /// and visibility changes also arriving in the middle of a draw, keeps
+    /// the invariants: never more than the bound in flight, every submitted
+    /// frame either completed or still in flight, every draw answering a
+    /// request, and a pending frame never stranded.
     @Test(arguments: [1, 2, 3])
     func `Random operation sequences keep the bound and lose no pending frame`(maxFramesInFlight: Int) {
         var generator = SplitMix64(seed: UInt64(maxFramesInFlight) * 0x9E37_79B9)
         var ledger = FrameLedger(maxFramesInFlight: maxFramesInFlight, isVisible: true)
         var displayPassScheduled = false
-        for _ in 0..<5_000 {
-            switch generator.next() % 5 {
+        var drawing = false
+        // The model's own record of a request not yet drawn.
+        var requestedSinceLastDraw = false
+        var draws = 0
+        var unrequestedPasses = 0
+        for _ in 0..<20_000 {
+            switch generator.next() % 6 {
             case 0:
+                // A request: between passes, or from the producer or an
+                // observer during a draw.
+                requestedSinceLastDraw = true
                 if ledger.request() { displayPassScheduled = true }
             case 1:
-                // A display pass runs whether or not one was scheduled.
+                // A display pass runs whether or not one was scheduled
+                // (a duplicate wake-up, or one UIKit started itself).
+                guard !drawing else { break }
+                if !displayPassScheduled { unrequestedPasses += 1 }
                 displayPassScheduled = false
-                if ledger.beginDraw() == .draw {
-                    if generator.next() % 4 == 0 { ledger.drawSkipped() } else { ledger.drawCommitted() }
+                let pendingBefore = ledger.hasPendingFrame
+                let decision = ledger.beginDraw()
+                #expect((decision == .nothingPending) == !pendingBefore)
+                if decision == .draw {
+                    #expect(requestedSinceLastDraw, "A draw ran with nothing requested")
+                    requestedSinceLastDraw = false
+                    draws += 1
+                    drawing = true
                 }
             case 2:
-                if ledger.statistics.framesInFlight > 0, ledger.frameCompleted() {
-                    displayPassScheduled = true
+                // The draw in progress ends.
+                guard drawing else { break }
+                drawing = false
+                if generator.next() % 3 == 0 {
+                    if ledger.drawSkipped() { displayPassScheduled = true }
+                } else {
+                    ledger.drawCommitted()
                 }
             case 3:
+                // A completion, possibly during a draw. The draw in progress
+                // has reserved a slot but committed nothing yet.
+                let committedInFlight = ledger.statistics.framesInFlight - (drawing ? 1 : 0)
+                if committedInFlight > 0, ledger.frameCompleted() {
+                    displayPassScheduled = true
+                }
+            case 4:
                 if ledger.setVisible(generator.next() % 3 != 0) { displayPassScheduled = true }
             default:
                 break
             }
             let statistics = ledger.statistics
             #expect(statistics.framesInFlight >= 0 && statistics.framesInFlight <= maxFramesInFlight)
-            #expect(statistics.submitted == statistics.completed + statistics.framesInFlight)
-            // Liveness: a pending frame on a visible host always has a
-            // display pass scheduled or a completion that will schedule one.
-            if ledger.hasPendingFrame, ledger.isVisible {
+            let committedInFlight = statistics.framesInFlight - (drawing ? 1 : 0)
+            #expect(statistics.submitted == statistics.completed + committedInFlight)
+            #expect(ledger.hasPendingFrame == requestedSinceLastDraw)
+            // Liveness: once no draw is in progress, a pending frame on a
+            // visible host always has a display pass scheduled or a
+            // committed frame whose completion will schedule one.
+            if !drawing, ledger.hasPendingFrame, ledger.isVisible {
                 #expect(displayPassScheduled || statistics.framesInFlight > 0)
             }
         }
+        // The sequence exercised what it claims to.
+        #expect(draws > 500)
+        #expect(unrequestedPasses > 100)
+        #expect(ledger.statistics.skipped > 100)
     }
 }
 
@@ -159,6 +274,7 @@ struct FrameSchedulerTests {
         let frames = 1_000
         let scheduler = FrameScheduler(maxFramesInFlight: frames, isVisible: true)
         for _ in 0..<frames {
+            _ = scheduler.request()
             #expect(scheduler.beginDraw() == .draw)
             scheduler.drawCommitted()
         }

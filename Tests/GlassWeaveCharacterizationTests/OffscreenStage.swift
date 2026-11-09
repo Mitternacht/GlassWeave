@@ -164,8 +164,10 @@ final class OffscreenStage {
         } catch {
             Issue.record("The renderer rejected a produced frame: \(error)")
         }
-        if !committed {
-            scheduler.drawSkipped()
+        // Nothing requests during the stage's draws, so a skip never leaves
+        // a frame to wake up for.
+        if !committed, scheduler.drawSkipped() {
+            Issue.record("A skipped draw left a frame pending")
         }
     }
 

@@ -298,6 +298,21 @@ public final class GlassSurfaceView: UIView {
     /// Records a request and asks for a display pass when one may draw now.
     private func scheduleFrame() {
         if scheduler.request() {
+            requestDisplayPass()
+        }
+    }
+
+    /// Whether ``render(in:)`` is drawing: the app's producer or observer
+    /// may request a frame from inside the draw.
+    private var isDrawing = false
+
+    /// Asks the Metal view for a display pass. From inside a draw, the ask
+    /// is made after the draw returns, so the pass that is running cannot
+    /// absorb it.
+    private func requestDisplayPass() {
+        if isDrawing {
+            Task { @MainActor [weak self] in self?.metalView.setNeedsDisplay() }
+        } else {
             metalView.setNeedsDisplay()
         }
     }
@@ -340,7 +355,7 @@ public final class GlassSurfaceView: UIView {
         guard visible != isVisible else { return }
         isVisible = visible
         if scheduler.setVisible(visible) {
-            metalView.setNeedsDisplay()
+            requestDisplayPass()
         }
         if !visible {
             // Hidden drawables are not needed; the next visible draw
@@ -404,7 +419,10 @@ public final class GlassSurfaceView: UIView {
         // An ancestor's hidden state is not observable; check it here so a
         // hidden surface never draws.
         refreshVisibility()
+        // A pass with nothing requested draws nothing (on demand).
         guard scheduler.beginDraw() == .draw else { return }
+        isDrawing = true
+        defer { isDrawing = false }
         // Acquire the drawable as late as possible: after the checks and
         // after any frame production has been encoded.
         let acquireTarget = { () -> BackgroundDrawTarget? in
@@ -422,11 +440,8 @@ public final class GlassSurfaceView: UIView {
                 Task { @MainActor [weak self] in self?.metalView.setNeedsDisplay() }
             }
         }
-        defer {
-            if !committed { scheduler.drawSkipped() }
-        }
         let scale = traitCollection.displayScale
-        let outcome: BackgroundRenderOutcome
+        let outcome: BackgroundRenderOutcome?
         if let frameProducer {
             do {
                 outcome = try renderer.drawProducing(
@@ -437,12 +452,21 @@ public final class GlassSurfaceView: UIView {
             } catch {
                 // The previous source stays; the next request tries again.
                 lastProducedFrameError = error
-                return
+                outcome = nil
             }
         } else {
             outcome = renderer.draw(targetPixelSize: pixelSize, displayScale: scale, acquireTarget: acquireTarget, onCommit: onCommit)
         }
-        record(outcome)
+        // End the draw before the app's observer runs, so a request it makes
+        // finds the slot a skipped draw frees. A request or completion that
+        // arrived during a skipped draw left its wake-up to this point, and
+        // no completion of this draw will deliver it.
+        if !committed, scheduler.drawSkipped() {
+            requestDisplayPass()
+        }
+        if let outcome {
+            record(outcome)
+        }
     }
 
     private func record(_ outcome: BackgroundRenderOutcome) {

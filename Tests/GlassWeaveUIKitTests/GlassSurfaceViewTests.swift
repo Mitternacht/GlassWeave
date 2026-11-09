@@ -205,6 +205,26 @@ struct GlassSurfaceViewTests {
         #expect(surface.hostedMetalView.isHidden, "Without a producer or a source the fallback shows")
     }
 
+    @Test func `A display pass with nothing requested produces and submits nothing`() throws {
+        let surface = try makeSurface(scale: 2, size: CGSize(width: 40, height: 30))
+        var calls = 0
+        surface.setFrameProducer { _, _ in
+            calls += 1
+            return nil
+        }
+        surface.renderNow()
+        #expect(calls == 1)
+        let statistics = surface.frameStatistics
+        // Further passes, as UIKit or a duplicate wake-up can start them,
+        // find nothing requested.
+        for _ in 0..<5 { surface.renderNow() }
+        #expect(calls == 1)
+        #expect(surface.frameStatistics == statistics)
+        surface.requestFrame()
+        surface.renderNow()
+        #expect(calls == 2)
+    }
+
     @Test func `The surface is decorative and passes touches through`() throws {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
         let surface = try makeSurface(scale: 2, size: CGSize(width: 200, height: 200))
