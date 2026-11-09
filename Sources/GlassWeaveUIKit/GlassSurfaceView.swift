@@ -26,9 +26,11 @@ import UIKit
 /// - At most ``maximumFramesInFlight`` frames are committed and not yet
 ///   completed. A draw at that bound is deferred, never queued or waited
 ///   for; the pending frame is drawn when a frame completes.
-/// - Leaving the visible state releases the view's drawables. Every texture
-///   a submitted frame uses stays alive until that frame completes, and no
-///   path waits for the GPU.
+/// - Leaving the visible state stops drawing but frees nothing: the Metal
+///   layer keeps its drawables (up to three at the drawable size). The app
+///   can give back its own memory from ``visibilityHandler``, for example by
+///   trimming its texture pool. Every texture a submitted frame uses stays
+///   alive until that frame completes, and no path waits for the GPU.
 ///
 /// Defined skips, none of which waits on the GPU or the main thread:
 /// - No source: the Metal view is hidden and the opaque `backgroundColor`
@@ -357,12 +359,10 @@ public final class GlassSurfaceView: UIView {
         if scheduler.setVisible(visible) {
             requestDisplayPass()
         }
-        if !visible {
-            // Hidden drawables are not needed; the next visible draw
-            // acquires a new one. In-flight frames keep theirs until they
-            // complete.
-            metalView.releaseDrawables()
-        }
+        // Hiding frees nothing here: `MTKView.releaseDrawables()` releases
+        // only depth/stencil and multisample textures, which this view does
+        // not create, and the layer keeps its drawable pool. Memory a hidden
+        // surface can give back is the app's (see `visibilityHandler`).
         visibilityHandler?(visible)
     }
 
