@@ -16,7 +16,8 @@ import UIKit
 /// `-lab.source pattern` presents the still four-corner orientation pattern
 /// instead, for orientation checks. Launching with `-lab.benchmark <mode>`
 /// runs one mode of GW-09's fixed workload (``BenchmarkScenario``) with
-/// `RenderMetrics` recording.
+/// `RenderMetrics` recording. Launching with `-lab.glow <name>` gives the
+/// custom panel a colored glow (``LabGlow``, GW-17).
 final class LabViewController: UIViewController {
     enum SourceMode {
         case moving
@@ -33,6 +34,8 @@ final class LabViewController: UIViewController {
     private let mode = SourceMode.fromLaunchArguments
     /// GW-09's workload, when launched with `-lab.benchmark <mode>`.
     private let benchmark = BenchmarkScenario.fromLaunchArguments()
+    /// The panel's glow, when launched with `-lab.glow <name>`.
+    private let labGlow = LabGlow.fromLaunchArguments
 
     // MARK: Stage
 
@@ -582,7 +585,10 @@ final class LabViewController: UIViewController {
         if let minimum = tint.minimumStrength(forContrast: panelContrastTarget, againstTextLuminance: panelTextLuminance) {
             tint.strength = max(tint.strength, (minimum * 100).rounded(.up) / 100)
         }
-        return GlassParameters(cornerRadius: 30, bezelWidth: 22, refraction: 0.85, edgeHighlight: 0.6, tint: tint)
+        return GlassParameters(
+            cornerRadius: 30, bezelWidth: 22, refraction: 0.85, edgeHighlight: 0.6, tint: tint,
+            glow: labGlow?.glow(for: traitCollection) ?? .none
+        )
     }
 
     /// WCAG contrast the panel text must keep: 4.5:1, or 7:1 when Increase
@@ -1013,6 +1019,9 @@ final class LabViewController: UIViewController {
                 let surfaceKind = settings.reduceTransparency ? "opaque (Reduce Transparency)" : "glass"
                 let contrast = presented.worstCaseContrast(againstTextLuminance: panelTextLuminance)
                 lines.append("Panel: \(surfaceKind) · tint \(String(format: "%.2f", presented.strength)) · text contrast ≥ \(String(format: "%.1f", contrast)):1 (target \(String(format: "%.1f", panelContrastTarget)))")
+            }
+            if let labGlow, let glow = surface.presentedPanel?.parameters.glow {
+                lines.append("Glow: \(labGlow.rawValue) · \(glow.colors.count) colors · rim \(String(format: "%.1f", glow.rimWidth)) pt · inner \(String(format: "%.2f", glow.innerGlowIntensity)) · center \(String(format: "%.2f", glow.centerOpacity))")
             }
             lines.append("Accessibility: Reduce Motion \(settings.reduceMotion ? "on" : "off") · Reduce Transparency \(settings.reduceTransparency ? "on" : "off") · contrast \(traitCollection.accessibilityContrast == .high ? "high" : "normal") · \(traitCollection.userInterfaceStyle == .dark ? "dark" : "light") · text \(traitCollection.preferredContentSizeCategory.rawValue.replacingOccurrences(of: "UICTContentSizeCategory", with: ""))")
             let statistics = surface.frameStatistics
