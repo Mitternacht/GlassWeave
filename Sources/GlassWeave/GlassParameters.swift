@@ -205,6 +205,21 @@ extension GlassParameters {
 }
 
 extension GlassPanel {
+    /// Applies the normalization rule to every panel of a list and keeps the
+    /// first ``GlassRenderer/maximumPanelCount``. A non-finite value in any
+    /// panel, kept or not, throws.
+    package static func normalized(_ panels: [GlassPanel]) throws(GlassParameterError) -> [GlassPanel] {
+        var normalized: [GlassPanel] = []
+        normalized.reserveCapacity(min(panels.count, GlassRenderer.maximumPanelCount))
+        for panel in panels {
+            let checked = try panel.normalized()
+            if normalized.count < GlassRenderer.maximumPanelCount {
+                normalized.append(checked)
+            }
+        }
+        return normalized
+    }
+
     /// Applies the normalization rule to the frame and parameters.
     package func normalized() throws(GlassParameterError) -> GlassPanel {
         let values = [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height]

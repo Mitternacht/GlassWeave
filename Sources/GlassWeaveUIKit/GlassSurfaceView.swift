@@ -3,20 +3,23 @@ import GlassWeave
 import MetalKit
 import UIKit
 
-/// Presents an explicit background source, with an optional rounded glass
-/// panel over it, through an `MTKView`, on demand.
+/// Presents an explicit background source, with rounded glass panels over
+/// it, through an `MTKView`, on demand.
 ///
-/// The view draws only when something changes: a new source, a new panel, a
+/// The view draws only when something changes: a new source, new panels, a
 /// new pixel size, a display-scale change, an app request through
-/// ``requestFrame()``, or a tick of the view's effect clock while its glow
-/// animates. No other display loop runs; an app animating its source drives
-/// redraws from its own clock and can produce each frame inside the draw
-/// with ``setFrameProducer(_:)``. The panel is given in this view's points
-/// and converted with the same display scale as the drawable. The view sizes
-/// its drawable from its own bounds and `traitCollection.displayScale`,
-/// never from a screen or a global scene.
+/// ``requestFrame()``, or a tick of the view's effect clock while a glow or
+/// interior animates. No other display loop runs; an app animating its
+/// source drives redraws from its own clock and can produce each frame
+/// inside the draw with ``setFrameProducer(_:)``. Panels are given in this
+/// view's points and converted with the same display scale as the drawable:
+/// one with ``setPanel(_:)``, or an ordered list of up to
+/// `GlassRenderer.maximumPanelCount` with ``setPanels(_:)``, all drawn in one
+/// pass over the same frame (see `GlassRenderer` for how their quads must
+/// not overlap). The view sizes its drawable from its own bounds and
+/// `traitCollection.displayScale`, never from a screen or a global scene.
 ///
-/// Effect clock (``isAnimating``): while the presented panel's glow animates
+/// Effect clock (``isAnimating``): while any presented panel's glow animates
 /// (`GlassGlow.isAnimated`, a pulse) or its interior does
 /// (`GlassInterior.isAnimated`, a speed above 0), and the view is visible,
 /// the view runs one `UIUpdateLink` created for itself, so it follows its
@@ -144,7 +147,7 @@ public final class GlassSurfaceView: UIView {
     /// can stop its source's nonessential motion under Reduce Motion.
     public var accessibilitySettingsHandler: ((GlassAccessibilitySettings) -> Void)?
 
-    /// Whether the effect clock runs: the presented panel's glow or interior
+    /// Whether the effect clock runs: a presented panel's glow or interior
     /// animates (a pulse that Reduce Motion has not steadied, or an interior
     /// with a speed above 0 that Reduce Motion has not stilled) and the view
     /// is visible. While it runs, the view requests a frame on every display
@@ -161,8 +164,8 @@ public final class GlassSurfaceView: UIView {
     /// runs.
     private var effectLink: UIUpdateLink?
 
-    /// The panel as the app set it, after the normalization rule.
-    private var requestedPanel: GlassPanel?
+    /// The panels as the app set them, after the normalization rule.
+    private var requestedPanels: [GlassPanel] = []
 
     let scheduler = FrameScheduler(isVisible: false)
     private let metalView: MTKView
@@ -203,7 +206,7 @@ public final class GlassSurfaceView: UIView {
         }
         // The opaque surface color resolves for these traits.
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (self: Self, _) in
-            self.presentPanel()
+            self.presentPanels()
         }
         let center = NotificationCenter.default
         for name in [
@@ -227,7 +230,7 @@ public final class GlassSurfaceView: UIView {
         }
         guard settings != accessibilitySettings else { return }
         accessibilitySettings = settings
-        presentPanel()
+        presentPanels()
         accessibilitySettingsHandler?(settings)
     }
 
@@ -257,36 +260,64 @@ public final class GlassSurfaceView: UIView {
         scheduleFrame()
     }
 
-    /// The panel the app set, in this view's points, after the
-    /// `GlassParameters` normalization rule; `nil` for none.
+    /// The first panel the app set, in this view's points, after the
+    /// `GlassParameters` normalization rule; `nil` for none. After
+    /// ``setPanel(_:)`` it is that panel.
     public var panel: GlassPanel? {
-        requestedPanel
+        requestedPanels.first
     }
 
-    /// The panel actually drawn: ``panel`` after ``GlassAccessibilityPolicy``
-    /// for the current ``accessibilitySettings`` and traits.
+    /// The panels the app set, in drawing order, in this view's points,
+    /// after the `GlassParameters` normalization rule: at most
+    /// `GlassRenderer.maximumPanelCount`.
+    public var panels: [GlassPanel] {
+        requestedPanels
+    }
+
+    /// The first panel actually drawn: ``panel`` after
+    /// ``GlassAccessibilityPolicy`` for the current ``accessibilitySettings``
+    /// and traits.
     public var presentedPanel: GlassPanel? {
         renderer.panel
     }
 
-    /// Sets the panel, in this view's coordinate space and points, and
-    /// redraws if it changed. A non-finite value throws and leaves the
-    /// current panel in place.
-    public func setPanel(_ panel: GlassPanel?) throws(GlassParameterError) {
-        requestedPanel = try panel?.normalized()
-        presentPanel()
+    /// The panels actually drawn: each of ``panels`` after
+    /// ``GlassAccessibilityPolicy`` for the current ``accessibilitySettings``
+    /// and traits.
+    public var presentedPanels: [GlassPanel] {
+        renderer.panels
     }
 
-    /// Draws ``panel`` as the accessibility policy says, redrawing if that
+    /// Sets the one panel, in this view's coordinate space and points, and
+    /// redraws if it changed: ``setPanels(_:)`` with a list of that panel, or
+    /// an empty list for `nil`. A non-finite value throws and leaves the
+    /// current panels in place.
+    public func setPanel(_ panel: GlassPanel?) throws(GlassParameterError) {
+        try setPanels(panel.map { [$0] } ?? [])
+    }
+
+    /// Sets the panels, in drawing order, in this view's coordinate space and
+    /// points, and redraws once if what is drawn changed. Each panel follows
+    /// the `GlassParameters` normalization rule: a non-finite value in any of
+    /// them throws and leaves the current panels in place, and only the first
+    /// `GlassRenderer.maximumPanelCount` are kept. The accessibility policy
+    /// applies to each panel, and the effect clock runs while any presented
+    /// panel animates.
+    public func setPanels(_ panels: [GlassPanel]) throws(GlassParameterError) {
+        requestedPanels = try GlassPanel.normalized(panels)
+        presentPanels()
+    }
+
+    /// Draws ``panels`` as the accessibility policy says, redrawing if that
     /// changes what is drawn, and starts or stops the effect clock.
-    private func presentPanel() {
-        let presented = requestedPanel.map {
+    private func presentPanels() {
+        let presented = requestedPanels.map {
             GlassAccessibilityPolicy.presentedPanel(for: $0, settings: accessibilitySettings, traits: traitCollection)
         }
-        if presented != renderer.panel {
+        if presented != renderer.panels {
             // A presented panel derives from a normalized one and keeps every
             // value in range, so the renderer never rejects it.
-            try? renderer.setPanel(presented)
+            try? renderer.setPanels(presented)
             scheduleFrame()
         }
         updateEffectClock()
@@ -319,10 +350,11 @@ public final class GlassSurfaceView: UIView {
         }
     }
 
-    /// Whether the effect clock should run now.
+    /// Whether the effect clock should run now: the view is visible and a
+    /// presented panel's glow or interior animates.
     private var wantsEffectClock: Bool {
-        guard isVisible, let parameters = renderer.panel?.parameters else { return false }
-        return parameters.glow.isAnimated || parameters.interior.isAnimated
+        guard isVisible else { return false }
+        return renderer.panels.contains { $0.parameters.glow.isAnimated || $0.parameters.interior.isAnimated }
     }
 
     /// Starts or stops the effect clock to match ``wantsEffectClock``.

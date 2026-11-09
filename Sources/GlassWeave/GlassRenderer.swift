@@ -1,13 +1,22 @@
 import Metal
 internal import GlassWeaveShaderTypes
 
-/// Draws an explicit background source with one optional rounded glass
-/// panel over it, in a single render pass.
+/// Draws an explicit background source with rounded glass panels over it, in
+/// a single render pass: none, one (``setPanel(_:)``), or an ordered list of
+/// up to ``maximumPanelCount`` (``setPanels(_:)``).
 ///
-/// The panel samples the same frame, through the same destination-to-source
-/// mapping and valid-rectangle clamp, as the background it sits on, so the
-/// refraction can never show a different frame than the background around
-/// it. Without a panel the output is exactly the background pass.
+/// Every panel samples the same frame, through the same
+/// destination-to-source mapping and valid-rectangle clamp, as the background
+/// it sits on, so no refraction can show a different frame than the
+/// background around it. Without a panel the output is exactly the
+/// background pass.
+///
+/// Each panel is drawn as one quad after the background, in list order. A
+/// panel's quad covers its rectangle grown by one pixel and its glow's halo
+/// radius (`GlassGlow.haloRadius`) on every side, and every pixel of it is
+/// computed from the background sample, not from what an earlier panel drew:
+/// where two quads overlap, the later panel wins. Lay panels out so that
+/// their quads do not overlap; panels are not merged optically.
 ///
 /// Source handling (validation, ordering, leases, defined skips) is the
 /// ``BackgroundRenderer`` contract; this type adds the panel. Like that
@@ -25,9 +34,22 @@ public final class GlassRenderer {
     private let background: BackgroundRenderer
     private let panelPipeline: any MTLRenderPipelineState
 
-    /// The panel as drawn: the last panel passed to ``setPanel(_:)`` after
-    /// the ``GlassParameters`` normalization rule, or `nil` for none.
-    public private(set) var panel: GlassPanel?
+    /// The most panels one draw renders. ``setPanels(_:)`` keeps the first
+    /// this many, which bounds the work of a draw: each panel is one quad
+    /// whose fragments evaluate the glass, its glow, and its interior.
+    public static let maximumPanelCount = 8
+
+    /// The panels as drawn, in drawing order: the last list passed to
+    /// ``setPanels(_:)`` (or the one panel passed to ``setPanel(_:)``) after
+    /// the ``GlassParameters`` normalization rule, at most
+    /// ``maximumPanelCount`` of them. Empty for none.
+    public private(set) var panels: [GlassPanel] = []
+
+    /// The first panel as drawn, or `nil` for none. After ``setPanel(_:)``
+    /// it is that panel, normalized.
+    public var panel: GlassPanel? {
+        panels.first
+    }
 
     /// Records the CPU and GPU cost of every draw while set; `nil` (the
     /// default) measures nothing. See ``RenderMetrics``.
@@ -81,13 +103,27 @@ public final class GlassRenderer {
         self.commandQueue = commandQueue
     }
 
-    /// Sets the panel to draw, or `nil` for the background alone.
+    /// Sets the one panel to draw, or `nil` for the background alone. The
+    /// same as ``setPanels(_:)`` with a list of that panel or an empty list.
     ///
     /// The panel is normalized by the documented rule: a non-finite value
-    /// throws and leaves the current panel unchanged; finite out-of-range
+    /// throws and leaves the current panels unchanged; finite out-of-range
     /// values are clamped. Read ``panel`` for the values actually drawn.
     public func setPanel(_ panel: GlassPanel?) throws(GlassParameterError) {
-        self.panel = try panel?.normalized()
+        try setPanels(panel.map { [$0] } ?? [])
+    }
+
+    /// Sets the panels to draw, in drawing order, or an empty list for the
+    /// background alone.
+    ///
+    /// Every panel is normalized by the ``GlassParameters`` rule. A
+    /// non-finite value in any panel of the list, including one past the
+    /// maximum, throws ``GlassParameterError/nonFinite(_:)`` naming its
+    /// field and leaves the current panels unchanged. Only the first
+    /// ``maximumPanelCount`` panels are kept, as `GlassGlow` keeps its first
+    /// four color stops. Read ``panels`` for the values actually drawn.
+    public func setPanels(_ panels: [GlassPanel]) throws(GlassParameterError) {
+        self.panels = try GlassPanel.normalized(panels)
     }
 
     /// The frame currently presented, if any.
@@ -251,28 +287,33 @@ public final class GlassRenderer {
         acquireTarget: () -> BackgroundDrawTarget?,
         onCommit: (_ commandBuffer: any MTLCommandBuffer, _ frameID: UInt64, _ drewFrame: Bool) -> Void
     ) -> BackgroundRenderOutcome {
-        let panel = panel
+        let panels = panels
         let effectTime = effectTime
         return background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline] encoder, frame, backgroundUniforms, targetSize in
             // Converted only once a target exists, so the skips that run
             // before (including a zero display scale's zero-size target)
             // never see the scale.
-            guard let panel else { return }
-            let geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime)
-            guard !geometry.isEmpty else { return }
-            var uniforms = geometry.uniforms(
-                background: backgroundUniforms,
-                targetWidth: targetSize.width, targetHeight: targetSize.height
-            )
-            let length = MemoryLayout<GWGlassUniforms>.stride
-            let uniformsIndex = Int(GWGlassBindingIndexUniforms.rawValue)
-            encoder.pushDebugGroup("GlassWeave glass panel")
-            encoder.setRenderPipelineState(panelPipeline)
-            encoder.setVertexBytes(&uniforms, length: length, index: uniformsIndex)
-            encoder.setFragmentBytes(&uniforms, length: length, index: uniformsIndex)
-            encoder.setFragmentTexture(frame.texture, index: Int(GWGlassBindingIndexSourceTexture.rawValue))
-            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-            encoder.popDebugGroup()
+            var pipelineSet = false
+            for panel in panels {
+                let geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime)
+                guard !geometry.isEmpty else { continue }
+                var uniforms = geometry.uniforms(
+                    background: backgroundUniforms,
+                    targetWidth: targetSize.width, targetHeight: targetSize.height
+                )
+                let length = MemoryLayout<GWGlassUniforms>.stride
+                let uniformsIndex = Int(GWGlassBindingIndexUniforms.rawValue)
+                encoder.pushDebugGroup("GlassWeave glass panel")
+                if !pipelineSet {
+                    encoder.setRenderPipelineState(panelPipeline)
+                    encoder.setFragmentTexture(frame.texture, index: Int(GWGlassBindingIndexSourceTexture.rawValue))
+                    pipelineSet = true
+                }
+                encoder.setVertexBytes(&uniforms, length: length, index: uniformsIndex)
+                encoder.setFragmentBytes(&uniforms, length: length, index: uniformsIndex)
+                encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                encoder.popDebugGroup()
+            }
         })
     }
 }
