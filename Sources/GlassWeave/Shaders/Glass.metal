@@ -5,7 +5,7 @@ using namespace metal;
 
 // The shader's view of the shared record must match the host layout asserted
 // in GlassWeaveShaderTypes.c.
-static_assert(sizeof(GWGlassUniforms) == 240, "GWGlassUniforms size");
+static_assert(sizeof(GWGlassUniforms) == 256, "GWGlassUniforms size");
 static_assert(alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 
 // The optical model below is mirrored on the CPU by `GlassPanelGeometry`
@@ -22,13 +22,16 @@ struct GWGlassVertexOut {
 
 /// A quad covering the panel rectangle grown by one pixel on every side, so
 /// the antialiased outline (half a pixel either side of the edge) is inside
-/// it. Pixels outside the quad keep the background pass's output.
+/// it, and by the halo radius when there is a halo (GW-18; zero otherwise,
+/// which leaves the quad exactly as before). The rasterizer clips it to the
+/// target, so a halo never reaches past the surface. Pixels outside the quad
+/// keep the background pass's output.
 vertex GWGlassVertexOut gw_glass_vertex(
     uint vertexID [[vertex_id]],
     constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]])
 {
     const float2 corner = float2(float(vertexID & 1u), float(vertexID >> 1u)) * 2.0 - 1.0;
-    const float2 pixel = uniforms.panelCenter + corner * (uniforms.panelHalfSize + 1.0);
+    const float2 pixel = uniforms.panelCenter + corner * (uniforms.panelHalfSize + 1.0 + uniforms.glowHaloRadius);
     // Target pixels (y down) to clip space (y up).
     const float2 clip = float2(pixel.x / uniforms.targetSize.x * 2.0 - 1.0,
                                1.0 - pixel.y / uniforms.targetSize.y * 2.0);
@@ -116,11 +119,10 @@ static float3 gw_glow_color(float turn, constant GWGlassUniforms &uniforms) {
     return mix(colors[previous], colors[next], fraction);
 }
 
-/// The glow layer's opacity and color at a pixel inside the panel
-/// (docs/glow.md): a rim band, an inner glow falling off as (1 - t)^2, and
-/// a center fill, all in one color, with the rim and inner glow lit from
-/// one side. Returns the opacity in `w`.
-static float4 gw_glow(float2 q, float depth, constant GWGlassUniforms &uniforms) {
+/// The glow color and light factor at a pixel, inside or outside the
+/// panel: the color at the pixel's angle around the center, in `xyz`, and
+/// the light factor, in `w`.
+static float4 gw_glow_shade(float2 q, constant GWGlassUniforms &uniforms) {
     // The angle around the center with the panel scaled to a square. The
     // precise atan2: on the axis through the center `-p.y` is a signed
     // zero, which the fast-math atan2 puts in the wrong half-plane.
@@ -132,9 +134,22 @@ static float4 gw_glow(float2 q, float depth, constant GWGlassUniforms &uniforms)
     }
     const float3 color = gw_glow_color(turn, uniforms);
 
+    // The same normal field inside and outside the outline, so the light is
+    // continuous across it.
     const float2 normal = gw_rounded_rect_normal(q, uniforms.panelHalfSize, uniforms.glowNormalRadius);
     const float facing = (1.0 + dot(normal, uniforms.glowLightDirection)) * 0.5;
     const float light = (1.0 - uniforms.glowDirectionality) + uniforms.glowDirectionality * facing * facing;
+    return float4(color, light);
+}
+
+/// The glow layer's opacity and color at a pixel inside the panel
+/// (docs/glow.md): a rim band, an inner glow falling off as (1 - t)^2, and
+/// a center fill, all in one color, with the rim and inner glow lit from
+/// one side. Returns the opacity in `w`.
+static float4 gw_glow(float2 q, float depth, constant GWGlassUniforms &uniforms) {
+    const float4 shade = gw_glow_shade(q, uniforms);
+    const float3 color = shade.xyz;
+    const float light = shade.w;
 
     float rim = 0.0;
     if (uniforms.glowRimIntensity > 0.0) {
@@ -169,6 +184,18 @@ static float4 gw_glow(float2 q, float depth, constant GWGlassUniforms &uniforms)
 /// ordered dither of at most 0.47 of an 8-bit step breaks up bands; where it
 /// does not (and always without a glow) the output is exactly the glow-free
 /// result. Every pixel is written opaque.
+///
+/// With a halo (GW-18, `glowHaloRadius` > 0), the part of each pixel
+/// outside the outline is the background with the halo's light added: the
+/// premultiplied light `L = color * haloAlpha` is screened over the
+/// background in linear light, `background + L * (1 - background)` per
+/// channel, with `haloAlpha = glowHaloIntensity * (1 - s / glowHaloRadius)^2
+/// * light` at distance `s` outside the outline (zero from the radius on).
+/// A halo therefore never darkens any channel of the background and never
+/// exceeds 1; over black it is exactly `L`. The antialiased outline mixes
+/// that with the glass, so rim and halo meet without a gap. A pixel entirely
+/// outside the outline with no halo to draw is discarded and keeps the
+/// background pass's bytes. Halo pixels are dithered like the glow.
 fragment float4 gw_glass_fragment(
     GWGlassVertexOut in [[stage_in]],
     constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]],
@@ -179,8 +206,26 @@ fragment float4 gw_glass_fragment(
     const float distance = gw_rounded_rect_distance(q, uniforms.panelHalfSize, uniforms.cornerRadius);
     const float coverage = saturate(0.5 - distance);
     const float3 background = gw_glass_sample(pixel, uniforms, source);
+
+    // The halo, for the part of the pixel outside the outline.
+    float haloAlpha = 0.0;
+    float3 outside = background;
+    if (uniforms.glowHaloRadius > 0.0 && coverage < 1.0) {
+        const float4 shade = gw_glow_shade(q, uniforms);
+        const float t = saturate(max(distance, 0.0) / uniforms.glowHaloRadius);
+        haloAlpha = uniforms.glowHaloIntensity * (1.0 - t) * (1.0 - t) * shade.w;
+        outside = background + shade.xyz * haloAlpha * (1.0 - background);
+    }
     if (coverage <= 0.0) {
-        return float4(gw_glass_encode_srgb(background), 1.0);
+        if (uniforms.glowHaloRadius <= 0.0) {
+            return float4(gw_glass_encode_srgb(background), 1.0);
+        }
+        if (haloAlpha <= 0.0) {
+            discard_fragment();
+        }
+        const uint2 cell = uint2(pixel) & 3u;
+        const float3 encoded = saturate(gw_glass_encode_srgb(outside) + ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0);
+        return float4(encoded, 1.0);
     }
 
     const float depth = max(-distance, 0.0);
@@ -201,8 +246,8 @@ fragment float4 gw_glass_fragment(
         glass = mix(glass, glow.xyz, glowAlpha);
     }
 
-    float3 encoded = gw_glass_encode_srgb(mix(background, glass, coverage));
-    if (glowAlpha > 0.0) {
+    float3 encoded = gw_glass_encode_srgb(mix(outside, glass, coverage));
+    if (glowAlpha > 0.0 || haloAlpha > 0.0) {
         const uint2 cell = uint2(pixel) & 3u;
         encoded = saturate(encoded + ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0);
     }

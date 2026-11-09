@@ -34,7 +34,7 @@ kernel void gw_test_background_uniforms_probe(
 }
 
 /// Writes the shader's view of a GWGlassUniforms record, field by field
-/// (including the nested background record and the glow), plus its size,
+/// (including the nested background record, the glow, and the halo), plus its size,
 /// alignment, and field offsets.
 kernel void gw_test_glass_uniforms_probe(
     constant GWGlassUniforms &record [[buffer(0)]],
@@ -90,6 +90,8 @@ kernel void gw_test_glass_uniforms_probe(
     values[53] = record.glowCenterOpacity;
     values[54] = record.glowDirectionality;
     values[55] = record.glowNormalRadius;
+    values[56] = record.glowHaloRadius;
+    values[57] = record.glowHaloIntensity;
 
     layout[0] = sizeof(GWGlassUniforms);
     layout[1] = alignof(GWGlassUniforms);
@@ -118,4 +120,6 @@ kernel void gw_test_glass_uniforms_probe(
     layout[24] = __builtin_offsetof(GWGlassUniforms, glowCenterOpacity);
     layout[25] = __builtin_offsetof(GWGlassUniforms, glowDirectionality);
     layout[26] = __builtin_offsetof(GWGlassUniforms, glowNormalRadius);
+    layout[27] = __builtin_offsetof(GWGlassUniforms, glowHaloRadius);
+    layout[28] = __builtin_offsetof(GWGlassUniforms, glowHaloIntensity);
 }

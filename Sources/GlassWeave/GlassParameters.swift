@@ -40,7 +40,7 @@ public struct GlassTint: Hashable, Sendable {
 /// | ``refraction`` | normalized | 0...1 | Rim displacement. At the outline the sample moves `refraction × bezelWidth / 2` toward the panel interior, falling off quadratically to zero at the rim's inner edge. Zero samples in place. |
 /// | ``edgeHighlight`` | normalized | 0...1 | Edge illumination. One moves the outline at most ``maximumEdgeHighlight`` of the way to white on the side facing the upper-left light. |
 /// | ``tint`` | normalized | components and strength 0...1 | See ``GlassTint``. |
-/// | ``glow`` | see ``GlassGlow`` | see ``GlassGlow`` | A colored rim, inner glow, and center fill drawn over the glass; ``GlassGlow/none`` (the default) draws nothing. |
+/// | ``glow`` | see ``GlassGlow`` | see ``GlassGlow`` | A colored rim, inner glow, and center fill drawn over the glass, an optional halo outside it, and an optional pulse; ``GlassGlow/none`` (the default) draws nothing. |
 ///
 /// **Normalization rule.** When a renderer accepts parameters, a non-finite
 /// value (NaN or infinity) anywhere is rejected with
@@ -134,6 +134,12 @@ public enum GlassParameterError: Error, Hashable, Sendable, CustomStringConverti
         case glowCenterOpacity
         case glowLightAngle
         case glowDirectionality
+        case glowHaloRadius
+        case glowHaloIntensity
+        case glowPulsePeriod
+        case glowPulseDepth
+        /// The time passed to ``GlassRenderer/setEffectTime(_:)``.
+        case effectTime
     }
 
     /// The value is NaN or infinite. Finite out-of-range values are clamped
@@ -142,6 +148,8 @@ public enum GlassParameterError: Error, Hashable, Sendable, CustomStringConverti
 
     public var description: String {
         switch self {
+        case .nonFinite(.effectTime):
+            "The effectTime is NaN or infinite. Pass a finite number of seconds."
         case let .nonFinite(field):
             "The glass parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         }

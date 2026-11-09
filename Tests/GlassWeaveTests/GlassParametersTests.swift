@@ -49,7 +49,11 @@ struct GlassParametersTests {
 
     static let nonFiniteValues: [Double] = [.nan, .infinity, -.infinity]
 
-    @Test(arguments: GlassParameterError.Field.allCases, nonFiniteValues)
+    /// Every field a panel holds; the effect time is the renderer's and is
+    /// tested with it (`GlassHaloParameterTests`).
+    static let panelFields = GlassParameterError.Field.allCases.filter { $0 != .effectTime }
+
+    @Test(arguments: panelFields, nonFiniteValues)
     func `A non-finite value is rejected and names its field`(field: GlassParameterError.Field, value: Double) {
         var panel = GlassPanel(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
         // A visible glow with two stops, so a bad value in either is found.
@@ -78,6 +82,11 @@ struct GlassParametersTests {
         case .glowCenterOpacity: panel.parameters.glow.centerOpacity = value
         case .glowLightAngle: panel.parameters.glow.lightAngle = value
         case .glowDirectionality: panel.parameters.glow.directionality = value
+        case .glowHaloRadius: panel.parameters.glow.haloRadius = value
+        case .glowHaloIntensity: panel.parameters.glow.haloIntensity = value
+        case .glowPulsePeriod: panel.parameters.glow.pulsePeriod = value
+        case .glowPulseDepth: panel.parameters.glow.pulseDepth = value
+        case .effectTime: Issue.record("Not a panel field")
         }
         #expect(throws: GlassParameterError.nonFinite(field)) {
             try panel.normalized()

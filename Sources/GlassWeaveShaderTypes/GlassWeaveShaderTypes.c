@@ -13,7 +13,7 @@ _Static_assert(offsetof(GWBackgroundUniforms, uvOrigin) == 16, "uvOrigin offset"
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMin) == 24, "sampleClampMin offset");
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMax) == 32, "sampleClampMax offset");
 
-_Static_assert(sizeof(GWGlassUniforms) == 240, "GWGlassUniforms size");
+_Static_assert(sizeof(GWGlassUniforms) == 256, "GWGlassUniforms size");
 _Static_assert(_Alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 _Static_assert(offsetof(GWGlassUniforms, background) == 0, "background offset");
 _Static_assert(offsetof(GWGlassUniforms, targetSize) == 40, "targetSize offset");
@@ -40,3 +40,8 @@ _Static_assert(offsetof(GWGlassUniforms, glowInnerIntensity) == 220, "glowInnerI
 _Static_assert(offsetof(GWGlassUniforms, glowCenterOpacity) == 224, "glowCenterOpacity offset");
 _Static_assert(offsetof(GWGlassUniforms, glowDirectionality) == 228, "glowDirectionality offset");
 _Static_assert(offsetof(GWGlassUniforms, glowNormalRadius) == 232, "glowNormalRadius offset");
+_Static_assert(offsetof(GWGlassUniforms, padding3) == 236, "padding3 offset");
+_Static_assert(offsetof(GWGlassUniforms, glowHaloRadius) == 240, "glowHaloRadius offset");
+_Static_assert(offsetof(GWGlassUniforms, glowHaloIntensity) == 244, "glowHaloIntensity offset");
+_Static_assert(offsetof(GWGlassUniforms, padding4) == 248, "padding4 offset");
+_Static_assert(offsetof(GWGlassUniforms, padding5) == 252, "padding5 offset");

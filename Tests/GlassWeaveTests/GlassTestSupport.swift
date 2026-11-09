@@ -93,13 +93,34 @@ struct GlassReference {
         return top * (1 - fy) + bottom * fy
     }
 
+    /// The halo's opacity at a pixel, where the shader evaluates it: only
+    /// where the panel's coverage is below 1.
+    func haloAlpha(at pixel: SIMD2<Double>) -> Double {
+        guard let geometry, !geometry.isEmpty, geometry.coverage(at: pixel) < 1 else { return 0 }
+        return geometry.haloAlpha(at: pixel)
+    }
+
+    /// The glow color at a pixel's angle, in blue, green, red order.
+    private func glowColorBGR(at pixel: SIMD2<Double>) -> SIMD3<Double> {
+        guard let geometry else { return .zero }
+        let rgb = geometry.glowColor(atTurn: geometry.glowTurn(at: pixel))
+        return SIMD3(rgb.z, rgb.y, rgb.x)
+    }
+
     /// The predicted output pixel in linear light (blue, green, red).
     func linearColor(x: Int, y: Int) -> SIMD3<Double> {
         let pixel = SIMD2(Double(x) + 0.5, Double(y) + 0.5)
         let background = sample(pixel)
         guard let geometry, !geometry.isEmpty else { return background }
         let coverage = geometry.coverage(at: pixel)
-        guard coverage > 0 else { return background }
+        // The part of the pixel outside the outline: the background with the
+        // halo's premultiplied light screened over it.
+        var outside = background
+        let halo = haloAlpha(at: pixel)
+        if halo > 0 {
+            outside = background + glowColorBGR(at: pixel) * halo * (SIMD3(repeating: 1) - background)
+        }
+        guard coverage > 0 else { return outside }
         var glass = sample(geometry.samplePosition(at: pixel))
         let tint = SIMD3(geometry.tintLinear.z, geometry.tintLinear.y, geometry.tintLinear.x)
         glass = glass * (1 - geometry.tintStrength) + tint * geometry.tintStrength
@@ -107,17 +128,18 @@ struct GlassReference {
         glass = glass + (SIMD3(repeating: 1) - glass) * highlight
         let glowAlpha = geometry.glowAlpha(at: pixel)
         if glowAlpha > 0 {
-            let rgb = geometry.glowColor(atTurn: geometry.glowTurn(at: pixel))
-            glass = glass + (SIMD3(rgb.z, rgb.y, rgb.x) - glass) * glowAlpha
+            glass = glass + (glowColorBGR(at: pixel) - glass) * glowAlpha
         }
-        return background * (1 - coverage) + glass * coverage
+        return outside * (1 - coverage) + glass * coverage
     }
 
-    /// Whether the glow draws at a pixel, so the shader dithers it.
+    /// Whether the glow or its halo draws at a pixel, so the shader dithers
+    /// it.
     func isDithered(x: Int, y: Int) -> Bool {
         let pixel = SIMD2(Double(x) + 0.5, Double(y) + 0.5)
-        guard let geometry, !geometry.isEmpty, geometry.coverage(at: pixel) > 0 else { return false }
-        return geometry.glowAlpha(at: pixel) > 0
+        guard let geometry, !geometry.isEmpty else { return false }
+        if haloAlpha(at: pixel) > 0 { return true }
+        return geometry.coverage(at: pixel) > 0 && geometry.glowAlpha(at: pixel) > 0
     }
 
     /// The predicted output bytes (blue, green, red) on the 0...255 scale,

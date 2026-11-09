@@ -100,6 +100,15 @@ typedef enum GWGlassBindingIndex {
 /// - `glowNormalRadius`: corner radius of the field that orients the light,
 ///   in pixels.
 ///
+/// Halo (GW-18), appended after the GW-17 fields, which keep their layout.
+/// - `glowHaloRadius`: how far the halo reaches outside the outline, in
+///   pixels. 0 draws no halo and keeps the panel's quad at one pixel around
+///   the outline; above 0 the quad grows by this much.
+/// - `glowHaloIntensity`: halo opacity at the outline, 0...1, with the pulse
+///   level at the draw's effect time already applied (the pulse also scales
+///   `glowRimIntensity` and `glowInnerIntensity` on the CPU; the shader sees
+///   no time).
+///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
 /// maxDisplacement 76, edgeHighlight 80, explicit padding 84, 88, 92 (set
@@ -108,8 +117,9 @@ typedef enum GWGlassBindingIndex {
 /// glowStopCount 200, glowRimWidth 204, glowRimFeather 208,
 /// glowRimIntensity 212, glowInnerRadius 216, glowInnerIntensity 220,
 /// glowCenterOpacity 224, glowDirectionality 228, glowNormalRadius 232,
-/// explicit padding 236 (set to zero).
-/// Size 240, alignment 16, stride 240.
+/// explicit padding 236 (set to zero); glowHaloRadius 240,
+/// glowHaloIntensity 244, explicit padding 248, 252 (set to zero).
+/// Size 256, alignment 16, stride 256.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
     simd_float2 targetSize;
@@ -140,6 +150,10 @@ typedef struct GWGlassUniforms {
     float glowDirectionality;
     float glowNormalRadius;
     float padding3;
+    float glowHaloRadius;
+    float glowHaloIntensity;
+    float padding4;
+    float padding5;
 } GWGlassUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

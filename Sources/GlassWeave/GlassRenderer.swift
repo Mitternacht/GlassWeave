@@ -33,6 +33,27 @@ public final class GlassRenderer {
     /// default) measures nothing. See ``RenderMetrics``.
     public var metrics: RenderMetrics?
 
+    /// The time on the effect clock, in seconds, at which draws evaluate
+    /// animated glow (``GlassGlow/pulseLevel(at:)``). 0 until set.
+    ///
+    /// The renderer keeps no clock of its own: every draw is a function of
+    /// its inputs, so a host advances this value from one time source per
+    /// frame (`GlassSurfaceView` does, while a glow animates and the view is
+    /// visible), and tests render chosen instants. Changing it does not
+    /// request a draw.
+    public private(set) var effectTime: Double = 0
+
+    /// Sets the effect time for the following draws.
+    ///
+    /// Any finite value is accepted, including negative ones (the pulse is
+    /// periodic). A non-finite value throws
+    /// ``GlassParameterError/nonFinite(_:)`` naming
+    /// ``GlassParameterError/Field/effectTime`` and leaves the time as it was.
+    public func setEffectTime(_ seconds: Double) throws(GlassParameterError) {
+        guard seconds.isFinite else { throw .nonFinite(.effectTime) }
+        effectTime = seconds
+    }
+
     /// Creates a renderer that submits to `commandQueue` on its device.
     /// Loads the package shader library and builds both pipelines now.
     public convenience init(commandQueue: any MTLCommandQueue) throws {
@@ -231,12 +252,13 @@ public final class GlassRenderer {
         onCommit: (_ commandBuffer: any MTLCommandBuffer, _ frameID: UInt64, _ drewFrame: Bool) -> Void
     ) -> BackgroundRenderOutcome {
         let panel = panel
+        let effectTime = effectTime
         return background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline] encoder, frame, backgroundUniforms, targetSize in
             // Converted only once a target exists, so the skips that run
             // before (including a zero display scale's zero-size target)
             // never see the scale.
             guard let panel else { return }
-            let geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale)
+            let geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime)
             guard !geometry.isEmpty else { return }
             var uniforms = geometry.uniforms(
                 background: backgroundUniforms,

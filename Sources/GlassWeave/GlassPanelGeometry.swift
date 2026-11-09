@@ -47,8 +47,19 @@ struct GlassPanelGeometry: Equatable {
         var directionality: Double
         /// Corner radius of the field that orients the light:
         /// `max(cornerRadius, rimWidth + rimFeather, innerRadius)`, at most
-        /// half the panel's shorter side.
+        /// half the panel's shorter side. The halo uses the same field
+        /// outside the outline, so the light is continuous across it.
         var normalRadius: Double
+        /// How far the halo reaches outside the outline, in pixels; zero
+        /// without a halo.
+        var haloRadius: Double
+        /// Halo opacity at the outline, with the pulse level applied; zero
+        /// without a halo.
+        var haloIntensity: Double
+        /// The pulse level at the effect time the geometry was built for
+        /// (``GlassGlow/pulseLevel(at:)``), already applied to
+        /// ``rimIntensity``, ``innerIntensity``, and ``haloIntensity``.
+        var pulseLevel: Double
     }
 
     /// Light direction for edge illumination (from the upper left, y down).
@@ -57,7 +68,9 @@ struct GlassPanelGeometry: Equatable {
     /// - Parameters:
     ///   - panel: A panel that has passed ``GlassPanel/normalized()``.
     ///   - displayScale: Pixels per point, finite and positive.
-    init(panel: GlassPanel, displayScale: Double) {
+    ///   - effectTime: Seconds on the effect clock, finite; sets the pulse
+    ///     level.
+    init(panel: GlassPanel, displayScale: Double, effectTime: Double = 0) {
         precondition(displayScale.isFinite && displayScale > 0, "The display scale must be finite and positive")
         let frame = panel.frame
         let parameters = panel.parameters
@@ -74,14 +87,18 @@ struct GlassPanelGeometry: Equatable {
             Self.decodeSRGB(parameters.tint.blue)
         )
         tintStrength = parameters.tint.strength
-        glow = Self.glow(parameters.glow, displayScale: displayScale, cornerRadius: cornerRadius, halfSize: halfSize)
+        glow = Self.glow(
+            parameters.glow, displayScale: displayScale, effectTime: effectTime,
+            cornerRadius: cornerRadius, halfSize: halfSize
+        )
     }
 
     /// Converts a normalized glow, or returns `nil` when it draws nothing.
     private static func glow(
-        _ glow: GlassGlow, displayScale: Double, cornerRadius: Double, halfSize: SIMD2<Double>
+        _ glow: GlassGlow, displayScale: Double, effectTime: Double, cornerRadius: Double, halfSize: SIMD2<Double>
     ) -> Glow? {
         guard glow.isVisible else { return nil }
+        let pulse = glow.pulseLevel(at: effectTime)
         let hasRim = glow.rimIntensity > 0 && (glow.rimWidth > 0 || glow.rimSoftness > 0)
         let rimWidth = glow.rimWidth * displayScale
         let rimFeather = max(glow.rimSoftness * displayScale, 1)
@@ -93,12 +110,15 @@ struct GlassPanelGeometry: Equatable {
             lightDirection: SIMD2(Foundation.sin(light), -Foundation.cos(light)),
             rimWidth: rimWidth,
             rimFeather: rimFeather,
-            rimIntensity: hasRim ? glow.rimIntensity : 0,
+            rimIntensity: hasRim ? glow.rimIntensity * pulse : 0,
             innerRadius: innerRadius,
-            innerIntensity: glow.innerGlowIntensity,
+            innerIntensity: glow.innerGlowIntensity * pulse,
             centerOpacity: glow.centerOpacity,
             directionality: glow.directionality,
-            normalRadius: min(max(cornerRadius, rimWidth + rimFeather, innerRadius), min(halfSize.x, halfSize.y))
+            normalRadius: min(max(cornerRadius, rimWidth + rimFeather, innerRadius), min(halfSize.x, halfSize.y)),
+            haloRadius: glow.hasHalo ? glow.haloRadius * displayScale : 0,
+            haloIntensity: glow.hasHalo ? glow.haloIntensity * pulse : 0,
+            pulseLevel: pulse
         )
     }
 
@@ -228,6 +248,25 @@ struct GlassPanelGeometry: Equatable {
         return 1 - (1 - glow.centerOpacity) * (1 - inner) * (1 - rim)
     }
 
+    /// The halo's opacity at a pixel, for the part of it outside the
+    /// outline: `haloIntensity × (1 − s / haloRadius)² × light` at distance
+    /// `s = max(signedDistance, 0)` from the outline, exactly zero from the
+    /// halo radius on. Zero without a halo. The shader evaluates it only
+    /// where the panel's coverage is below 1.
+    func haloAlpha(at pixel: SIMD2<Double>) -> Double {
+        guard let glow, glow.haloRadius > 0 else { return 0 }
+        let distance = max(signedDistance(at: pixel), 0)
+        let t = min(distance / glow.haloRadius, 1)
+        return glow.haloIntensity * (1 - t) * (1 - t) * glowLight(at: pixel)
+    }
+
+    /// How far the panel's quad reaches beyond the panel rectangle on every
+    /// side, in pixels: one pixel for the antialiased outline, plus the
+    /// halo radius.
+    var quadOutset: Double {
+        1 + (glow?.haloRadius ?? 0)
+    }
+
     /// The 4 × 4 ordered-dither (Bayer) matrix, row by row.
     static let bayer: [Double] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
 
@@ -277,7 +316,10 @@ struct GlassPanelGeometry: Equatable {
             glowCenterOpacity: Float(glow?.centerOpacity ?? 0),
             glowDirectionality: Float(glow?.directionality ?? 0),
             glowNormalRadius: Float(glow?.normalRadius ?? 0),
-            padding3: 0
+            padding3: 0,
+            glowHaloRadius: Float(glow?.haloRadius ?? 0),
+            glowHaloIntensity: Float(glow?.haloIntensity ?? 0),
+            padding4: 0, padding5: 0
         )
     }
 

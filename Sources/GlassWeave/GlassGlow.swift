@@ -1,19 +1,25 @@
+import Foundation
+
 /// A colored glow at a glass panel's edge that fades toward a see-through
-/// middle.
+/// middle, with an optional halo outside the shape and a pulse.
 ///
 /// The glow is one color layer drawn over the finished glass (refraction,
 /// tint, and edge illumination): a bright **rim** band just inside the
 /// outline, an **inner glow** that fades inward from the outline, and an
-/// optional **center** fill. All three use the same color, which is either
-/// one color or an angular gradient of up to four ``ColorStop``s around the
-/// panel's center, and the rim and inner glow can be lit from one side.
-/// With ``centerOpacity`` at 0 the middle of the panel stays exactly the
-/// glass it would be without a glow.
+/// optional **center** fill. A **halo** can spill outside the outline over
+/// the background. All of them use the same color, which is either one
+/// color or an angular gradient of up to four ``ColorStop``s around the
+/// panel's center, and the rim, inner glow, and halo can be lit from one
+/// side. With ``centerOpacity`` at 0 the middle of the panel stays exactly
+/// the glass it would be without a glow. A **pulse** scales the rim, inner
+/// glow, and halo by ``pulseLevel(at:)`` at the renderer's effect time
+/// (``GlassRenderer/effectTime``).
 ///
 /// Units are explicit. Lengths are in **points**, converted with the host's
 /// display scale like the rest of the panel; coefficients are
 /// **normalized**; angles are in **degrees**, 0 at the top of the panel and
-/// increasing clockwise (90 right, 180 bottom, 270 left).
+/// increasing clockwise (90 right, 180 bottom, 270 left); periods are in
+/// **seconds** of effect time.
 ///
 /// | Property | Unit | Valid range | Default | Meaning |
 /// | --- | --- | --- | --- | --- |
@@ -25,12 +31,37 @@
 /// | ``innerGlowIntensity`` | normalized | 0...1 | 0.5 | Opacity of the inner glow at the outline, falling off as `(1 − depth / radius)²`. |
 /// | ``centerOpacity`` | normalized | 0...1 | 0 | Opacity of the glow color everywhere inside, including the middle. At 0 the middle is see-through. |
 /// | ``lightAngle`` | degrees | any finite value | 0 | The side the light comes from: 0 lights the top edge. |
-/// | ``directionality`` | normalized | 0...1 | 0 | 0 lights the rim and inner glow evenly; 1 lights only the side facing the light. With facing `f = (1 + cos φ) / 2` for the angle `φ` between the edge's outward normal and the light, the light factor is `(1 − directionality) + directionality × f²`. |
+/// | ``directionality`` | normalized | 0...1 | 0 | 0 lights the rim, inner glow, and halo evenly; 1 lights only the side facing the light. With facing `f = (1 + cos φ) / 2` for the angle `φ` between the edge's outward normal and the light, the light factor is `(1 − directionality) + directionality × f²`. |
+/// | ``haloRadius`` | points | 0 to ``maximumHaloRadius`` | 0 | How far the halo reaches outside the outline. It is exactly zero at and beyond this distance. 0 draws no halo. |
+/// | ``haloIntensity`` | normalized | 0...1 | 0.5 | Opacity of the halo at the outline, falling off as `(1 − distance / haloRadius)²`. |
+/// | ``pulsePeriod`` | seconds | ``minimumPulsePeriod`` to ``maximumPulsePeriod`` | 2 | The time of one pulse cycle. |
+/// | ``pulseDepth`` | normalized | 0...1 | 0 | How far the pulse dims the rim, inner glow, and halo at its lowest point: their opacities are multiplied by ``pulseLevel(at:)``, which runs from 1 down to `1 − pulseDepth` and back. 0 is no pulse. |
+///
+/// **Halo.** Outside the outline, at distance `s` from it, the halo's opacity
+/// is `a = haloIntensity × (1 − s / haloRadius)² × light`, with the light
+/// factor of the rim (the same edge normals, continuous across the outline),
+/// in the glow color `C` at the pixel's angle. The halo is light: its
+/// premultiplied value `L = C × a` is screened over the background `B` in
+/// linear light, `B + L × (1 − B)` per channel (the blend a designer's
+/// "outer glow" uses). It never darkens any channel of the background,
+/// never exceeds full intensity, shows no dark fringe, and over black is
+/// exactly `L`; over white, like any light, it is invisible. The halo is
+/// drawn only inside the surface: it is cut off where the surface ends, so
+/// give a shape at least ``haloRadius`` of surface around it.
+///
+/// **Pulse.** At effect time `t`, the level is
+/// `1 − pulseDepth × (1 − cos(2π t / pulsePeriod)) / 2`: 1 at `t = 0` and
+/// every whole period, `1 − pulseDepth` half a period later. The center
+/// fill does not pulse, so the middle stays as see-through as set. Its mean
+/// over a period, `1 − pulseDepth / 2`, is the steady level used when motion
+/// is reduced.
 ///
 /// **Normalization rule** (the ``GlassParameters`` rule): a NaN or infinite
 /// value is rejected with ``GlassParameterError/nonFinite(_:)`` naming its
-/// field. Finite values out of range are clamped: lengths to 0 through half
-/// the panel's shorter side, coefficients and color components to 0...1.
+/// field. Finite values out of range are clamped: lengths inside the shape
+/// to 0 through half the panel's shorter side, the halo radius to 0 through
+/// ``maximumHaloRadius``, the pulse period to ``minimumPulsePeriod`` through
+/// ``maximumPulsePeriod``, and coefficients and color components to 0...1.
 /// Angles are reduced modulo 360 into `0..<360`. Only the first
 /// ``maximumColorStops`` stops are kept, and they are then ordered by angle
 /// (stably, so two stops at one angle make a hard edge). A glow without
@@ -75,9 +106,30 @@ public struct GlassGlow: Hashable, Sendable {
     public var lightAngle: Double
     /// How much the light favors the side it comes from, 0...1.
     public var directionality: Double
+    /// How far the halo reaches outside the outline, in points; 0 for no
+    /// halo.
+    public var haloRadius: Double
+    /// Opacity of the halo at the outline, 0...1.
+    public var haloIntensity: Double
+    /// The time of one pulse cycle, in seconds of effect time.
+    public var pulsePeriod: Double
+    /// How far the pulse dims the rim, inner glow, and halo, 0...1; 0 for no
+    /// pulse.
+    public var pulseDepth: Double
 
     /// The most color stops a glow uses.
     public static let maximumColorStops = 4
+
+    /// The longest halo, in points.
+    public static let maximumHaloRadius = 128.0
+
+    /// The shortest pulse period, in seconds: at most two cycles a second,
+    /// well below the three flashes a second that accessibility guidance
+    /// (WCAG 2.3.1) treats as a seizure risk.
+    public static let minimumPulsePeriod = 0.5
+
+    /// The longest pulse period, in seconds.
+    public static let maximumPulsePeriod = 60.0
 
     /// No glow: no colors. The panel renders as it would without a glow.
     public static let none = GlassGlow(colors: [])
@@ -91,7 +143,11 @@ public struct GlassGlow: Hashable, Sendable {
         innerGlowIntensity: Double = 0.5,
         centerOpacity: Double = 0,
         lightAngle: Double = 0,
-        directionality: Double = 0
+        directionality: Double = 0,
+        haloRadius: Double = 0,
+        haloIntensity: Double = 0.5,
+        pulsePeriod: Double = 2,
+        pulseDepth: Double = 0
     ) {
         self.colors = colors
         self.rimWidth = rimWidth
@@ -102,15 +158,55 @@ public struct GlassGlow: Hashable, Sendable {
         self.centerOpacity = centerOpacity
         self.lightAngle = lightAngle
         self.directionality = directionality
+        self.haloRadius = haloRadius
+        self.haloIntensity = haloIntensity
+        self.pulsePeriod = pulsePeriod
+        self.pulseDepth = pulseDepth
     }
 
     /// Whether the glow changes any pixel: it has a color and a rim, an
-    /// inner glow, or a center fill.
+    /// inner glow, a center fill, or a halo.
     public var isVisible: Bool {
         guard !colors.isEmpty else { return false }
-        let rim = rimIntensity > 0 && (rimWidth > 0 || rimSoftness > 0)
-        let inner = innerGlowIntensity > 0 && innerGlowRadius > 0
-        return rim || inner || centerOpacity > 0
+        return hasRim || hasInnerGlow || centerOpacity > 0 || hasHalo
+    }
+
+    /// Whether the glow draws a halo outside the outline.
+    public var hasHalo: Bool {
+        !colors.isEmpty && haloRadius > 0 && haloIntensity > 0
+    }
+
+    /// Whether the glow changes over time: it is visible, has a pulse, and
+    /// the pulse has a rim, inner glow, or halo to modulate (the center fill
+    /// does not pulse). A host draws new frames only while this is true.
+    public var isAnimated: Bool {
+        isVisible && pulseDepth > 0 && (hasRim || hasInnerGlow || hasHalo)
+    }
+
+    /// The factor the pulse applies to the rim, inner glow, and halo
+    /// opacities at `seconds` of effect time:
+    /// `1 − pulseDepth × (1 − cos(2π seconds / pulsePeriod)) / 2`.
+    ///
+    /// 1 at time 0 and every whole period, `1 − pulseDepth` half a period
+    /// later; exactly 1 for a glow without a pulse. Evaluated for the
+    /// values as given, so call it on a normalized glow (for example
+    /// ``GlassRenderer/panel``) to get the level drawn. A non-finite time or
+    /// a period that is not positive gives the level at time 0.
+    public func pulseLevel(at seconds: Double) -> Double {
+        guard pulseDepth > 0 else { return 1 }
+        guard seconds.isFinite, pulsePeriod.isFinite, pulsePeriod > 0 else { return 1 }
+        // The phase in whole turns, reduced in double precision first, so a
+        // long-running clock keeps its accuracy.
+        let turns = (seconds / pulsePeriod).truncatingRemainder(dividingBy: 1)
+        return 1 - pulseDepth * (1 - Foundation.cos(2 * .pi * turns)) / 2
+    }
+
+    private var hasRim: Bool {
+        rimIntensity > 0 && (rimWidth > 0 || rimSoftness > 0)
+    }
+
+    private var hasInnerGlow: Bool {
+        innerGlowIntensity > 0 && innerGlowRadius > 0
     }
 }
 
@@ -133,6 +229,8 @@ extension GlassGlow {
             (.glowRimIntensity, rimIntensity), (.glowInnerGlowRadius, innerGlowRadius),
             (.glowInnerGlowIntensity, innerGlowIntensity), (.glowCenterOpacity, centerOpacity),
             (.glowLightAngle, lightAngle), (.glowDirectionality, directionality),
+            (.glowHaloRadius, haloRadius), (.glowHaloIntensity, haloIntensity),
+            (.glowPulsePeriod, pulsePeriod), (.glowPulseDepth, pulseDepth),
         ]
         for (field, value) in checks where !value.isFinite {
             throw .nonFinite(field)
@@ -157,8 +255,27 @@ extension GlassGlow {
             innerGlowIntensity: unit(innerGlowIntensity),
             centerOpacity: unit(centerOpacity),
             lightAngle: Self.reducedAngle(lightAngle),
-            directionality: unit(directionality)
+            directionality: unit(directionality),
+            haloRadius: min(max(haloRadius, 0), Self.maximumHaloRadius),
+            haloIntensity: unit(haloIntensity),
+            pulsePeriod: min(max(pulsePeriod, Self.minimumPulsePeriod), Self.maximumPulsePeriod),
+            pulseDepth: unit(pulseDepth)
         )
+    }
+
+    /// The glow with its pulse replaced by the pulse's mean level: the rim,
+    /// inner glow, and halo opacities are multiplied by
+    /// `1 − pulseDepth / 2` and the depth becomes 0, so nothing animates.
+    /// Used when motion is reduced.
+    package func steadyAtMeanPulseLevel() -> GlassGlow {
+        guard pulseDepth > 0 else { return self }
+        let mean = 1 - pulseDepth / 2
+        var steady = self
+        steady.rimIntensity *= mean
+        steady.innerGlowIntensity *= mean
+        steady.haloIntensity *= mean
+        steady.pulseDepth = 0
+        return steady
     }
 
     /// A finite angle in degrees reduced into `0..<360`.
