@@ -39,8 +39,15 @@ import UIKit
 /// - No drawable available: the outcome is `.skipped(.drawableUnavailable)`
 ///   and the producer's lease counts the skipped use.
 ///
-/// The surface is decorative: it is not an accessibility element and does
-/// not take touches, so native content placed above it keeps its behavior.
+/// The surface is decorative: neither it nor its Metal view is an
+/// accessibility element (its accessibility elements are hidden), and it
+/// does not take touches, so native content placed above it keeps its
+/// behavior and VoiceOver reaches only that content.
+///
+/// Accessibility settings (``accessibilitySettings``) change what is drawn
+/// as ``GlassAccessibilityPolicy`` documents: under Reduce Transparency the
+/// panel becomes an opaque surface (``presentedPanel``). By default the
+/// view follows the system settings and their change notifications.
 @MainActor
 public final class GlassSurfaceView: UIView {
     public let renderer: GlassRenderer
@@ -86,6 +93,30 @@ public final class GlassSurfaceView: UIView {
     /// texture pool while the view is hidden.
     public var visibilityHandler: ((Bool) -> Void)?
 
+    /// Where the view reads its accessibility settings.
+    public enum AccessibilitySettingsSource: Hashable, Sendable {
+        /// `UIAccessibility`, updated when the system posts a change.
+        case system
+        /// Fixed values, for tests, previews, and comparison runs.
+        case fixed(GlassAccessibilitySettings)
+    }
+
+    /// Where ``accessibilitySettings`` come from. Setting it applies the new
+    /// settings at once.
+    public var accessibilitySettingsSource: AccessibilitySettingsSource = .system {
+        didSet { refreshAccessibilitySettings() }
+    }
+
+    /// The settings currently applied.
+    public private(set) var accessibilitySettings = GlassAccessibilitySettings()
+
+    /// Called when ``accessibilitySettings`` change, for example so the app
+    /// can stop its source's nonessential motion under Reduce Motion.
+    public var accessibilitySettingsHandler: ((GlassAccessibilitySettings) -> Void)?
+
+    /// The panel as the app set it, after the normalization rule.
+    private var requestedPanel: GlassPanel?
+
     let scheduler = FrameScheduler(isVisible: false)
     private let metalView: MTKView
     private let drawDelegate = DrawDelegate()
@@ -117,11 +148,40 @@ public final class GlassSurfaceView: UIView {
         isOpaque = true
         isUserInteractionEnabled = false
         isAccessibilityElement = false
+        accessibilityElementsHidden = true
         backgroundColor = .secondarySystemBackground
 
         registerForTraitChanges([UITraitDisplayScale.self]) { (self: Self, _) in
             self.updatePixelSize()
         }
+        // The opaque surface color resolves for these traits.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (self: Self, _) in
+            self.presentPanel()
+        }
+        let center = NotificationCenter.default
+        for name in [
+            UIAccessibility.reduceTransparencyStatusDidChangeNotification,
+            UIAccessibility.reduceMotionStatusDidChangeNotification,
+        ] {
+            center.addObserver(self, selector: #selector(systemAccessibilitySettingsChanged), name: name, object: nil)
+        }
+        refreshAccessibilitySettings()
+    }
+
+    @objc private func systemAccessibilitySettingsChanged() {
+        refreshAccessibilitySettings()
+    }
+
+    /// Reads the settings from the source and applies them if they changed.
+    private func refreshAccessibilitySettings() {
+        let settings: GlassAccessibilitySettings = switch accessibilitySettingsSource {
+        case .system: .system
+        case let .fixed(settings): settings
+        }
+        guard settings != accessibilitySettings else { return }
+        accessibilitySettings = settings
+        presentPanel()
+        accessibilitySettingsHandler?(settings)
     }
 
     override public var isHidden: Bool {
@@ -150,9 +210,15 @@ public final class GlassSurfaceView: UIView {
         scheduleFrame()
     }
 
-    /// The panel drawn over the source, in this view's points, after the
+    /// The panel the app set, in this view's points, after the
     /// ``GlassParameters`` normalization rule; `nil` for none.
     public var panel: GlassPanel? {
+        requestedPanel
+    }
+
+    /// The panel actually drawn: ``panel`` after ``GlassAccessibilityPolicy``
+    /// for the current ``accessibilitySettings`` and traits.
+    public var presentedPanel: GlassPanel? {
         renderer.panel
     }
 
@@ -160,11 +226,21 @@ public final class GlassSurfaceView: UIView {
     /// redraws if it changed. A non-finite value throws and leaves the
     /// current panel in place.
     public func setPanel(_ panel: GlassPanel?) throws(GlassParameterError) {
-        let previous = renderer.panel
-        try renderer.setPanel(panel)
-        if renderer.panel != previous {
-            scheduleFrame()
+        requestedPanel = try panel?.normalized()
+        presentPanel()
+    }
+
+    /// Draws ``panel`` as the accessibility policy says, redrawing if that
+    /// changes what is drawn.
+    private func presentPanel() {
+        let presented = requestedPanel.map {
+            GlassAccessibilityPolicy.presentedPanel(for: $0, settings: accessibilitySettings, traits: traitCollection)
         }
+        guard presented != renderer.panel else { return }
+        // A presented panel derives from a normalized one and keeps every
+        // value in range, so the renderer never rejects it.
+        try? renderer.setPanel(presented)
+        scheduleFrame()
     }
 
     /// Makes every draw produce its own frame first.

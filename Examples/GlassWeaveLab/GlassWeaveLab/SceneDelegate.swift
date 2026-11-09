@@ -12,6 +12,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     ) {
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
+        // `-lab.appearance dark` or `light` fixes this window's appearance,
+        // for UI tests on simulators where the system setting does not
+        // reach the app.
+        switch UserDefaults.standard.string(forKey: "lab.appearance") {
+        case "dark": window.overrideUserInterfaceStyle = .dark
+        case "light": window.overrideUserInterfaceStyle = .light
+        default: break
+        }
         window.rootViewController = LabViewController()
         window.makeKeyAndVisible()
         self.window = window

@@ -1,6 +1,6 @@
 # Support policy
 
-Status: updated for GW-03 through GW-07, 2026-11-08. This page states what the package
+Status: updated for GW-03 through GW-08, 2026-11-08. This page states what the package
 declares and what it checks at runtime. It is not a list of qualified devices.
 No physical-device measurement has been made yet; see
 [the validation protocol](validation.md).
@@ -42,8 +42,8 @@ the backend today.
 
 | Product or target | Imports | Purpose |
 | --- | --- | --- |
-| `GlassWeave` | Metal, simd, os, CoreGraphics, Synchronization | Core types and rendering: the source-frame contract, its validation and lease, the background renderer, the glass renderer with its parameters (one rounded panel), the frame scheduler (package access), and `FrameTexturePool`, a bounded pool of producer textures recycled only after GPU use. Never imports UIKit or SwiftUI; `CoreGraphics` supplies only `CGRect` for panel frames in points. |
-| `GlassWeaveUIKit` | UIKit, MetalKit | UIKit presentation. `NativeGlassView` is native mode: a `UIVisualEffectView` with a public `UIGlassEffect` (tint, interactive) around native controls, creating no GlassWeave renderer. `GlassSurfaceView` hosts an `MTKView` for an explicit source and an optional glass panel given in the view's points; it draws on demand, only while visible in its own window scene, with at most two frames in flight (`frameStatistics` reports the counts). Compiled only where UIKit exists; on macOS the module is empty. |
+| `GlassWeave` | Metal, simd, os, CoreGraphics, Synchronization | Core types and rendering: the source-frame contract, its validation and lease, the background renderer, the glass renderer with its parameters (one rounded panel), the frame scheduler (package access), `FrameTexturePool`, a bounded pool of producer textures recycled only after GPU use, and the text legibility rule for tinted glass (`GlassTint.worstCaseContrast`, `minimumStrength`). Never imports UIKit or SwiftUI; `CoreGraphics` supplies only `CGRect` for panel frames in points. |
+| `GlassWeaveUIKit` | UIKit, MetalKit | UIKit presentation. `NativeGlassView` is native mode: a `UIVisualEffectView` with a public `UIGlassEffect` (tint, interactive) around native controls, creating no GlassWeave renderer. `GlassSurfaceView` hosts an `MTKView` for an explicit source and an optional glass panel given in the view's points; it draws on demand, only while visible in its own window scene, with at most two frames in flight (`frameStatistics` reports the counts); it is hidden from assistive technologies and applies `GlassAccessibilityPolicy` (an opaque legible panel under Reduce Transparency; Reduce Motion reported to the app). Compiled only where UIKit exists; on macOS the module is empty. |
 | `GlassWeaveShaderTypes` (internal C target, not a product) | simd | The single definition of every record uploaded to the GPU, shared by Swift and the Metal shaders. |
 
 GlassWeave never creates a Metal device or command queue. An app that uses

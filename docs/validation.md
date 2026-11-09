@@ -98,6 +98,44 @@ Use Swift Testing for deterministic math, validation, and lifecycle state. Use n
 
 Load the matching Apple accessibility skills when implementing or auditing these behaviors. If a setting intentionally changes only the app's demonstration background rather than the framework's surface, document that ownership clearly.
 
+### Recorded accessibility matrix (GW-08, 2026-11-08)
+
+Simulators only (iOS 27.2: iPhone 18 Pro, iPad Pro 13-inch (M5)); no
+physical device. Lab UI tests live in `AccessibilityUITests` and
+`CoexistenceUITests`; package tests in `GlassLegibilityTests` and
+`AccessibilityPolicyTests`. Settings were injected with launch arguments
+(`-lab.reduceMotion YES`, `-lab.reduceTransparency YES`,
+`-UIPreferredContentSizeCategoryName …`, `-lab.appearance dark|light`, which
+sets the window's `overrideUserInterfaceStyle`) and `XCUIDevice.appearance`,
+and the real system settings were also switched on the iPhone simulator by
+hand (`defaults write com.apple.Accessibility ReduceMotionEnabled` /
+`EnhancedBackgroundContrastEnabled` with the matching Darwin notifications,
+and `simctl ui … increase_contrast`).
+
+| Case | Owner | iPhone 18 Pro simulator | iPad Pro 13-inch (M5) simulator |
+| --- | --- | --- | --- |
+| VoiceOver: elements | Native controls; the surface is decorative | Pass: each control is exactly one button element with its label; the surface is absent from the accessibility tree; title, button, caption, button appear top to bottom in one stack; each control activates once | Pass (same test) |
+| VoiceOver: live navigation and double-tap | — | Not run: the Simulator has no VoiceOver | Not run |
+| Accessibility audit (`performAccessibilityAudit`, all types, source paused) | Lab | Pass in light and in system dark | Pass in light; dark skipped because the simulator's system appearance (`XCUIDevice.appearance` or `simctl ui appearance dark`) did not reach any app |
+| Largest text (`AccessibilityXXXL`), portrait and landscape | Lab layout; native controls | Pass: title wraps whole inside the glass panel, buttons grow (> 60 pt tall, ≥ 44 pt), both act, the panel follows content as the stage scrolls; `.dynamicType` and `.textClipped` audits clean | Pass |
+| Light: panel text over the moving source | App's tint, GlassWeave legibility rule | Worst sampled contrast 9.78:1 (350 samples, 5 frames); rule guarantees ≥ 9.6:1 at tint 0.45 | 9.78:1 |
+| Dark: panel text over the moving source | App's tint, GlassWeave legibility rule | 5.65:1 (system dark); tint raised to 0.83, guaranteeing ≥ 4.6:1 over any background | 8.12:1 (window override) |
+| Increase Contrast | Lab target 7:1 | Manual: dark glass tint 0.91, ≥ 7.1:1 guaranteed; opaque surface ≥ 15.5:1 | Not run |
+| Reduce Motion | App (GlassWeave reports the setting; the panel has no motion) | Pass: clock stays at t 0.00 s, no submissions over 2 s, Pause/Resume keep it stopped, controls act; manual system setting: paused at launch and resumed live when turned off | Pass (launch argument) |
+| Reduce Transparency | GlassWeave (`GlassAccessibilityPolicy`) | Pass: panel interior is `secondarySystemBackground` (242, 242, 247 light; 28, 28, 30 dark) within 3 steps in every sample over 3 frames while the source moves; controls act; manual system setting: opaque at launch, glass again live when turned off, opaque again live when turned on | Pass, light and dark (window override) |
+
+Package evidence: `GlassLegibilityTests` (WCAG luminance and contrast, the
+worst case over every background, minimum strengths for 4.5:1 and 7:1, and a
+GPU render over black and white halves keeping the ratio) on My Mac and the
+iPhone simulator; `AccessibilityPolicyTests` (opaque surface keeps the shape,
+label text ≥ 7:1 on it in light/dark × normal/high contrast, fixed settings
+applied and reported, trait changes re-resolve the color, the surface and its
+Metal view contribute no accessibility element and hit tests reach the
+control) on the iPhone simulator. Captures:
+[largest text](evidence/captures/gw-08-largest-text-iphone18pro-sim.png),
+[dark glass](evidence/captures/gw-08-dark-glass-iphone18pro-sim.png),
+[Reduce Transparency and Reduce Motion, dark](evidence/captures/gw-08-reduce-transparency-and-motion-dark-iphone18pro-sim.png).
+
 ## Milestone report template
 
 ```markdown

@@ -29,7 +29,9 @@ final class CustomSurfaceUITests: XCTestCase {
     func testPatternStaysUprightThroughRotation() throws {
         XCUIDevice.shared.orientation = .portrait
         let app = launchWithPattern()
-        let surface = app.otherElements["lab.customSurface"]
+        // The surface is decorative and hidden from accessibility, so the
+        // stage it exactly fills stands in for it.
+        let surface = app.otherElements["lab.stage"]
         XCTAssertTrue(surface.waitForExistence(timeout: 10))
         let diagnostics = app.staticTexts["lab.diagnostics"]
         XCTAssertTrue(diagnostics.waitForExistence(timeout: 10))
@@ -57,7 +59,7 @@ final class CustomSurfaceUITests: XCTestCase {
         XCTAssertTrue(wait(for: diagnostics, toContain: "Released frame 1:"), diagnostics.label)
         XCTAssertTrue(diagnostics.label.contains("0 skipped"), diagnostics.label)
 
-        let corners = try waitForUprightCorners(of: app.otherElements["lab.customSurface"])
+        let corners = try waitForUprightCorners(of: app.otherElements["lab.stage"])
         XCTAssertEqual(corners, [.red, .green, .blue, .yellow])
     }
 

@@ -72,7 +72,14 @@ final class CoexistenceUITests: XCTestCase {
         XCTAssertTrue(wait(for: diagnostics, toContain: "Custom taps: 5\n"), diagnostics.label)
         XCTAssertTrue(wait(for: diagnostics, toContain: "Native taps: 5 ·"), diagnostics.label)
         XCUIDevice.shared.orientation = .portrait
-        let portraitFrame = try waitForFrame(after: resizedFrame, diagnostics)
+        _ = try waitForFrame(after: resizedFrame, diagnostics)
+        // A frame can arrive while the rotation animation still turns the
+        // window; read the strip once the rotation has settled. Each draw
+        // while paused refreshes the diagnostics, so the frame read then is
+        // the one on screen.
+        Thread.sleep(forTimeInterval: 1)
+        let portraitFrame = try presentedFrame(diagnostics)
+        try assertPresentedFrameIsTheProducedFrame(diagnostics)
         try assertFrameIDStripMatches(app: app, panel: panel, frameID: portraitFrame)
 
         // Resume: frames and content time advance again.
@@ -168,7 +175,12 @@ final class CoexistenceUITests: XCTestCase {
     /// for 1. Portrait only: the stage starts at the screen's left edge.
     @MainActor
     private func assertFrameIDStripMatches(app: XCUIApplication, panel: XCUIElement, frameID: Int) throws {
-        let screenshot = app.screenshot().image
+        let capture = app.screenshot()
+        let attachment = XCTAttachment(screenshot: capture)
+        attachment.name = "frame-id-strip-\(frameID)"
+        attachment.lifetime = .deleteOnSuccess
+        add(attachment)
+        let screenshot = capture.image
         let pixels = try SRGBPixels(screenshot)
         let scale = Double(pixels.width) / Double(app.windows.firstMatch.frame.width)
         let stripY = Double(panel.frame.maxY) - 34
@@ -190,9 +202,10 @@ final class CoexistenceUITests: XCTestCase {
         XCTAssertFalse(outside.isEmpty)
         XCTAssertEqual(Set(inside.map(\.bit)).count, 16, "The panel interior shows all 16 bits")
         // Outside the panel the cells are near-black or white.
+        let label = app.staticTexts["lab.diagnostics"].label
         for (bit, value) in outside {
-            XCTAssertTrue(value < 60 || value > 200, "Outside cell for bit \(bit) is \(value)")
-            XCTAssertEqual(value > 128, (frameID >> bit) & 1 == 1, "Outside bit \(bit) of frame \(frameID)")
+            XCTAssertTrue(value < 60 || value > 200, "Outside cell for bit \(bit) is \(value); outside \(outside), inside \(inside), strip y \(stripY), panel \(panel.frame): \(label)")
+            XCTAssertEqual(value > 128, (frameID >> bit) & 1 == 1, "Outside bit \(bit) of frame \(frameID); outside \(outside): \(label)")
         }
         // Inside, the tint lifts both levels; split them at the midpoint.
         let values = inside.map(\.value)

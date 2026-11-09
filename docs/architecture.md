@@ -211,6 +211,25 @@ The visual surface is decorative; native content owns accessibility elements and
 
 The application remains responsible for content semantics and layout. GlassWeave must provide predictable hooks and documented defaults; the first example must demonstrate those defaults with actual controls rather than flattened text images.
 
+Implemented (GW-08): `GlassSurfaceView` hides its own accessibility elements
+(`accessibilityElementsHidden`), so neither it nor its `MTKView` appears to
+assistive technologies. `GlassAccessibilityPolicy` (GlassWeaveUIKit) defines
+what is drawn: under Reduce Transparency the panel keeps its frame and corner
+radius and becomes opaque `secondarySystemBackground` resolved for the
+surface's traits, with no refraction or edge illumination; Reduce Motion
+changes nothing in the panel, which has no motion, and is reported through
+`accessibilitySettingsHandler` so the app stops its source. The surface reads
+`GlassAccessibilitySettings` from `UIAccessibility` (updated on its change
+notifications) or from fixed values (`accessibilitySettingsSource`), and keeps
+the app's panel (`panel`) apart from the panel drawn (`presentedPanel`). For
+see-through glass, the core legibility rule (`GlassTint.worstCaseContrast`,
+`minimumStrength(forContrast:againstTextLuminance:)`) gives the lowest
+contrast between text and the flat interior over any background from black to
+white, since the interior mixes background and tint in linear light; the
+laboratory raises its tint strength to keep 4.5:1 (7:1 with Increase
+Contrast) for its label text. The results are recorded in the
+[accessibility matrix](validation.md#recorded-accessibility-matrix-gw-08-2026-11-08).
+
 ## Sharing with Frostfield
 
 Start with no package dependency. A later example may depend on both packages and exchange an explicit texture lease. A future `FrostfieldMetal` product is worth considering only after both implementations need the same measured resource/pipeline behavior. That product must not import scene nodes, mesh loaders, materials, or UI adapters. Avoid exposing its internal types through GlassWeave's public API unless that dependency is a deliberate long-term contract.

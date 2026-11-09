@@ -33,6 +33,9 @@ final class LabViewController: UIViewController {
     // MARK: Stage
 
     private let stage = StageView()
+    /// Scrolls the stage's native content when it is taller than the stage,
+    /// for example at accessibility text sizes. The glass panel follows.
+    private let stageScroll = UIScrollView()
     private let content = UIStackView()
     /// Holds the custom panel's native content. Its frame, converted into
     /// the surface's points, is the glass panel's frame.
@@ -61,6 +64,11 @@ final class LabViewController: UIViewController {
     private let closeWindowButton = UIButton(configuration: .bordered())
     private let diagnosticsLabel = UILabel()
     private let resetButton = UIButton(configuration: .bordered())
+    /// The control rows; vertical at accessibility text sizes.
+    private var controlRows: [UIStackView] = []
+    /// At accessibility text sizes the custom panel takes the stage's full
+    /// width instead of its nominal 320 points.
+    private var panelFillsWidth: NSLayoutConstraint?
     private var portraitConstraints: [NSLayoutConstraint] = []
     private var landscapeConstraints: [NSLayoutConstraint] = []
 
@@ -98,13 +106,28 @@ final class LabViewController: UIViewController {
         setUpCustomRendering()
         setUpClock()
         reset()
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+        // The panel tint keeps its text readable for the appearance and
+        // contrast setting.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (self: Self, _) in
             self.updateCustomPanel()
+            self.updateDiagnostics()
         }
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(reduceMotionChanged),
-            name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil
-        )
+        applyContentSizeLayout()
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
+            self.applyContentSizeLayout()
+        }
+    }
+
+    /// At accessibility text sizes, control rows stack vertically and the
+    /// custom panel uses the full stage width, so text wraps instead of
+    /// being cut off; the stage and the controls scroll.
+    private func applyContentSizeLayout() {
+        let large = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        for row in controlRows {
+            row.axis = large ? .vertical : .horizontal
+            row.alignment = large ? .leading : .center
+        }
+        panelFillsWidth?.isActive = large
     }
 
     override func viewWillLayoutSubviews() {
@@ -155,6 +178,8 @@ final class LabViewController: UIViewController {
         customTitle.adjustsFontForContentSizeCategory = true
         customTitle.textAlignment = .center
         customTitle.numberOfLines = 0
+        // Never truncate: a word wider than the panel wraps by character.
+        customTitle.lineBreakMode = .byWordWrapping
 
         customButton.configuration?.title = String(localized: "Custom action")
         customButton.accessibilityIdentifier = "lab.customButton"
@@ -205,29 +230,62 @@ final class LabViewController: UIViewController {
         content.alignment = .center
         content.spacing = 20
         content.translatesAutoresizingMaskIntoConstraints = false
-        stage.addSubview(content)
+        // The content is centered in the stage's safe area while it fits and
+        // scrolls when it does not.
+        // The host reports its own layout passes too: content inside the
+        // scroll view can lay out again without the stage doing so.
+        let contentHost = StageView()
+        contentHost.translatesAutoresizingMaskIntoConstraints = false
+        contentHost.onLayout = { [weak self] in self?.updateCustomPanel() }
+        contentHost.addSubview(content)
+        stageScroll.addSubview(contentHost)
+        stageScroll.translatesAutoresizingMaskIntoConstraints = false
+        stageScroll.contentInsetAdjustmentBehavior = .never
+        // Content scrolls under the status bar like the glass panel drawn
+        // behind it; the stage itself clips at its edges.
+        stageScroll.clipsToBounds = false
+        stageScroll.accessibilityIdentifier = "lab.stageScroll"
+        stageScroll.delegate = self
+        stage.addSubview(stageScroll)
 
         let safe = stage.safeAreaLayoutGuide
+        let scroll = stageScroll
+        let fillsFrame = contentHost.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor)
+        fillsFrame.priority = .defaultLow
         // Nominal 320 x 180 points, narrower when the stage is.
         let preferredWidth = customPanel.widthAnchor.constraint(equalToConstant: 320)
         preferredWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            content.centerXAnchor.constraint(equalTo: safe.centerXAnchor),
-            content.centerYAnchor.constraint(equalTo: safe.centerYAnchor),
-            content.leadingAnchor.constraint(greaterThanOrEqualTo: safe.leadingAnchor, constant: 16),
-            content.topAnchor.constraint(greaterThanOrEqualTo: safe.topAnchor, constant: 8),
+            scroll.leadingAnchor.constraint(equalTo: safe.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: safe.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: safe.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: safe.bottomAnchor),
+            contentHost.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            contentHost.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            contentHost.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            contentHost.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            contentHost.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
+            contentHost.heightAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.heightAnchor),
+            fillsFrame,
+            content.centerXAnchor.constraint(equalTo: contentHost.centerXAnchor),
+            content.centerYAnchor.constraint(equalTo: contentHost.centerYAnchor),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: contentHost.leadingAnchor, constant: 16),
+            content.topAnchor.constraint(greaterThanOrEqualTo: contentHost.topAnchor, constant: 8),
             preferredWidth,
             customPanel.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
             panelContent.centerXAnchor.constraint(equalTo: customPanel.centerXAnchor),
             panelContent.centerYAnchor.constraint(equalTo: customPanel.centerYAnchor, constant: -14),
+            // Keep the text out of the 22-point rim, where refraction and
+            // edge illumination act.
             panelContent.leadingAnchor.constraint(greaterThanOrEqualTo: customPanel.leadingAnchor, constant: 24),
-            panelContent.topAnchor.constraint(greaterThanOrEqualTo: customPanel.topAnchor, constant: 20),
+            panelContent.topAnchor.constraint(greaterThanOrEqualTo: customPanel.topAnchor, constant: 24),
             panelContent.bottomAnchor.constraint(lessThanOrEqualTo: customPanel.bottomAnchor, constant: -48),
             nativeButton.leadingAnchor.constraint(equalTo: nativeGlass.contentView.leadingAnchor, constant: 20),
             nativeButton.trailingAnchor.constraint(equalTo: nativeGlass.contentView.trailingAnchor, constant: -20),
             nativeButton.topAnchor.constraint(equalTo: nativeGlass.contentView.topAnchor, constant: 8),
             nativeButton.bottomAnchor.constraint(equalTo: nativeGlass.contentView.bottomAnchor, constant: -8),
         ])
+        panelFillsWidth = customPanel.widthAnchor.constraint(equalTo: contentHost.widthAnchor, constant: -32)
         stage.onLayout = { [weak self] in self?.updateCustomPanel() }
     }
 
@@ -284,6 +342,7 @@ final class LabViewController: UIViewController {
         // Lifecycle checks: hide the stage, or open a second window where
         // the system supports several (iPad).
         let lifecycleRow = Self.row([newWindowButton, closeWindowButton, UIView(), Self.caption(String(localized: "Stage")), stageSwitch])
+        controlRows = [tintRow, motionRow, lifecycleRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
         let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, diagnosticsLabel, resetButton])
@@ -319,6 +378,7 @@ final class LabViewController: UIViewController {
         label.font = .preferredFont(forTextStyle: .subheadline)
         label.adjustsFontForContentSizeCategory = true
         label.isAccessibilityElement = false
+        label.numberOfLines = 0
         return label
     }
 
@@ -361,6 +421,13 @@ final class LabViewController: UIViewController {
             surface.translatesAutoresizingMaskIntoConstraints = false
             surface.renderObserver = { [weak self] _ in self?.renderDidFinish() }
             surface.visibilityHandler = { [weak self] visible in self?.surfaceVisibilityChanged(visible) }
+            if let override = Self.accessibilitySettingsOverride {
+                surface.accessibilitySettingsSource = .fixed(override)
+            }
+            surface.accessibilitySettingsHandler = { [weak self] _ in
+                self?.applyMotionState()
+                self?.updateDiagnostics()
+            }
             stage.insertSubview(surface, at: 0)
             NSLayoutConstraint.activate([
                 surface.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
@@ -413,10 +480,30 @@ final class LabViewController: UIViewController {
     /// readable over the moving background.
     private func panelParameters() -> GlassParameters {
         let dark = traitCollection.userInterfaceStyle == .dark
-        let tint = dark
+        var tint = dark
             ? GlassTint(red: 0.08, green: 0.09, blue: 0.12, strength: 0.45)
             : GlassTint(red: 0.97, green: 0.98, blue: 1.0, strength: 0.45)
+        // Raise the strength until the panel's label text keeps the target
+        // contrast over any background (GlassWeave's legibility rule).
+        if let minimum = tint.minimumStrength(forContrast: panelContrastTarget, againstTextLuminance: panelTextLuminance) {
+            tint.strength = max(tint.strength, (minimum * 100).rounded(.up) / 100)
+        }
         return GlassParameters(cornerRadius: 30, bezelWidth: 22, refraction: 0.85, edgeHighlight: 0.6, tint: tint)
+    }
+
+    /// WCAG contrast the panel text must keep: 4.5:1, or 7:1 when Increase
+    /// Contrast is on.
+    private var panelContrastTarget: Double {
+        traitCollection.accessibilityContrast == .high ? 7 : 4.5
+    }
+
+    /// The relative luminance of the panel's text color (`label`) in the
+    /// current appearance.
+    private var panelTextLuminance: Double {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        UIColor.label.resolvedColor(with: traitCollection).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        let unit = { (value: CGFloat) in min(max(Double(value), 0), 1) }
+        return GlassTint.relativeLuminance(red: unit(red), green: unit(green), blue: unit(blue))
     }
 
     /// Makes the glass panel follow the native panel content's frame, in the
@@ -515,16 +602,37 @@ final class LabViewController: UIViewController {
         }
     }
 
-    @objc private func reduceMotionChanged() {
-        applyMotionState()
-        updateDiagnostics()
+    /// The accessibility settings the custom surface applies; the clock
+    /// follows the same Reduce Motion value.
+    private var accessibilitySettings: GlassAccessibilitySettings {
+        if case let .success(stageRendering) = custom {
+            return stageRendering.surface.accessibilitySettings
+        }
+        return .system
+    }
+
+    /// Fixed accessibility settings from launch arguments
+    /// (`-lab.reduceMotion YES`, `-lab.reduceTransparency YES`), for UI tests
+    /// and comparison runs; `nil` follows the system.
+    private static var accessibilitySettingsOverride: GlassAccessibilitySettings? {
+        let defaults = UserDefaults.standard
+        let keys = ["lab.reduceMotion", "lab.reduceTransparency"]
+        guard keys.contains(where: { defaults.object(forKey: $0) != nil }) else { return nil }
+        let system = GlassAccessibilitySettings.system
+        func value(_ key: String, _ fallback: Bool) -> Bool {
+            defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
+        }
+        return GlassAccessibilitySettings(
+            reduceTransparency: value("lab.reduceTransparency", system.reduceTransparency),
+            reduceMotion: value("lab.reduceMotion", system.reduceMotion)
+        )
     }
 
     /// Runs the clock while the user wants motion, Reduce Motion is off, and
     /// the surface is visible: a hidden stage needs no new frames, so the
     /// clock stops instead of asking the surface for frames it would defer.
     private func applyMotionState() {
-        let running = mode == .moving && wantsMotion && !UIAccessibility.isReduceMotionEnabled && surfaceIsVisible
+        let running = mode == .moving && wantsMotion && !accessibilitySettings.reduceMotion && surfaceIsVisible
         updateLink?.isEnabled = running
         pauseButton.configuration?.title = wantsMotion ? String(localized: "Pause") : String(localized: "Resume")
     }
@@ -558,10 +666,11 @@ final class LabViewController: UIViewController {
         }
     }
 
-    /// Diagnostics follow the frames, at most ten times a second while the
-    /// clock runs, so the label does not churn at the display rate.
+    /// Diagnostics follow the frames, about four times a second while the
+    /// clock runs, so laying out the label (large at accessibility text
+    /// sizes) does not compete with the display rate.
     private func renderDidFinish() {
-        if mode == .pattern || clock.ticks % 6 == 0 || updateLink?.isEnabled != true {
+        if mode == .pattern || clock.ticks % 15 == 0 || updateLink?.isEnabled != true {
             updateDiagnostics()
         }
     }
@@ -647,10 +756,10 @@ final class LabViewController: UIViewController {
         case (.pattern, _): "still pattern"
         case (.moving, true): "running"
         case (.moving, false):
-            if !wantsMotion { "paused" } else if UIAccessibility.isReduceMotionEnabled { "paused (Reduce Motion)" } else { "paused (hidden)" }
+            if !wantsMotion { "paused" } else if accessibilitySettings.reduceMotion { "paused (Reduce Motion)" } else { "paused (hidden)" }
         }
         var lines = [
-            Self.gpuDescription(),
+            Self.gpuDescription,
             "Resets: \(resetCount)",
             "Clock: \(motion) · t \(String(format: "%.2f", clock.seconds)) s · frame ID overlay \(showsFrameID ? "on" : "off")",
             "Native taps: \(nativeTapCount) · tint \(tint.diagnosticName) · \(nativeButton.isEnabled ? "enabled" : "disabled")",
@@ -663,6 +772,13 @@ final class LabViewController: UIViewController {
             let size = "\(surface.pixelSize.width)×\(surface.pixelSize.height) px"
             let outcome = surface.lastRenderOutcome.map(Self.describe) ?? "not drawn"
             lines.append("Custom: \(frame) · \(size) · \(outcome)")
+            let settings = surface.accessibilitySettings
+            if let presented = surface.presentedPanel?.parameters.tint {
+                let surfaceKind = settings.reduceTransparency ? "opaque (Reduce Transparency)" : "glass"
+                let contrast = presented.worstCaseContrast(againstTextLuminance: panelTextLuminance)
+                lines.append("Panel: \(surfaceKind) · tint \(String(format: "%.2f", presented.strength)) · text contrast ≥ \(String(format: "%.1f", contrast)):1 (target \(String(format: "%.1f", panelContrastTarget)))")
+            }
+            lines.append("Accessibility: Reduce Motion \(settings.reduceMotion ? "on" : "off") · Reduce Transparency \(settings.reduceTransparency ? "on" : "off") · contrast \(traitCollection.accessibilityContrast == .high ? "high" : "normal") · \(traitCollection.userInterfaceStyle == .dark ? "dark" : "light") · text \(traitCollection.preferredContentSizeCategory.rawValue.replacingOccurrences(of: "UICTContentSizeCategory", with: ""))")
             let statistics = surface.frameStatistics
             lines.append("Surface: \(surface.isVisible ? "visible" : "hidden") · scene \(Self.describe(view.window?.windowScene?.activationState))")
             lines.append("Frames: \(statistics.submitted) submitted · \(statistics.framesInFlight) in flight (peak \(statistics.peakFramesInFlight) of \(GlassSurfaceView.maximumFramesInFlight)) · \(statistics.deferredWhileHidden) deferred hidden · \(statistics.deferredAtLimit) at limit · \(statistics.coalesced) coalesced")
@@ -707,7 +823,10 @@ final class LabViewController: UIViewController {
         }
     }
 
-    private static func gpuDescription() -> String {
+    /// The GPU line never changes, so it is computed once.
+    private static let gpuDescription: String = makeGPUDescription()
+
+    private static func makeGPUDescription() -> String {
         guard let device = MTLCreateSystemDefaultDevice() else { return "No Metal device" }
         let capabilities = RenderCapabilities(device: device)
         let family = capabilities.highestAppleFamily.map { "apple\($0)" } ?? "none"
@@ -715,7 +834,16 @@ final class LabViewController: UIViewController {
     }
 }
 
-/// The stage reports each layout pass after its subviews have frames, so the
+/// Scrolling the stage moves the native panel content; the glass panel
+/// follows it.
+extension LabViewController: UIScrollViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        updateCustomPanel()
+    }
+}
+
+/// The stage (and the scrolling content host inside it) reports each layout
+/// pass after its subviews have frames, so the
 /// glass panel can follow the native panel content exactly.
 final class StageView: UIView {
     var onLayout: (() -> Void)?

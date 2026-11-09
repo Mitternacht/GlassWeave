@@ -156,7 +156,7 @@ extension GlassParameters {
 
 extension GlassPanel {
     /// Applies the normalization rule to the frame and parameters.
-    func normalized() throws(GlassParameterError) -> GlassPanel {
+    package func normalized() throws(GlassParameterError) -> GlassPanel {
         let values = [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height]
         guard values.allSatisfy(\.isFinite) else { throw .nonFinite(.frame) }
         let width = max(Double(frame.size.width), 0)

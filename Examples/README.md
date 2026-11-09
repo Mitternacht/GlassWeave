@@ -39,9 +39,19 @@ presented and produced frame IDs, the drawable size, the surface's
 visibility and its own scene's activation state, the scheduler's counts
 (submitted, in flight with peak and bound, deferred while hidden, deferred
 at the bound, coalesced), the submissions during the last hidden period,
-pooled textures with total allocations and coalesced ticks, and the last
-released frame. The background stops moving while Reduce Motion is on; that
-path is not yet verified (GW-08 owns the accessibility checks).
+pooled textures with total allocations and coalesced ticks, the last
+released frame, the panel's surface (glass or opaque), tint strength and
+guaranteed text contrast, and the accessibility settings in effect.
+
+Accessibility (GW-08): the stage's native content scrolls when it is taller
+than the stage (for example at accessibility text sizes, where the panel also
+takes the full width and the control rows stack vertically) and the glass
+panel follows it. The panel tint is raised until its label text keeps 4.5:1
+(7:1 with Increase Contrast) over any background. Reduce Motion stops the
+clock; Reduce Transparency makes the panel opaque. For UI tests and
+comparison runs, launch arguments fix the settings: `-lab.reduceMotion YES`,
+`-lab.reduceTransparency YES`, and `-lab.appearance dark` or `light` (the
+window's `overrideUserInterfaceStyle`).
 
 Nothing here is evidence of physical device performance. The remaining work
 and its acceptance gates are listed in [the task checklist](../tasks/todo.md).
