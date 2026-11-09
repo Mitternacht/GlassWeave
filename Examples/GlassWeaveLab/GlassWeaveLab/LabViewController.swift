@@ -108,6 +108,8 @@ final class LabViewController: UIViewController {
     private let paperButton = UIButton(configuration: .bordered())
     /// Opens the shapes page (GW-26).
     private let shapesButton = UIButton(configuration: .bordered())
+    /// Opens native glass beside GlassWeave's on one backdrop (REFINE).
+    private let compareButton = UIButton(configuration: .bordered())
     /// Open GW-27's presentation screen and GW-24a's frost pyramid screen.
     private let presentationButton = UIButton(configuration: .bordered())
     private let frostButton = UIButton(configuration: .bordered())
@@ -197,6 +199,9 @@ final class LabViewController: UIViewController {
             if let page = BenchPage.fromBenchArgument {
                 openedBenchAtLaunch = true
                 openBench(.bench, page: page, animated: false)
+            } else if defaults.bool(forKey: "lab.compare") {
+                openedBenchAtLaunch = true
+                openBench(.compare, page: BenchPage.named(defaults.string(forKey: "lab.compareBackdrop")) ?? .charcoal, animated: false)
             } else if defaults.bool(forKey: "lab.shapes") {
                 openedBenchAtLaunch = true
                 openShapes(page: BenchPage.named(defaults.string(forKey: "lab.shapesBackdrop")) ?? .charcoal, animated: false)
@@ -560,6 +565,10 @@ final class LabViewController: UIViewController {
         shapesButton.accessibilityIdentifier = "lab.openShapes"
         shapesButton.addAction(UIAction { [weak self] _ in self?.openShapes(page: .charcoal, animated: true) }, for: .primaryActionTriggered)
         shapesButton.isHidden = benchmark != nil
+        compareButton.configuration?.title = String(localized: "Native vs refined glass")
+        compareButton.accessibilityIdentifier = "lab.openCompare"
+        compareButton.addAction(UIAction { [weak self] _ in self?.openBench(.compare, page: .charcoal, animated: true) }, for: .primaryActionTriggered)
+        compareButton.isHidden = benchmark != nil
         presentationButton.configuration?.title = String(localized: "Presentation")
         presentationButton.accessibilityIdentifier = "lab.openPresentation"
         presentationButton.addAction(UIAction { [weak self] _ in
@@ -596,7 +605,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, presentationButton, frostButton, benchButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, compareButton, presentationButton, frostButton, benchButton, measureButton])
        stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false

@@ -65,36 +65,25 @@ final class ShapesBenchViewController: UIViewController {
         GlassGlow.ColorStop(red: red, green: green, blue: blue, angle: angle)
     }
 
-    /// The glass every shape shares: smoky, thick, lit from the upper left,
-    /// with a glow rim and halo in the shape's own colors and the inner light
-    /// pooled where it belongs.
+    /// The glass every shape shares: clear, thick at the edge, lit from the
+    /// upper left, with a quiet glow rim in the shape's own colors, no halo,
+    /// and the inner light pooled softly where it belongs.
     private static func look(
-        shape: GlassShape, bezel: Double, glow: [GlassGlow.ColorStop], light: GlassLight, thickness: Double = 30
+        shape: GlassShape, bezel: Double, glow: [GlassGlow.ColorStop], light: GlassLight, thickness: Double = 24
     ) -> GlassParameters {
-        GlassParameters(
-            cornerRadius: 999, bezelWidth: bezel, refraction: 0.55, edgeHighlight: 0.35,
-            tint: GlassTint(red: 0.03, green: 0.03, blue: 0.06, strength: 0.3),
-            glow: GlassGlow(
-                colors: glow, rimWidth: 2.5, rimSoftness: 5, innerGlowRadius: 26, innerGlowIntensity: 0.5,
-                lightAngle: 315, directionality: 0.55, haloRadius: 9, haloIntensity: 0.5
-            ),
-            light: light,
-            lens: GlassLens(
-                profile: .squircle(exponent: 3), thickness: thickness, indexOfRefraction: 1.5, maximumOffset: 60,
-                allowsFold: true, dispersion: 0.7, dispersionTaps: .sixTap
-            ),
-            lighting: GlassLighting(
-                key: GlassLighting.Light(azimuth: 315, elevation: 52, intensity: 1, size: 0.3),
-                environment: .studioDark, finish: .dielectric,
-                fresnel: 0.85, specular: 0.85, reflection: 0.9, bloom: 0.45, bloomWidth: 6
-            ),
-            shape: shape
+        var parameters = RefinedLook.lens(corner: 999, bezel: bezel, thickness: thickness, dark: true)
+        parameters.glow = GlassGlow(
+            colors: glow, rimWidth: 1.5, rimSoftness: 3, rimIntensity: 0.45, innerGlowRadius: 0, innerGlowIntensity: 0,
+            lightAngle: 315, directionality: 0.6, haloRadius: 0, haloIntensity: 0
         )
+        parameters.light = light
+        parameters.shape = shape
+        return parameters
     }
 
     private static func makeDemos() -> [Demo] {
-        let orange = stop(1, 0.6, 0.16), pink = stop(1, 0.38, 0.82)
-        let violet = stop(0.62, 0.44, 1), cyan = stop(0.22, 0.88, 1)
+        let orange = stop(1, 0.62, 0.30), pink = stop(0.96, 0.46, 0.72)
+        let violet = stop(0.62, 0.50, 0.96), cyan = stop(0.34, 0.80, 1)
         // The blobs' coordinates are frame units: 1 is half the frame's shorter
         // side, so they scale with the frame.
         let pebble = GlassBlob(
@@ -103,7 +92,7 @@ final class ShapesBenchViewController: UIViewController {
                 .circle(center: CGPoint(x: 0.36, y: -0.14), radius: 0.52),
                 .capsule(from: CGPoint(x: -0.1, y: 0.55), to: CGPoint(x: 0.5, y: 0.42), radius: 0.3),
             ],
-            smoothness: 0.5, wobble: GlassBlob.Wobble(amplitude: 0.03, speed: 0.7)
+            smoothness: 0.5, wobble: GlassBlob.Wobble(amplitude: 0.012, speed: 0.5)
         )
         let triple = GlassBlob(
             primitives: [
@@ -112,39 +101,39 @@ final class ShapesBenchViewController: UIViewController {
                 .circle(center: CGPoint(x: 1.25, y: 0.1), radius: 0.72),
                 .box(center: CGPoint(x: 0.55, y: 0.35), halfSize: CGSize(width: 0.55, height: 0.3), cornerRadius: 0.25, rotation: -14),
             ],
-            smoothness: 0.6, wobble: GlassBlob.Wobble(amplitude: 0.035, speed: 1)
+            smoothness: 0.6, wobble: GlassBlob.Wobble(amplitude: 0.012, speed: 0.6)
         )
         return [
-            Demo(caption: String(localized: "Ellipse: rim, halo and pooled light follow the oval"), parameters: look(
+            Demo(caption: String(localized: "Ellipse: the rim and the pooled light follow the oval"), parameters: look(
                 shape: .ellipse, bezel: 34,
                 glow: [glowStop(1, 0.55, 0.2, 0), glowStop(1, 0.3, 0.7, 180)],
                 light: GlassLight(
-                    emitters: [GlassLight.Emitter(placement: .band(angle: 180, reach: 1.1), colors: [orange, pink, violet, cyan], intensity: 0.95, flow: 2, drift: 0.25)],
-                    piping: 0.85
+                    emitters: [GlassLight.Emitter(placement: .band(angle: 180, reach: 1.1), colors: [orange, pink, violet, cyan], intensity: 0.6, flow: 2, drift: 0.25)],
+                    piping: 0.4
                 )
             )),
             Demo(caption: String(localized: "Squircle, exponent 4"), parameters: look(
                 shape: .squircle, bezel: 30,
                 glow: [glowStop(0.25, 0.85, 1, 0), glowStop(0.65, 0.35, 1, 180)],
                 light: GlassLight(
-                    emitters: [GlassLight.Emitter(placement: .point(x: 0, y: 0.25, radius: 0.8, stretch: 1), colors: [stop(0.9, 1, 1), cyan, violet], intensity: 0.95, flow: 1, drift: 0.4)],
-                    centerFade: 0.15, piping: 0.5
+                    emitters: [GlassLight.Emitter(placement: .point(x: 0, y: 0.25, radius: 0.8, stretch: 1), colors: [stop(0.9, 1, 1), cyan, violet], intensity: 0.6, flow: 1, drift: 0.4)],
+                    centerFade: 0.5, piping: 0.4
                 )
             )),
             Demo(caption: String(localized: "Pebble blob: smooth union of three parts"), parameters: look(
                 shape: .blob(pebble), bezel: 30,
                 glow: [glowStop(1, 0.62, 0.15, 0), glowStop(1, 0.35, 0.1, 200)],
                 light: GlassLight(
-                    emitters: [GlassLight.Emitter(placement: .band(angle: 170, reach: 1.0), colors: [stop(1, 0.78, 0.25), orange, pink], intensity: 0.95, flow: 1, drift: 0.4)],
-                    piping: 1, pipingWidth: 6
+                    emitters: [GlassLight.Emitter(placement: .band(angle: 170, reach: 1.0), colors: [stop(1, 0.80, 0.42), orange, pink], intensity: 0.6, flow: 1, drift: 0.4)],
+                    piping: 0.5, pipingWidth: 6
                 )
             )),
             Demo(caption: String(localized: "Wobbling triple with a tilted box: necks stay smooth"), parameters: look(
                 shape: .blob(triple), bezel: 26,
                 glow: [glowStop(1, 0.35, 0.75, 0), glowStop(0.3, 0.8, 1, 180)],
                 light: GlassLight(
-                    emitters: [GlassLight.Emitter(placement: .band(angle: 180, reach: 0.9), colors: [pink, violet, cyan], intensity: 0.95, flow: 1.5, drift: 0.3)],
-                    piping: 0.8
+                    emitters: [GlassLight.Emitter(placement: .band(angle: 180, reach: 0.9), colors: [pink, violet, cyan], intensity: 0.6, flow: 1.5, drift: 0.3)],
+                    piping: 0.4
                 ), thickness: 26
             )),
         ]

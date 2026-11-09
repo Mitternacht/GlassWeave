@@ -199,6 +199,9 @@ final class MaterialBenchViewController: UIViewController {
         case lens
         case chrome
         case paper
+        /// Native `UIGlassEffect` beside GlassWeave's glass on one backdrop
+        /// (REFINE): `-lab.compare YES`, `-lab.compareBackdrop <page>`.
+        case compare
     }
 
     /// One demo panel: where it goes (in a layout the controller computes),
@@ -224,6 +227,9 @@ final class MaterialBenchViewController: UIViewController {
     private let pageControl: UISegmentedControl
     private let pages: [BenchPage]
     private var captionLabels: [UILabel] = []
+    /// The comparison's native glass views and its two column headers.
+    private var nativeViews: [UIVisualEffectView] = []
+    private var columnLabels: [UILabel] = []
     private let timeLabel = UILabel()
     private let diagnosticsLabel = UILabel()
     /// The moment `-lab.lightTime` freezes the light at, or `nil` to flow.
@@ -238,6 +244,7 @@ final class MaterialBenchViewController: UIViewController {
         case .lens: pages = [.orbs, .dotGrid, .checkerboard, .ribbons]
         case .chrome: pages = [.chrome]
         case .paper: pages = [.paperDesk]
+        case .compare: pages = [.charcoal, .orbs, .paper]
         }
         pageControl = UISegmentedControl(items: pages.map(\.title))
         stillTime = UserDefaults.standard.object(forKey: "lab.lightTime") == nil
@@ -248,6 +255,7 @@ final class MaterialBenchViewController: UIViewController {
         case .lens: demos = Self.lensDemos
         case .chrome: demos = Self.chromeDemos
         case .paper: demos = Self.paperDemos
+        case .compare: demos = Self.compareDemos(dark: page.isDark)
         }
         super.init(nibName: nil, bundle: nil)
     }
@@ -269,197 +277,208 @@ final class MaterialBenchViewController: UIViewController {
         )),
     ]
 
-    // MARK: Lens demos (GW-22)
+    // MARK: Lens demos (GW-22, refined)
 
-    /// The lens page's panels: a thick pill, a dome marble, a ring, and a
-    /// fold pair.
+    /// The quiet pooled light of the lens page and the chrome page: warm to cool
+    /// along the bottom edge at modest strength, so the middle stays clear.
+    private static func pooledLight() -> GlassLight {
+        GlassLight(
+            emitters: [GlassLight.Emitter(
+                placement: .band(angle: 180, reach: 0.8),
+                colors: [stop(1.0, 0.62, 0.30), stop(0.96, 0.46, 0.72), stop(0.62, 0.50, 0.96), stop(0.34, 0.80, 1.0)],
+                intensity: 0.55
+            )],
+            piping: 0.35
+        )
+    }
+
+    /// The lens page's panels: a thick pill, a dome marble, a round lens, and a
+    /// fold pair. Magnification and bending live at the edge; the middle of
+    /// the pill and the round lens stays quiet.
     private static let lensDemos: [Demo] = [
-        Demo(caption: String(localized: "Thick lens pill with an inlaid dome button, pooled light, six-tap dispersion"), parameters: GlassParameters(
-            cornerRadius: 999, bezelWidth: 46, refraction: 0.6, edgeHighlight: 0.8,
-            light: GlassLight(
-                emitters: [GlassLight.Emitter(
-                    placement: .band(angle: 180, reach: 0.9),
-                    colors: [stop(1.0, 0.60, 0.16), stop(1.0, 0.38, 0.82), stop(0.62, 0.44, 1.0), stop(0.22, 0.88, 1.0)],
-                    intensity: 0.85
-                )],
-                piping: 0.6
-            ),
-            lens: GlassLens(
-                profile: .squircle(exponent: 3), thickness: 40, indexOfRefraction: 1.5, maximumOffset: 80, allowsFold: true,
-                dispersion: 1, dispersionTaps: .sixTap,
-                inlays: [GlassLens.Inlay(radius: 40, height: 16, profile: .dome, rimLine: 0.9)]
-            )
-        )),
-        Demo(caption: String(localized: "Dome, three-tap"), parameters: GlassParameters(
-            cornerRadius: 999, bezelWidth: 60, refraction: 0.6, edgeHighlight: 0.6,
-            lens: GlassLens(profile: .dome, thickness: 60, indexOfRefraction: 1.9, maximumOffset: 120, dispersion: 0.8)
-        )),
-        Demo(caption: String(localized: "Ring, six-tap"), parameters: GlassParameters(
-            cornerRadius: 999, bezelWidth: 20, refraction: 0.6, edgeHighlight: 0.6,
-            lens: GlassLens(profile: .ring(center: 13, width: 14), thickness: 26, indexOfRefraction: 1.6, maximumOffset: 80, allowsFold: true, dispersion: 1, dispersionTaps: .sixTap)
-        )),
-        Demo(caption: String(localized: "Fold off: magnified, never mirrored"), parameters: GlassParameters(
-            cornerRadius: 28, bezelWidth: 32, refraction: 0.6, edgeHighlight: 0.5,
-            lens: GlassLens(profile: .squircle(exponent: 3), thickness: 44, indexOfRefraction: 1.8, maximumOffset: 120, allowsFold: false)
-        )),
-        Demo(caption: String(localized: "Fold on: the edge mirrors"), parameters: GlassParameters(
-            cornerRadius: 28, bezelWidth: 32, refraction: 0.6, edgeHighlight: 0.5,
-            lens: GlassLens(profile: .squircle(exponent: 3), thickness: 44, indexOfRefraction: 1.8, maximumOffset: 120, allowsFold: true)
-        )),
+        Demo(caption: String(localized: "Thick lens pill with an inlaid dome button and quiet pooled light"), parameters: {
+            var pill = RefinedLook.lens(bezel: 40, thickness: 34, dark: true)
+            pill.light = pooledLight()
+            pill.lens.dispersionTaps = .sixTap
+            pill.lens.dispersion = 0.45
+            pill.lens.inlays = [GlassLens.Inlay(radius: 40, height: 14, profile: .dome, rimLine: 0.25)]
+            return pill
+        }()),
+        Demo(caption: String(localized: "Dome, three-tap"), parameters: {
+            var dome = RefinedLook.panel(corner: 999, bezel: 60, dark: true)
+            dome.lens = GlassLens(profile: .dome, thickness: 44, indexOfRefraction: 1.5, maximumOffset: 80, dispersion: 0.3, dispersionTaps: .threeTap)
+            return dome
+        }()),
+        Demo(caption: String(localized: "Round lens, six-tap"), parameters: {
+            var round = RefinedLook.lens(bezel: 28, thickness: 28, dark: true)
+            round.lens.dispersion = 0.5
+            round.lens.dispersionTaps = .sixTap
+            return round
+        }()),
+        Demo(caption: String(localized: "Fold off: magnified, never mirrored"), parameters: {
+            var lens = RefinedLook.lens(corner: 28, bezel: 32, thickness: 44, dark: true)
+            lens.lens.indexOfRefraction = 1.7
+            lens.lens.maximumOffset = 100
+            lens.lens.allowsFold = false
+            return lens
+        }()),
+        Demo(caption: String(localized: "Fold on: the edge mirrors"), parameters: {
+            var lens = RefinedLook.lens(corner: 28, bezel: 32, thickness: 44, dark: true)
+            lens.lens.indexOfRefraction = 1.7
+            lens.lens.maximumOffset = 100
+            lens.lens.allowsFold = true
+            return lens
+        }()),
     ]
 
-    // MARK: Chrome demos (GW-23)
+    // MARK: Compare demos (REFINE)
+
+    /// The shapes of the comparison, one pair per row: Apple's `UIGlassEffect`
+    /// on the left, GlassWeave's glass on the right, the same frame.
+    private enum CompareRow: Int, CaseIterable {
+        case capsule, circle, card, clearCapsule
+    }
+
+    private static func compareDemos(dark: Bool) -> [Demo] {
+        [
+            Demo(caption: String(localized: "Capsule: Apple regular, GlassWeave refined"), parameters: RefinedLook.panel(corner: 999, bezel: 18, dark: dark)),
+            Demo(caption: String(localized: "Circle"), parameters: RefinedLook.panel(corner: 999, bezel: 16, dark: dark)),
+            Demo(caption: String(localized: "Rounded rectangle"), parameters: RefinedLook.panel(corner: 28, bezel: 18, dark: dark)),
+            Demo(caption: String(localized: "Apple clear, GlassWeave thick lens"), parameters: {
+                var lens = RefinedLook.lens(dark: dark)
+                lens.lens.inlays = [GlassLens.Inlay(radius: 22, height: 8, profile: .dome, rimLine: 0.25)]
+                return lens
+            }()),
+        ]
+    }
+
+    // MARK: Chrome demos (GW-23, refined)
 
     private static func color(_ red: Double, _ green: Double, _ blue: Double) -> GlassLighting.Color {
         GlassLighting.Color(red: red, green: green, blue: blue)
     }
 
-    /// The chrome page's panels: a round ring button with a chrome rim and
-    /// prismatic glints (the studio on a light plate), a thick lens pill with
-    /// a warm top streak, and a dark smoky dome with studio strips on its rim.
+    /// The chrome page's panels: a round button with a polished glass edge on a
+    /// light plate, a thick lens pill over the orbs, and a smoky dome over
+    /// glowing liquid. One light, from the upper left, for all of them.
     private static let chromeDemos: [Demo] = [
-        Demo(caption: String(localized: "Round button: chrome ring, prismatic glints"), parameters: GlassParameters(
-            cornerRadius: 999, bezelWidth: 6, refraction: 0.3, edgeHighlight: 0,
-            tint: GlassTint(red: 1, green: 1, blue: 1, strength: 0.16),
-            lighting: GlassLighting(
-                key: GlassLighting.Light(azimuth: 0, elevation: 50, intensity: 1, size: 0.25),
-                environment: .studioLight, finish: .prismatic(spread: 1, saturation: 0.95, phase: 0.02),
-                fresnel: 0.5, specular: 0.9, reflection: 1, bloom: 0.25, bloomWidth: 3
-            )
-        )),
-        Demo(caption: String(localized: "Lens pill: top specular streak, warm highlight, bloom"), parameters: GlassParameters(
-            cornerRadius: 999, bezelWidth: 40, refraction: 0.6, edgeHighlight: 0.3,
-            light: GlassLight(
-                emitters: [GlassLight.Emitter(
-                    placement: .band(angle: 180, reach: 0.9),
-                    colors: [stop(1.0, 0.60, 0.16), stop(1.0, 0.38, 0.82), stop(0.62, 0.44, 1.0), stop(0.22, 0.88, 1.0)],
-                    intensity: 0.85
-                )],
-                piping: 0.6
-            ),
-            lens: GlassLens(
-                profile: .squircle(exponent: 3), thickness: 40, indexOfRefraction: 1.5, maximumOffset: 80, allowsFold: true,
-                dispersion: 1, dispersionTaps: .sixTap,
-                inlays: [GlassLens.Inlay(radius: 40, height: 16, profile: .dome, rimLine: 0.6)]
-            ),
-            lighting: GlassLighting(
-                key: GlassLighting.Light(azimuth: 0, elevation: 55, color: color(1, 0.88, 0.70), intensity: 1, size: 0.3),
-                environment: .studioLight, finish: .dielectric,
-                fresnel: 0.8, specular: 0.9, reflection: 0.8, bloom: 0.6, bloomWidth: 8
-            )
-        )),
-        Demo(caption: String(localized: "Smoky dome: studio strips on the rim"), parameters: GlassParameters(
-            cornerRadius: 999, bezelWidth: 75, refraction: 0.5, edgeHighlight: 0,
-            tint: GlassTint(red: 0.02, green: 0.02, blue: 0.035, strength: 0.62),
-            lens: GlassLens(profile: .dome, thickness: 60, indexOfRefraction: 1.6, maximumOffset: 100, dispersion: 0.3),
-            lighting: GlassLighting(
-                key: GlassLighting.Light(azimuth: 330, elevation: 45, intensity: 0.9, size: 0.45),
-                environment: .studioDark, finish: .dielectric,
-                fresnel: 0.9, specular: 0.7, reflection: 1, bloom: 0.3, bloomWidth: 6
-            )
-        )),
+        Demo(caption: String(localized: "Round button: polished glass edge"), parameters: {
+            var button = RefinedLook.panel(corner: 999, bezel: 15, dark: false)
+            button.refraction = 0.35
+            button.tint = GlassTint(red: 1, green: 1, blue: 1, strength: 0.15)
+            button.lighting = RefinedLook.lighting(dark: false, finish: .prismatic(spread: 1, saturation: 0.3, phase: 0.02))
+            button.lighting.reflection = 0.9
+            button.lighting.fresnel = 0.8
+            return button
+        }()),
+        Demo(caption: String(localized: "Lens pill: thick edge, quiet pooled light, one soft highlight"), parameters: {
+            var pill = RefinedLook.lens(bezel: 40, thickness: 34, dark: true)
+            pill.light = pooledLight()
+            pill.lens.dispersionTaps = .sixTap
+            pill.lens.dispersion = 0.45
+            pill.lens.inlays = [GlassLens.Inlay(radius: 40, height: 14, profile: .dome, rimLine: 0.25)]
+            return pill
+        }()),
+        Demo(caption: String(localized: "Smoky dome: a calm gel behind clear glass"), parameters: {
+            var dome = RefinedLook.panel(corner: 999, bezel: 75, dark: true)
+            dome.tint = GlassTint(red: 0.03, green: 0.03, blue: 0.045, strength: 0.4)
+            dome.lens = GlassLens(profile: .dome, thickness: 50, indexOfRefraction: 1.5, maximumOffset: 80, dispersion: 0.2, dispersionTaps: .threeTap)
+            dome.lighting.bloom = 0.1
+            dome.lighting.bloomWidth = 3
+            return dome
+        }()),
     ]
 
-    // MARK: Paper demos (GW-25)
+    // MARK: Paper demos (GW-25, refined)
 
     private static func ink(_ red: Double, _ green: Double, _ blue: Double) -> GlassGrounding.Color {
         GlassGrounding.Color(red: red, green: green, blue: blue)
     }
 
-    /// The paper desk's panels: a round chrome-ring button and a lens pill
-    /// about 8 points apart, and a glass marble below, each with a drop,
-    /// contact and inner shadow and a colored caustic, lit from the upper left.
+    /// The paper desk's panels: a round button and a lens pill about 8 points
+    /// apart, and a glass marble below, each with a soft shadow and a faint
+    /// warm caustic, lit from the upper left.
     private static let paperDemos: [Demo] = [
-        Demo(caption: String(localized: "Ring button"), parameters: GlassParameters(
-            cornerRadius: 999, bezelWidth: 6, refraction: 0.3, edgeHighlight: 0,
-            tint: GlassTint(red: 1, green: 1, blue: 1, strength: 0.2),
-            lighting: GlassLighting(
-                key: GlassLighting.Light(azimuth: 315, elevation: 50, intensity: 1, size: 0.25),
-                environment: .studioLight, finish: .prismatic(spread: 1, saturation: 0.95, phase: 0.02),
-                fresnel: 0.5, specular: 0.9, reflection: 1, bloom: 0.2, bloomWidth: 3
-            ),
-            grounding: GlassGrounding(
-                drop: .init(offset: 10, blur: 18, spread: -2, opacity: 0.75, color: ink(0.12, 0.12, 0.2)),
-                contact: .init(width: 2.5, opacity: 0.65, color: ink(0.05, 0.05, 0.1)),
-                inner: .off,
-                caustic: .init(offset: 7, radius: 6.5, intensity: 0.5, color: ink(1, 0.88, 0.7), dispersion: 0.6, spectrum: 1)
-            )
-        )),
-        Demo(caption: String(localized: "Lens pill, 8 points from the button"), parameters: GlassParameters(
-            cornerRadius: 999, bezelWidth: 34, refraction: 0.6, edgeHighlight: 0.3,
-            lens: GlassLens(
-                profile: .squircle(exponent: 3), thickness: 30, indexOfRefraction: 1.5, maximumOffset: 60, allowsFold: true,
-                dispersion: 0.7, dispersionTaps: .sixTap,
-                inlays: [GlassLens.Inlay(radius: 24, height: 12, profile: .dome, rimLine: 0.6)]
-            ),
-            lighting: GlassLighting(
-                key: GlassLighting.Light(azimuth: 315, elevation: 50, color: color(1, 0.92, 0.82), intensity: 1, size: 0.3),
-                environment: .studioLight, finish: .dielectric,
-                fresnel: 0.8, specular: 0.9, reflection: 0.8, bloom: 0.4, bloomWidth: 6
-            ),
-            grounding: GlassGrounding(
-                drop: .init(offset: 10, blur: 18, spread: -2, opacity: 0.72, color: ink(0.12, 0.14, 0.24)),
-                contact: .init(width: 2.5, opacity: 0.6, color: ink(0.05, 0.05, 0.1)),
-                inner: .init(offset: 2, blur: 6, opacity: 0.18, color: ink(0.1, 0.12, 0.25)),
-                caustic: .init(offset: 7, radius: 6.5, intensity: 0.5, color: ink(1, 0.9, 0.75), dispersion: 0.6, spectrum: 1)
-            )
-        )),
-        Demo(caption: String(localized: "Glass marble: refracted grid, soft shadow, colored caustic"), parameters: GlassParameters(
-            cornerRadius: 999, bezelWidth: 70, refraction: 0.5, edgeHighlight: 0,
-            lens: GlassLens(profile: .dome, thickness: 56, indexOfRefraction: 1.7, maximumOffset: 100, dispersion: 0.5),
-            lighting: GlassLighting(
-                key: GlassLighting.Light(azimuth: 315, elevation: 50, intensity: 1, size: 0.45),
-                environment: .studioLight, finish: .dielectric,
-                fresnel: 0.9, specular: 0.9, reflection: 1, bloom: 0.3, bloomWidth: 5
-            ),
-            grounding: GlassGrounding(
-                drop: .init(offset: 16, blur: 26, spread: -4, opacity: 0.78, color: ink(0.12, 0.14, 0.26)),
-                contact: .init(width: 3, opacity: 0.65, color: ink(0.05, 0.05, 0.1)),
-                inner: .init(offset: 4, blur: 10, opacity: 0.2, color: ink(0.1, 0.12, 0.25)),
-                caustic: .init(offset: 12, radius: 12, intensity: 0.55, color: ink(1, 0.9, 0.7), dispersion: 0.6, spectrum: 1)
-            )
-        )),
+        Demo(caption: String(localized: "Round button"), parameters: {
+            var button = RefinedLook.panel(corner: 999, bezel: 15, dark: false)
+            button.refraction = 0.35
+            button.lighting = RefinedLook.lighting(dark: false, finish: .prismatic(spread: 1, saturation: 0.3, phase: 0.02))
+            button.lighting.reflection = 0.9
+            button.lighting.fresnel = 0.8
+            button.grounding = paperGrounding(offset: 8, blur: 18, opacity: 0.2, caustic: 0.1)
+            return button
+        }()),
+        Demo(caption: String(localized: "Lens pill, 8 points from the button"), parameters: {
+            var pill = RefinedLook.lens(bezel: 34, thickness: 26, dark: false)
+            pill.lens.inlays = [GlassLens.Inlay(radius: 24, height: 10, profile: .dome, rimLine: 0.25)]
+            pill.grounding = paperGrounding(offset: 8, blur: 18, opacity: 0.2, caustic: 0.12)
+            return pill
+        }()),
+        Demo(caption: String(localized: "Glass marble: refracted grid, soft shadow, faint warm caustic"), parameters: {
+            var marble = RefinedLook.panel(corner: 999, bezel: 70, dark: false)
+            marble.tint = .none
+            marble.lens = GlassLens(profile: .dome, thickness: 46, indexOfRefraction: 1.5, maximumOffset: 80, dispersion: 0.25, dispersionTaps: .threeTap)
+            marble.lighting.fresnel = 0.8
+            marble.lighting.specular = 0.7
+            marble.grounding = paperGrounding(offset: 14, blur: 28, opacity: 0.22, caustic: 0.16)
+            return marble
+        }()),
     ]
+
+    private static func paperGrounding(offset: Double, blur: Double, opacity: Double, caustic: Double) -> GlassGrounding {
+        let shadow = ink(0.16, 0.17, 0.24)
+        return GlassGrounding(
+            drop: .init(offset: offset, blur: blur, spread: -3, opacity: opacity, color: shadow),
+            contact: .init(width: 1, opacity: 0.06, color: shadow),
+            caustic: caustic > 0
+                ? .init(offset: offset * 0.8, radius: offset, intensity: caustic, color: ink(1, 0.93, 0.82), dispersion: 0.3, spectrum: 0.5)
+                : .off,
+            lightAzimuth: RefinedLook.azimuth
+        )
+    }
 
     private static func stop(_ red: Double, _ green: Double, _ blue: Double) -> GlassLight.Stop {
         GlassLight.Stop(red: red, green: green, blue: blue)
     }
 
-    /// The four light demos. Every light keeps the middle clear except the
-    /// orb, which is the point of an orb.
+    /// The four light demos. Light is a quiet pooled tint at the edge with a
+    /// believable falloff; every light keeps the middle clear except the orb,
+    /// which is the point of an orb.
     private static func lightDemos(timeOffset: Double) -> [Demo] {
-        let orange = stop(1.0, 0.60, 0.16), pink = stop(1.0, 0.38, 0.82)
-        let violet = stop(0.62, 0.44, 1.0), cyan = stop(0.22, 0.88, 1.0)
+        let orange = stop(1.0, 0.62, 0.30), pink = stop(0.96, 0.46, 0.72)
+        let violet = stop(0.62, 0.50, 0.96), cyan = stop(0.34, 0.80, 1.0)
         let pill = GlassLight(
             emitters: [GlassLight.Emitter(
-                placement: .band(angle: 180, reach: 1.2), colors: [orange, pink, violet, cyan],
-                intensity: 0.95, flow: 2, drift: 0.25
+                placement: .band(angle: 180, reach: 0.9), colors: [orange, pink, violet, cyan],
+                intensity: 0.6, flow: 2, drift: 0.25
             )],
-            piping: 0.85, timeOffset: timeOffset
+            piping: 0.4, timeOffset: timeOffset
         )
         let arc = GlassLight(
             emitters: [GlassLight.Emitter(
-                placement: .arc(angle: 225, span: 170, reach: 0.62), colors: [stop(1, 0.78, 0.25), pink, violet],
-                intensity: 0.95, flow: 1, drift: 0.4
+                placement: .arc(angle: 225, span: 150, reach: 0.5), colors: [stop(1, 0.80, 0.42), pink, violet],
+                intensity: 0.6, flow: 1, drift: 0.4
             )],
-            piping: 1, pipingWidth: 6, timeOffset: timeOffset
+            piping: 0.5, pipingWidth: 6, timeOffset: timeOffset
         )
         let orb = GlassLight(
             emitters: [GlassLight.Emitter(
-                placement: .point(x: 0, y: 0.12, radius: 0.78, stretch: 1), colors: [stop(1, 0.96, 0.82), orange, stop(0.85, 0.12, 0.45)],
-                intensity: 0.95, flow: 1, drift: 0.45
+                placement: .point(x: 0, y: 0.12, radius: 0.7, stretch: 1), colors: [stop(1, 0.95, 0.84), orange, stop(0.85, 0.30, 0.55)],
+                intensity: 0.7, flow: 1, drift: 0.45
             )],
-            centerFade: 0.1, piping: 0.5, timeOffset: timeOffset
+            centerFade: 0.45, piping: 0.35, timeOffset: timeOffset
         )
         let field = GlassLight(
             emitters: [GlassLight.Emitter(
-                placement: .field(warp: 0.75), colors: [orange, stop(0.92, 0.18, 0.72), cyan, violet],
-                intensity: 0.95, flow: 1
+                placement: .field(warp: 0.5), colors: [orange, pink, cyan, violet],
+                intensity: 0.42, flow: 1
             )],
-            piping: 0.7, timeOffset: timeOffset
+            piping: 0.35, timeOffset: timeOffset
         )
-        let base = { (corner: Double, bezel: Double, light: GlassLight) in
-            GlassParameters(cornerRadius: corner, bezelWidth: bezel, refraction: 0.55, edgeHighlight: 0.5, light: light)
+        let base = { (corner: Double, bezel: Double, light: GlassLight) -> GlassParameters in
+            var parameters = RefinedLook.panel(corner: corner, bezel: bezel, dark: true)
+            parameters.light = light
+            return parameters
         }
         return [
             Demo(caption: String(localized: "Band: light pooled along the bottom edge"), parameters: base(999, 18, pill)),
@@ -566,6 +585,7 @@ final class MaterialBenchViewController: UIViewController {
         case .lens: titleLabel.text = String(localized: "Thick lens")
         case .chrome: titleLabel.text = String(localized: "Chrome and light")
         case .paper: titleLabel.text = String(localized: "Paper desk")
+        case .compare: titleLabel.text = String(localized: "Apple vs GlassWeave")
         }
         titleLabel.accessibilityTraits.insert(.header)
         closeButton.configuration?.title = String(localized: "Close")
@@ -580,6 +600,28 @@ final class MaterialBenchViewController: UIViewController {
             // The light's composite and the tint depend on the page.
             applyPanels()
         }, for: .valueChanged)
+        if mode == .compare {
+            // Apple's glass sits above the surface, so it samples the same
+            // backdrop the GlassWeave panels are drawn over.
+            for row in CompareRow.allCases {
+                let effect = UIGlassEffect(style: row == .clearCapsule ? .clear : .regular)
+                let native = UIVisualEffectView(effect: effect)
+                native.cornerConfiguration = row == .card ? .corners(radius: .fixed(28)) : .capsule()
+                native.isUserInteractionEnabled = false
+                native.tag = row.rawValue
+                native.isAccessibilityElement = false
+                view.addSubview(native)
+                nativeViews.append(native)
+            }
+            for title in [String(localized: "Apple, UIGlassEffect"), String(localized: "GlassWeave, refined")] {
+                let label = UILabel()
+                label.font = .preferredFont(forTextStyle: .footnote).withSize(13)
+                label.text = title
+                label.textAlignment = .center
+                view.addSubview(label)
+                columnLabels.append(label)
+            }
+        }
         for label in [titleLabel, timeLabel, diagnosticsLabel] {
             label.translatesAutoresizingMaskIntoConstraints = true
             view.addSubview(label)
@@ -638,14 +680,14 @@ final class MaterialBenchViewController: UIViewController {
     /// Text and controls to match the page: white on the dark pages.
     private func applyPage() {
         let color: UIColor = page.isDark ? .white : .black
-        for label in [titleLabel, timeLabel] + captionLabels {
+        for label in [titleLabel, timeLabel] + captionLabels + columnLabels {
             label.textColor = color
         }
         diagnosticsLabel.textColor = page.isDark ? UIColor(white: 1, alpha: 0.7) : UIColor(white: 0, alpha: 0.6)
         pageControl.selectedSegmentIndex = pages.firstIndex(of: page) ?? 0
         // A faint scrim behind the text, so it reads over the dots and cells.
         let scrim = page.isDark ? UIColor(white: 0, alpha: 0.55) : UIColor(white: 1, alpha: 0.55)
-        for label in [titleLabel, diagnosticsLabel] + captionLabels {
+        for label in [titleLabel, diagnosticsLabel] + captionLabels + columnLabels {
             label.backgroundColor = scrim
             label.layer.cornerRadius = 6
             label.layer.masksToBounds = true
@@ -654,6 +696,7 @@ final class MaterialBenchViewController: UIViewController {
         pageControl.backgroundColor = scrim
         // The native controls read on the page: light on dark pages.
         let style: UIUserInterfaceStyle = page.isDark ? .dark : .light
+        for native in nativeViews { native.overrideUserInterfaceStyle = style }
         pageControl.overrideUserInterfaceStyle = style
         closeButton.overrideUserInterfaceStyle = style
         surface?.requestFrame()
@@ -707,6 +750,26 @@ final class MaterialBenchViewController: UIViewController {
             frames.append(CGRect(x: rowLeft + button + 8, y: rowTop, width: row - button - 8, height: button))
             let marble = min(row * 0.55, 210)
             frames.append(CGRect(x: bounds.midX - marble / 2, y: rowTop + button + 80, width: marble, height: marble))
+        } else if mode == .compare {
+            // Two columns of the same four frames: Apple's glass on the left,
+            // GlassWeave's on the right. One caption under each pair.
+            let gutter: CGFloat = 16
+            let column = (width - gutter) / 2
+            let rowHeights: [CGFloat] = [56, 92, 104, 64]
+            var theirs: [CGRect] = []
+            columnLabels[0].frame = CGRect(x: left, y: y - 2, width: column, height: 22)
+            columnLabels[1].frame = CGRect(x: left + column + gutter, y: y - 2, width: column, height: 22)
+            y += 28
+            for (index, height) in rowHeights.enumerated() {
+                let frame = height == 92
+                    ? CGRect(x: 0, y: y, width: 92, height: 92) : CGRect(x: 0, y: y, width: column, height: height)
+                let inset = (column - frame.width) / 2
+                theirs.append(frame.offsetBy(dx: left + inset, dy: 0))
+                frames.append(frame.offsetBy(dx: left + column + gutter + inset, dy: 0))
+                y += height + captionHeight + gap + 8
+                _ = index
+            }
+            for (native, frame) in zip(nativeViews, theirs) { native.frame = frame }
         } else if mode == .lens {
             // The pill, then a dome and a ring, then the fold pair.
             let pillHeight: CGFloat = 104
@@ -733,6 +796,10 @@ final class MaterialBenchViewController: UIViewController {
         for index in demos.indices {
             demos[index].frame = frames[index]
             // A caption is at least as wide as a small button's neighbours.
+            if mode == .compare {
+                captionLabels[index].frame = CGRect(x: left, y: frames[index].maxY + 4, width: width, height: captionHeight + 14)
+                continue
+            }
             let wide = mode == .chrome || mode == .paper
             let captionWidth = wide ? max(frames[index].width, 300) : frames[index].width
             let captionX = wide && frames[index].width < 300 ? frames[index].midX - captionWidth / 2 : frames[index].minX
@@ -756,6 +823,10 @@ final class MaterialBenchViewController: UIViewController {
     /// each light's `timeOffset`.
     private func applyPanels() {
         let base = stillTime ?? 0
+        if mode == .compare {
+            let fresh = Self.compareDemos(dark: page.isDark)
+            for index in demos.indices { demos[index].parameters = fresh[index].parameters }
+        }
         let panels = demos.map { demo -> GlassPanel in
             var parameters = demo.parameters
             parameters.light.timeOffset = base
@@ -769,7 +840,9 @@ final class MaterialBenchViewController: UIViewController {
                 parameters.light.composite = page.isDark ? .light : .paint
                 // Smoky glass on the dark and colorful pages, so light shows
                 // over any of them.
-                parameters.tint = page.isDark ? GlassTint(red: 0.03, green: 0.03, blue: 0.06, strength: 0.5) : .none
+                parameters.tint = page.isDark ? RefinedLook.tint(dark: true, strength: 0.12) : RefinedLook.tint(dark: false)
+                parameters.lighting = RefinedLook.lighting(dark: page.isDark)
+                parameters.grounding = RefinedLook.grounding(dark: page.isDark)
             }
             return GlassPanel(frame: demo.frame, parameters: parameters)
         }

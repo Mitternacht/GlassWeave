@@ -89,7 +89,7 @@ static float3 bench_orbs_color(float2 p, float2 size, float pixel) {
             const float limb = 0.55 + 0.45 * pow(saturate(normal.z), 0.6);
             float3 base = bench_orb_colors[uint(orb.w + 0.5)];
             float3 shaded = base * (0.30 + 0.85 * light) * limb + float3(0.05) * pow(light, 6.0);
-            shaded *= 1.0 + 0.22 * grain;
+            shaded *= 1.0 + 0.05 * grain;
             color = mix(color, shaded, edge);
         }
     }
@@ -173,8 +173,8 @@ static float3 bench_liquid_color(float2 p, float2 center, float pixel) {
     for (uint i = 0; i < 3; ++i) {
         const float2 d = u - bubbles[i].xy;
         const float r = length(d);
-        color += float3(1.0, 0.78, 0.5) * 0.35 * bench_fill(abs(r - bubbles[i].z) - 0.4, pixel) * inside;
-        color += float3(1.0, 0.95, 0.85) * 0.5 * bench_fill(length(d - float2(-1.5, -1.5) * bubbles[i].z * 0.4) - 1.0, pixel) * inside;
+        // A tiny soft speck, no ring: a gas bubble in a gel, not a soap bubble.
+        color += float3(1.0, 0.86, 0.62) * 0.22 * bench_fill(r - 1.2, pixel) * inside;
     }
     return color;
 }

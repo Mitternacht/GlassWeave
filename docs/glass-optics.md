@@ -713,3 +713,142 @@ and `gw-26-shapes-orbs-iphone18pro-sim.png`.
 - **`PipelineVariant` gained a case** and `GlassParameterError` a case;
   `ShaderLayoutTests` changed only the record size, the new offset and the
   record's new memberwise argument.
+
+## Apple-grade defaults (REFINE)
+
+> Experimental. `GlassLighting.Look`, `GlassLighting.look`, and
+> `GlassLighting.refined(azimuth:environment:finish:)` may change before a
+> stable release.
+
+The phase 1 pictures looked bubbly and fake: soap-bubble rings and crescents on
+the smoky dome, gray wedge-shaped studio strips, a round glare spot, thick
+jelly outlines, neon halos, a ring button that read as a thin white face. The
+goal of this pass is glass that looks like Apple's Liquid Glass, with more
+capability: a mostly clear body, real edge refraction, a thin crisp rim that is
+brighter on the lit side, calm frost and shadow, color as a quiet pooled tint.
+One light direction (the upper left, azimuth 315) lights every highlight.
+
+### How it was compared
+
+The lab's "Native vs refined glass" page (`-lab.compare YES`,
+`-lab.compareBackdrop charcoal|orbs|paper`) draws a real `UIGlassEffect` view
+(`.regular`, and `.clear` for the last row) above the same GlassWeave surface
+that draws our panels, so both sample one backdrop: a dark charcoal stage, the
+colorful soft-pebble scene (the orbs), and light paper. Four matched shapes per
+row: capsule, circle, rounded rectangle, and a clear capsule against our thick
+lens. Captures: `docs/evidence/captures/gw-refine-compare-*`. I measured the
+native rim on the charcoal stage (pixel rows through the capsule) and matched
+its structure: a 1 to 2 pixel bright hairline at the outline, a soft gradient
+about 10 points deep, and no second ring inside; on paper a faint gray
+hairline and a soft low shadow, body slightly lighter than the page.
+
+### What looked fake, and the cause
+
+| Phase 1 capture | What looked fake | Cause |
+| --- | --- | --- |
+| Smoky dome (chrome page) | Soap-bubble rings and crescents, a glare dot, gray wedges | The classic studio's horizon line (a bright ring where the reflection vector crosses the horizon), its two tall strips and wide key box, a Blinn-Phong lobe that is a round spot on a dome; ring-and-speck "bubbles" drawn in the backdrop |
+| Lens pill (chrome, lens pages) | A hot yellow streak, magenta bloom, a bright inlay ring | Specular 0.9 with bloom 0.6 and a warm key; light intensity 0.85; inlay `rimLine` 0.6 to 0.9 |
+| Ring button | A thin white-faced ring, not a polished edge | A 6 pt bevel with a white tint: the chrome band replaced the glass on a face-wide band |
+| Ring profile demo | A soap-bubble ring | The `.ring` lens profile as a default demo shape |
+| Fold pair, orbs | Gritty streaks | A felt grain of 22 % on the orbs backdrop, magnified by the lens |
+| Shapes page | A thick gray jelly outline, orange and pink halos, wobbling edges | Outline from the horizon ring; halo intensity 0.5 with a colored rim 2.5 pt wide and an inner glow; wobble amplitude 0.03 to 0.035 |
+| Paper desk | Heavy dark outline, a cyan neon caustic | Contact shadow 0.65 and drop 0.75; caustic intensity 0.5 with full spectrum |
+| Light fields | Neon bands and a fully saturated field | Emitter intensity 0.95 with piping 0.85 to 1 |
+
+### The refined look (shader)
+
+`GlassLighting.look` is `.classic` by default: the GW-23 model, byte for byte
+(the frozen-shader safety tests still compare it). `.refined` switches the
+`lighting` pipeline variant to new code in `Glass.metal` ("Refined look"); the
+look travels in `GWLightingUniforms.tint.w` (0 classic, 1 refined), which was
+zero padding the GW-23 shader never reads, so the record keeps its 160 bytes
+and its offsets. Everything stays inside the existing `bandWidth` (the bevel by
+default), so the legibility bound still holds.
+
+- **Rim hairline.** A fixed 1 to 2 pixel line at the outline (`1 - smoothstep(0.4, 1.8, depth)`),
+  independent of the lens profile (a tilt-based line was too faint at the last
+  pixel). It mixes toward a gradient color: sky on the lit side, floor on the far
+  side, so it shows as a thin gray line on a light page and a light line on a
+  dark one. Weight `0.55 + 0.30 lit + 0.45 back`: a little stronger toward
+  the light and on the echo opposite it. Strength: `fresnel`.
+- **Soft Fresnel body.** `f0 + (1 - f0) tilt^3.5`, mixed toward the same gradient
+  at `0.5 × reflection`: the rim reads as the edge of a thick clear body. It is
+  confined to the outermost part of the bevel by the exponent, so there is no
+  inner ring.
+- **One soft highlight.** A window in the surface tilt (`1 - N.z`) placed by the
+  key light's elevation (a low light lands near the wall) and at least 0.14 wide
+  (and never narrower than a pixel and a half), times `lit³`, the cube of the
+  angular factor `(0.5 + 0.5 cos)²`: it runs along the rim, fades over a
+  quarter turn to either side of the light, and is not a spot. Peak
+  `0.16 × specular` before the knee. The optional `rim` light adds a second one at
+  60 %.
+- **Edge gradient.** Sky toward the light and floor away from it, smooth, no
+  horizon line, no boxes. `.studioLight`: sky (0.97, 0.975, 1), floor (0.40, 0.41,
+  0.46); `.studioDark`: sky (0.30, 0.31, 0.35), floor (0.07, 0.07, 0.08), in
+  linear light.
+- **Polished glass edge** (`.chrome`, `.prismatic`). Across the bevel: a darker
+  wall at the outline (the floor color, ×0.62 on light pages), one soft bright
+  band at tilt 0.26, then the clear face; alpha `reflection × (0.30 + 0.42 band +
+  0.38 wall)`, at most 0.85, so the backdrop still shows through. The thin-film
+  hue multiplies the band and half of the wall only.
+- **Bloom.** The same three-tap spill, but at `0.4 × bloom` instead of 0.6, from
+  the refined lines (neutral, short).
+- **Accessibility.** The policy copies the whole `GlassLighting` and zeroes
+  `reflection`, `specular`, `rim`, `bloom` and the finish, then sets
+  `crispOutline`; the refined path reads exactly those fields, so Reduce
+  Transparency and Increase Contrast give the same thin contrasting hairline
+  as before (`GlassAccessibilityPolicy.presentedLighting`, unchanged). Reduce
+  Motion: the light does not move, as before. Captures:
+  `gw-refine-compare-charcoal-increase-contrast-*`, `gw-refine-compare-paper-reduce-transparency-*`,
+  `gw-23-chrome-reduce-transparency-*`.
+- **`GlassLighting.refined(azimuth:environment:finish:)`** returns the tuned
+  starting values: key 50° (size 0.3), `fresnel` 0.55, `specular` 0.5,
+  `reflection` 0.4, `bloom` 0.12 over 3 pt.
+
+### Demo defaults that changed
+
+`RefinedLook.swift` (lab) holds the shared starting values; every page builds
+from it and adds only what the page is about.
+
+| Value | Phase 1 | Now | Why |
+| --- | --- | --- | --- |
+| Light | classic studio, key 315 to 330, size 0.25 to 0.45 | `.refined`, 315, 50°, size 0.3 | one light, no wedges or rings |
+| `edgeHighlight` | 0.3 to 0.8 | 0 on lit panels | the lighting model draws the rim; two rims read as a plastic bevel |
+| `fresnel` / `specular` / `reflection` | 0.5 to 0.9 | 0.55 / 0.5 / 0.4 (buttons and the marble 0.8 / 0.5 / 0.9 for a crisper edge on paper) | restraint |
+| `bloom`, `bloomWidth` | 0.25 to 0.6, 3 to 8 pt | 0.12, 3 pt (0.1 on the dome) | neutral, no neon |
+| Body tint | none, or smoky 0.3 to 0.62 | 0.10 of a quiet gray on dark pages (matches the measured native body), 0.25 white on light pages, 0.15 on the ring | a calm material, not a gel |
+| Lens | thickness 40 to 60, ior 1.5 to 1.9, offset 80 to 120, dispersion 0.7 to 1 six-tap | thickness 24 to 34, ior 1.45, offset 44, dispersion 0.3 three-tap (0.45 to 0.5 six-tap on the large pill and the round lens), squircle 3 | dispersion at the bevel only (the profile is flat in the middle) and low; the fold pair keeps ior 1.7, thickness 44, offset 100 so the fold still shows |
+| Inlay `rimLine` | 0.6 to 0.9 | 0.25 | subtle dome |
+| Default shapes | blobs, ring profile | capsule, circle, rounded rectangle, ellipse, squircle; the ring profile demo became a round lens | clean by default |
+| Blob wobble | amplitude 0.03 to 0.035 | 0.012, speed 0.5 to 0.6 | slow, small motion |
+| Glow on the shapes page | rim 2.5 pt, softness 5, inner glow 26 pt at 0.5, halo 9 pt at 0.5 | rim 1.5 pt at 0.45, softness 3, no inner glow, no halo | no halos |
+| Pooled light | intensity 0.85 to 0.95, piping 0.6 to 1 | 0.42 to 0.7, piping 0.35 to 0.5, reach 0.8 to 0.9, softer hues | a quiet pooled tint with a falloff |
+| Grounding (paper, light pages) | drop 0.72 to 0.78 over 18 to 26 pt, contact 0.6 to 0.65, caustic 0.5 to 0.55 spectrum 1 | drop 0.16 to 0.22 over 18 to 28 pt, contact 1 pt at 0.05 to 0.06, caustic 0.1 to 0.16 spectrum 0.5, warm | soft, low-contrast shadow; no hard outline |
+| Orbs backdrop grain | 22 % | 5 % | the grain turned into streaks under the lens |
+| Liquid backdrop bubbles | a ring with a bright speck | a tiny soft speck, no ring | no soap-bubble rings |
+
+### Result
+
+Rounded rectangles, capsules and circles now read as the same family as the
+native glass on all three backdrops (compare captures), with a thin rim, a
+calm body and a soft shadow on paper. What GlassWeave adds shows without
+effects: the thick lens bends and magnifies the backdrop at the edge, light
+pools inside the body, the polished edge carries a faint thin-film glint.
+
+### Deviations and limits
+
+- **Opt-in, not a new default.** The frozen-shader safety tests render the
+  classic light model with its default values, so `look` defaults to
+  `.classic`. A host asks for the Apple-grade look with `.refined(...)`.
+- **No frost yet.** Native `.regular` glass is strongly frosted over the orbs;
+  ours is clear there until GW-24b wires the frost pyramid. The compare page
+  shows the gap honestly.
+- **Native glass is not an exact target.** It is an adaptive system material;
+  the comparison matches its structure (hairline, soft inner gradient, shadow,
+  body value), not every pixel. The compare captures are iPhone 18 Pro
+  simulator renderings.
+- **The refined highlight is tuned by eye** in four rounds of captures; the
+  numbers above are the shipped values, not derived constants. No CPU mirror
+  and no numeric test (fast pass).
+- **The classic model is untouched** and still draws gray wedges when asked
+  for; it exists for byte-compatibility.

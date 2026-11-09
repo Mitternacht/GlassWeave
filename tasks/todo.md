@@ -611,6 +611,32 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 - `Shaders/GlassOptics.h`, `Shaders/Glass.metal`, `GlassWeaveShaderTypes.h`
 - `Tests/GlassWeaveTests/GlassShapeTests.swift`
 
+## REFINE: Apple-grade look pass over GW-21 to GW-26
+
+**Description:** The phase 1 pictures looked too bubbly and fake. Retune everything built so far so it reads as Apple's Liquid Glass, enhanced: the same refinement and restraint, with more capability. No new feature; behavior changes only inside opt-in effects.
+
+**Dependencies:** GW-21 to GW-26. **Scope:** M, about 8 files, no new tests.
+
+**Acceptance criteria:**
+- [x] A comparison exists: a real `UIGlassEffect` beside our panels on the same procedural backdrops (dark charcoal, colorful soft pebbles, light paper), captured and inspected (`gw-refine-compare-*`).
+- [x] Every phase 1 demo capture reviewed, and what looked fake listed with its cause (docs/glass-optics.md, "Apple-grade defaults").
+- [x] Causes fixed in the shader terms (an opt-in refined look: thin rim hairline, one soft highlight, calm edge gradient, polished glass edge, neutral bloom) and in the demo defaults (shared `RefinedLook`, quieter light, softer shadows, calmer lens, cleaner shapes, backdrops without ring bubbles).
+- [x] Lens, chrome, paper, shapes and light fields recaptured, plus one native-versus-ours comparison per backdrop; superseded phase 1 captures replaced under the same names.
+- [x] The off paths stay byte-identical: `look` defaults to `.classic`, the record layout is unchanged (`tint.w`, formerly zero padding the GW-23 shader never reads), `GlassBaselineGW21` to `GW25Tests` pass unmodified (see the Evidence).
+- [x] Accessibility rows: Reduce Transparency and Increase Contrast give the thin contrasting hairline for the refined look through the unchanged `presentedLighting` policy; captured (`gw-refine-compare-charcoal-increase-contrast-*`, `gw-refine-compare-paper-reduce-transparency-*`, the chrome, paper, lens and light-field accessibility captures).
+- [ ] Numeric tests for the refined terms (rim width, highlight placement, hairline contrast on paper). (fast pass: not tested)
+- [ ] Frost on the native-like body over the orbs. (GW-24b)
+- [ ] Device sign-off, M5 cost of the refined path. (device only / fast pass: not run)
+
+**Evidence (2026-11-09, fast pass):** What exists: `GlassLighting.Look` (`.classic` default, `.refined`), `GlassLighting.look` and `GlassLighting.refined(azimuth:environment:finish:)`; the refined shader code in `Glass.metal` ("Refined look", inside the `lighting` variant, selected by `lighting.tint.w`); the lab's "Native vs refined glass" page (`-lab.compare YES`, `-lab.compareBackdrop <page>`), the shared `RefinedLook.swift`, and retuned lens, chrome, paper, shapes and light-field demos; the orbs backdrop lost most of its grain and the liquid backdrop its ring bubbles. Design, the cause list, every changed value and the limits: docs/glass-optics.md "Apple-grade defaults". Safety: no new test; the existing frozen-shader tests (`GlassBaselineGW21` to `GW25Tests`) render the classic light model and pass unmodified. End batch, once: package scheme on My Mac 204 passed, 0 failed (`xcresulttool` summary); on the iPhone 18 Pro simulator the first run was 285 passed, 1 failed, `EnhancedNativeGlassViewTests` "The pulse resumes where it stopped" (a wall-clock pulse timing check on the native glow, nothing to do with the light model), and the suite rerun alone passed 21 of 21, 0 failed. No lab UI test was added or changed (the menu gained one button), so none was run. Captures (iPhone 18 Pro simulator, inspected, four rounds): `docs/evidence/captures/gw-refine-compare-{charcoal,orbs,paper}-iphone18pro-sim.png` and two accessibility variants, and the replaced `gw-21-light-fields-*`, `gw-22-lens-*`, `gw-23-chrome-*`, `gw-25-paper-desk-*`, `gw-26-shapes-*`. Limits: the Xcode MCP bridge could not open a workspace, so `xcodebuild` was used; ours has no frost yet, so native `.regular` glass over the orbs is more frosted than ours; the native glass is an adaptive system material and was matched in structure, not pixel by pixel; tuned by eye, no CPU mirror.
+
+**Verification:** `xcodebuild test` for the package scheme on My Mac and the iPhone 18 Pro simulator; by-eye comparison of the captures.
+
+**Likely files:**
+- `Sources/GlassWeave/GlassLighting.swift`, `Shaders/Glass.metal`, `GlassWeaveShaderTypes.h` (comment only)
+- `Examples/GlassWeaveLab/GlassWeaveLab/RefinedLook.swift` (new), `MaterialBenchViewController.swift`, `ShapesBenchViewController.swift`, `BenchBackgrounds.metal`, `LabViewController.swift`
+- `docs/glass-optics.md`, `docs/evidence/captures/`
+
 ## GW-27: Non-blocking presentation, frame pacing and quality tiers (closes GW-04 item 3)
 
 **Description:** No GlassWeave draw stalls the main thread waiting for a drawable. Interaction frames can request up to 120 Hz while ambient motion stays calm, native views over moving glass stay in step, and a quality setting trades extras for frame time.
