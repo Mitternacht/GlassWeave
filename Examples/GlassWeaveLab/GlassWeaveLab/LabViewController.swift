@@ -22,7 +22,9 @@ import UIKit
 /// Launching with `-lab.nativeGlow <name>` draws the same preset's rim and
 /// halo around the native reference glass (``EnhancedNativeGlassView``,
 /// GW-14), with a Native glow switch; without it the reference is plain
-/// native glass.
+/// native glass. Launching with `-lab.interior <name>` gives the custom
+/// panel an animated interior (``LabInterior``, GW-19) with an Interior
+/// motion switch.
 final class LabViewController: UIViewController {
     enum SourceMode {
         case moving
@@ -44,6 +46,9 @@ final class LabViewController: UIViewController {
     /// The native reference's glow, when launched with
     /// `-lab.nativeGlow <name>` (GW-14).
     private let labNativeGlow = LabGlow.fromLaunchArguments(key: "lab.nativeGlow")
+    /// The panel's interior, when launched with `-lab.interior <name>`
+    /// (GW-19).
+    private let labInterior = LabInterior.fromLaunchArguments
 
     // MARK: Stage
 
@@ -85,6 +90,8 @@ final class LabViewController: UIViewController {
     private let pulseSwitch = UISwitch()
     /// Turns the native reference's glow on and off (GW-14).
     private let nativeGlowSwitch = UISwitch()
+    /// Moves or stills the panel's interior (GW-19).
+    private let interiorMotionSwitch = UISwitch()
     private let diagnosticsLabel = UILabel()
     private let resetButton = UIButton(configuration: .bordered())
     /// Benchmark only: settles the stage and reports allocated bytes.
@@ -201,6 +208,7 @@ final class LabViewController: UIViewController {
         stageSwitch.isOn = true
         pulseSwitch.isOn = true
         nativeGlowSwitch.isOn = true
+        interiorMotionSwitch.isOn = true
         updateNativeGlow()
         // Before the first layout the stage lays the panel out itself.
         if stage.bounds.width > 0 {
@@ -404,6 +412,13 @@ final class LabViewController: UIViewController {
             self?.updateNativeGlow()
             self?.updateDiagnostics()
         }, for: .valueChanged)
+        interiorMotionSwitch.accessibilityIdentifier = "lab.interiorMotion"
+        interiorMotionSwitch.accessibilityLabel = String(localized: "Interior motion")
+        interiorMotionSwitch.isOn = true
+        interiorMotionSwitch.addAction(UIAction { [weak self] _ in
+            self?.updateCustomPanel()
+            self?.updateDiagnostics()
+        }, for: .valueChanged)
 
         newWindowButton.configuration?.title = String(localized: "New window")
         newWindowButton.accessibilityIdentifier = "lab.newWindow"
@@ -448,10 +463,13 @@ final class LabViewController: UIViewController {
         // The native reference's glow can be turned off to compare (GW-14).
         let nativeGlowRow = Self.row([UIView(), Self.caption(String(localized: "Native glow")), nativeGlowSwitch])
         nativeGlowRow.isHidden = labNativeGlow == nil
-        controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow]
+        // The panel's interior can be stilled to compare frame counts (GW-19).
+        let interiorRow = Self.row([UIView(), Self.caption(String(localized: "Interior motion")), interiorMotionSwitch])
+        interiorRow.isHidden = labInterior == nil
+        controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, diagnosticsLabel, resetButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, measureButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -643,9 +661,13 @@ final class LabViewController: UIViewController {
         if !pulseSwitch.isOn {
             glow.pulseDepth = 0
         }
+        var interior = labInterior?.interior(for: traitCollection) ?? .none
+        if !interiorMotionSwitch.isOn {
+            interior.speed = 0
+        }
         return GlassParameters(
             cornerRadius: 30, bezelWidth: 22, refraction: 0.85, edgeHighlight: 0.6, tint: tint,
-            glow: glow
+            glow: glow, interior: interior
         )
     }
 
@@ -1104,6 +1126,12 @@ final class LabViewController: UIViewController {
                     ? "pulse \(String(format: "%.1f", glow.pulsePeriod)) s × \(String(format: "%.2f", glow.pulseDepth))"
                     : "no pulse"
                 lines.append("Halo: \(String(format: "%.0f", glow.hasHalo ? glow.haloRadius : 0)) pt · \(String(format: "%.2f", glow.hasHalo ? glow.haloIntensity : 0)) · \(pulse) · effect clock \(surface.isAnimating ? "running" : "stopped") · t \(String(format: "%.2f", surface.renderer.effectTime)) s")
+            }
+            if let labInterior, let interior = surface.presentedPanel?.parameters.interior {
+                let drawn = interior.isVisible
+                    ? "\(interior.colors.count) colors · intensity \(String(format: "%.2f", interior.intensity)) · speed \(String(format: "%.2f", interior.speed)) · seed \(interior.seed) · fade \(String(format: "%.2f", interior.centerFade))"
+                    : "not drawn"
+                lines.append("Interior: \(labInterior.rawValue) · \(drawn) · effect clock \(surface.isAnimating ? "running" : "stopped") · t \(String(format: "%.2f", surface.renderer.effectTime)) s")
             }
             if let labNativeGlow {
                 let glow = nativeHost.presentedGlow
