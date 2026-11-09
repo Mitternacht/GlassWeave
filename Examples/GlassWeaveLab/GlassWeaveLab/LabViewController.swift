@@ -96,6 +96,10 @@ final class LabViewController: UIViewController {
     private let resetButton = UIButton(configuration: .bordered())
     /// Benchmark only: settles the stage and reports allocated bytes.
     private let measureButton = UIButton(configuration: .bordered())
+    /// Opens the glow gallery (GW-20).
+    private let galleryButton = UIButton(configuration: .bordered())
+    /// Whether `-lab.gallery YES` has opened the gallery yet.
+    private var openedGalleryAtLaunch = false
     /// The control rows; vertical at accessibility text sizes.
     private var controlRows: [UIStackView] = []
     /// At accessibility text sizes the custom panel takes the stage's full
@@ -162,6 +166,24 @@ final class LabViewController: UIViewController {
         if let benchmark {
             startBenchmark(benchmark)
         }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // `-lab.gallery YES` opens the glow gallery once, at launch.
+        if !openedGalleryAtLaunch, UserDefaults.standard.bool(forKey: "lab.gallery") {
+            openedGalleryAtLaunch = true
+            openGallery(animated: false)
+        }
+    }
+
+    /// Presents the glow gallery (GW-20) over the whole window. While it is
+    /// shown this screen is out of the window, so its surface draws nothing.
+    private func openGallery(animated: Bool) {
+        guard presentedViewController == nil else { return }
+        let gallery = GlowGalleryViewController()
+        gallery.modalPresentationStyle = .fullScreen
+        present(gallery, animated: animated)
     }
 
     /// At accessibility text sizes, control rows stack vertically and the
@@ -448,6 +470,11 @@ final class LabViewController: UIViewController {
         }, for: .primaryActionTriggered)
         measureButton.isHidden = benchmark == nil
 
+        galleryButton.configuration?.title = String(localized: "Glow gallery")
+        galleryButton.accessibilityIdentifier = "lab.openGallery"
+        galleryButton.addAction(UIAction { [weak self] _ in self?.openGallery(animated: true) }, for: .primaryActionTriggered)
+        galleryButton.isHidden = benchmark != nil
+
         let tintRow = Self.row([tintControl, UIView(), Self.caption(String(localized: "Enabled")), enabledSwitch])
         let motionRow = Self.row([pauseButton, UIView(), Self.caption(String(localized: "Frame ID")), overlaySwitch])
         // The still pattern has no clock and no frame-ID strip.
@@ -469,7 +496,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, measureButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -802,8 +829,9 @@ final class LabViewController: UIViewController {
 
     /// Fixed accessibility settings from launch arguments
     /// (`-lab.reduceMotion YES`, `-lab.reduceTransparency YES`), for UI tests
-    /// and comparison runs; `nil` follows the system.
-    private static var accessibilitySettingsOverride: GlassAccessibilitySettings? {
+    /// and comparison runs; `nil` follows the system. The glow gallery reads
+    /// them too.
+    static var accessibilitySettingsOverride: GlassAccessibilitySettings? {
         let defaults = UserDefaults.standard
         let keys = ["lab.reduceMotion", "lab.reduceTransparency"]
         guard keys.contains(where: { defaults.object(forKey: $0) != nil }) else { return nil }
