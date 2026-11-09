@@ -116,9 +116,13 @@ by the laboratory and tests; it is not yet a frozen public API.
 Defined skips (`BackgroundRenderOutcome.skipped`): no source, zero-size
 target, no drawable, released source, or no encoder. Missing-source and
 zero-size checks run before a drawable is requested. No path waits for GPU
-completion. Known limit carried to GW-07: `MTKView.currentDrawable` can block
-for up to the layer's one-second timeout if every drawable is still in
-flight; bounding in-flight frames belongs to the lifecycle task.
+completion. Known limit, still open: `GlassSurfaceView` acquires its drawable
+on the main thread through `MTKView.currentRenderPassDescriptor`
+(`CAMetalLayer.nextDrawable()`), which blocks until a drawable is free or the
+layer's one-second timeout passes, so the host's no-drawable skip comes only
+after a main-thread wait. GW-07's two-frame in-flight bound normally keeps
+that wait to about one display refresh; it does not remove it (GW-04's third
+acceptance item stays open).
 
 ### Synchronization progression
 

@@ -32,14 +32,22 @@ import UIKit
 ///   trimming its texture pool. Every texture a submitted frame uses stays
 ///   alive until that frame completes, and no path waits for the GPU.
 ///
-/// Defined skips, none of which waits on the GPU or the main thread:
+/// Defined skips. None waits for GPU work; the first two return before a
+/// drawable is requested:
 /// - No source: the Metal view is hidden and the opaque `backgroundColor`
 ///   shows as the fallback. ``lastRenderOutcome`` is
 ///   `.skipped(.missingSource)`.
 /// - Zero-size bounds or a zero display scale: no drawable is requested and
 ///   the outcome is `.skipped(.zeroSizeTarget)`.
 /// - No drawable available: the outcome is `.skipped(.drawableUnavailable)`
-///   and the producer's lease counts the skipped use.
+///   and the producer's lease counts the skipped use. This skip is reached
+///   only after a wait on the main thread: the view acquires its drawable
+///   through `MTKView.currentRenderPassDescriptor`, which calls
+///   `CAMetalLayer.nextDrawable()`, and that call blocks until a drawable is
+///   free or the layer's one-second timeout passes. With at most
+///   ``maximumFramesInFlight`` frames in flight the wait is normally at most
+///   about one display refresh; when no drawable is free it can last up to
+///   one second.
 ///
 /// The surface is decorative: neither it nor its Metal view is an
 /// accessibility element (its accessibility elements are hidden), and it

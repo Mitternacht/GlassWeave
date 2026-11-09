@@ -56,6 +56,12 @@ None of the following is part of v0.1, and none is required for it:
   exercised.
 - A produced frame that gets no drawable becomes current but is presented
   only by the next draw; nothing schedules a retry.
+- `GlassSurfaceView` acquires its drawable on the main thread through
+  `MTKView.currentRenderPassDescriptor` (`CAMetalLayer.nextDrawable()`),
+  which blocks until a drawable is free: normally at most about one display
+  refresh with the two-frame in-flight bound, up to the layer's one-second
+  timeout when no drawable is free. The "no drawable" skip is reached only
+  after that wait, and no test exercises it through a real `MTKView`.
 - The CI workflow has not run on GitHub.
 - `swift build` cannot compile the Metal shaders; build with Xcode.
 
