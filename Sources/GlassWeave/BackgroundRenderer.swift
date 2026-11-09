@@ -84,7 +84,9 @@ public final class BackgroundRenderer {
     /// this queue before handing over a frame (same-queue readiness).
     public let commandQueue: any MTLCommandQueue
 
-    private let pipeline: any MTLRenderPipelineState
+    /// The background pass's pipeline; the experimental Metal 4 path (GW-11)
+    /// encodes the same pipeline state.
+    let pipeline: any MTLRenderPipelineState
     private var source: (lease: BackgroundFrameLease, hold: LeaseHold)?
     private var lastAccepted: (frameID: UInt64, timestamp: Duration)?
 
@@ -364,13 +366,13 @@ public final class BackgroundRenderer {
 /// Each creation and destruction also emits an `os_signpost` event in the
 /// "dev.glassweave" subsystem, "Renderer" category, visible in Instruments'
 /// os_signpost and Points of Interest tracks.
-enum RendererCensus {
+package enum RendererCensus {
     private static let createdCount = Atomic<Int>(0)
     private static let liveCount = Atomic<Int>(0)
     private static let signposter = OSSignposter(subsystem: "dev.glassweave", category: "Renderer")
 
     /// Renderers created since the process started.
-    static var created: Int { createdCount.load(ordering: .relaxed) }
+    package static var created: Int { createdCount.load(ordering: .relaxed) }
     /// Renderers currently alive.
     static var live: Int { liveCount.load(ordering: .relaxed) }
 

@@ -862,3 +862,74 @@ public final class GlassRenderer {
         return outcome
     }
 }
+
+// MARK: Metal 4 plan (GW-11, experimental)
+
+#if !targetEnvironment(simulator)
+extension GlassRenderer {
+    /// One panel quad as the Metal 4 experiment draws it: the pipeline the
+    /// conventional path binds for the panel, and the record both shader
+    /// stages read. The conventional path computes the same pair inside
+    /// `draw`; this copy exists so the experiment never touches that path.
+    struct Metal4PanelDraw {
+        let pipeline: any MTLRenderPipelineState
+        let uniforms: GWGlassUniforms
+        let variant: PipelineVariant
+    }
+
+    /// Everything the Metal 4 path encodes for one draw: the background
+    /// pass's pipeline and the panels' quads, in drawing order.
+    struct Metal4Plan {
+        let backgroundPipeline: any MTLRenderPipelineState
+        let panels: [Metal4PanelDraw]
+    }
+
+    /// The draw the conventional path would encode, as pipelines and records,
+    /// or `nil` when it needs something the experiment does not encode (the
+    /// caller then falls back to the conventional path).
+    ///
+    /// Encoded: panels that draw in the ``PipelineVariant/base``,
+    /// ``PipelineVariant/optics`` or ``PipelineVariant/lighting`` variants,
+    /// which need only a pipeline and the uniform record. Not encoded: frost
+    /// (a compute pre-pass), grounding (pre-pass quads), a freeform shape, a
+    /// fill and a touch response (extra records). The variant choice mirrors
+    /// `draw`'s; a new variant added there is "not encoded" here until this
+    /// function learns it, and the Metal 4 agreement test compares only the
+    /// cases it lists.
+    func metal4Plan(
+        backgroundUniforms: GWBackgroundUniforms,
+        targetWidth: Int, targetHeight: Int, displayScale: Double
+    ) -> Metal4Plan? {
+        if frostRequest != nil || panelFrostRequest() != nil { return nil }
+        var draws: [Metal4PanelDraw] = []
+        for panel in panels {
+            var geometry = GlassPanelGeometry(
+                panel: panel, displayScale: displayScale, effectTime: effectTime,
+                lightOffset: offsetOfLight, touches: touches
+            )
+            if isFrostSuppressed || frostedPipeline == nil { geometry.frost = nil }
+            if filledPipeline == nil { geometry.fill = nil }
+            if touchedPipeline == nil { geometry.touch = nil }
+            if geometry.isEmpty { continue }
+            guard geometry.fill == nil, geometry.frost == nil, geometry.touch == nil,
+                  geometry.shape == nil, geometry.grounding == nil
+            else { return nil }
+            let variant: PipelineVariant
+            let pipeline: any MTLRenderPipelineState
+            if geometry.lighting != nil, let lightingPipeline {
+                (variant, pipeline) = (.lighting, lightingPipeline)
+            } else if geometry.lens != nil, let opticsPipeline {
+                (variant, pipeline) = (.optics, opticsPipeline)
+            } else {
+                (variant, pipeline) = (.base, panelPipeline)
+            }
+            draws.append(Metal4PanelDraw(
+                pipeline: pipeline,
+                uniforms: geometry.uniforms(background: backgroundUniforms, targetWidth: targetWidth, targetHeight: targetHeight),
+                variant: variant
+            ))
+        }
+        return Metal4Plan(backgroundPipeline: background.pipeline, panels: draws)
+    }
+}
+#endif
