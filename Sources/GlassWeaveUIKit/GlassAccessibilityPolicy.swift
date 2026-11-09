@@ -45,6 +45,7 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | Reduce Motion | A glow's pulse stops: the rim, inner glow, and halo stay at the pulse's mean level, `1 − pulseDepth / 2` of their opacity. An interior shows its still frame: its speed becomes 0, so it is drawn at interior time 0 whatever the effect time. Nothing animates, so ``GlassSurfaceView`` runs no effect clock. ``GlassSurfaceView`` also reports the setting so the app can stop its source's nonessential motion. |
 /// | Inner light (`GlassLight`) | Reduce Transparency removes it. Increase Contrast removes the body light (it would sit behind text) and keeps only the piping, within ``increasedContrastPipingWidth`` of the outline, a clearer boundary like the glow's rim. Reduce Motion gives the still frame: its speed becomes 0, so it is drawn at phase 0 whatever the effect time. |
 /// | Thick lens (`GlassLens`) | Reduce Transparency removes it, dispersion included (the panel is the opaque surface). Increase Contrast keeps the lens, whose samples stay within the source's own colors so the legibility bound for text still holds, and removes the chromatic dispersion, which would put colored fringes behind text. Reduce Motion changes nothing: the lens is static. |
+/// | Light model (`GlassLighting`) | Reduce Transparency keeps a thin, crisp rim: the Fresnel outline as a contrasting hairline within ``reducedTransparencyRimWidth`` of the outline, with no reflections, specular streak, rim light, chrome or prismatic finish, or bloom (the panel is the opaque surface). Increase Contrast removes the reflections, the specular streak, the rim light, the finish, and the bloom: only the Fresnel outline in the bevel band remains, as a contrasting hairline (evenly lit) that is a clearer boundary. Reduce Motion changes nothing: the light moves only when the app moves it. |
 /// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
     /// The widest rim a glow keeps under Reduce Transparency, in points.
@@ -72,9 +73,44 @@ public enum GlassAccessibilityPolicy {
         }
         presented.parameters.glow = presentedGlow(for: panel.parameters.glow, settings: settings, traits: traits)
         presented.parameters.interior = presentedInterior(for: panel.parameters.interior, settings: settings, traits: traits)
+        presented.parameters.lighting = presentedLighting(
+            for: panel.parameters.lighting, bezelWidth: panel.parameters.bezelWidth, settings: settings, traits: traits
+        )
         presented.parameters.light = presentedLight(
             for: panel.parameters.light, bezelWidth: panel.parameters.bezelWidth, settings: settings, traits: traits
         )
+        return presented
+    }
+
+    /// The light model to draw for `lighting` under `settings` and `traits`
+    /// (GW-23): under Reduce Transparency a thin crisp rim, the Fresnel
+    /// outline within ``reducedTransparencyRimWidth``; under Increase Contrast
+    /// the outline in the bevel band only. In both the reflections, the
+    /// specular streak, the rim light, the chrome and prismatic finishes, and
+    /// the bloom are removed, so nothing bright or colored sits where text
+    /// might. Lighting that is not active is kept as it is.
+    static func presentedLighting(
+        for lighting: GlassLighting,
+        bezelWidth: Double,
+        settings: GlassAccessibilitySettings,
+        traits: UITraitCollection
+    ) -> GlassLighting {
+        guard lighting.isActive else { return lighting }
+        let reduceTransparency = settings.reduceTransparency
+        guard reduceTransparency || traits.accessibilityContrast == .high else { return lighting }
+        var presented = lighting
+        presented.finish = .dielectric
+        presented.reflection = 0
+        presented.specular = 0
+        presented.rim = nil
+        presented.bloom = 0
+        // A hairline that contrasts with the surface, so the boundary shows
+        // on an opaque or white surface too.
+        presented.crispOutline = true
+        presented.fresnel = max(lighting.fresnel, 0.8)
+        if reduceTransparency {
+            presented.bandWidth = min(lighting.bandWidth ?? bezelWidth, reducedTransparencyRimWidth)
+        }
         return presented
     }
 

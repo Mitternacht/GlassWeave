@@ -174,6 +174,89 @@ typedef struct GWLensInlay {
     uint32_t padding2;
 } GWLensInlay;
 
+/// The finish of the light model's reflections (GW-23), stored in
+/// `GWLightingUniforms.finish`. 0 draws no light model at all: the panel keeps
+/// its original edge highlight.
+typedef enum GWLightingFinish {
+    GWLightingFinishNone = 0,
+    /// Glass: the environment reflected with Schlick's Fresnel term.
+    GWLightingFinishDielectric = 1,
+    /// A neutral (or tinted) polished metal band on the rim.
+    GWLightingFinishChrome = 2,
+    /// Chrome whose bright reflections carry a thin-film rainbow.
+    GWLightingFinishPrismatic = 3,
+} GWLightingFinish;
+
+/// The analytic studio the glass reflects (GW-23), stored in
+/// `GWLightingUniforms.environment`.
+typedef enum GWLightingEnvironment {
+    /// A bright cyclorama: pale sky and floor, white softboxes.
+    GWLightingEnvironmentStudioLight = 0,
+    /// A dark room: near-black sky and floor, bright gray strips.
+    GWLightingEnvironmentStudioDark = 1,
+} GWLightingEnvironment;
+
+/// The light model of one panel (GW-23), resolved on the CPU for one draw:
+/// angles are unit vectors, lengths are pixels, colors are linear light, and
+/// the draw's light offset is already applied. All zero (`finish` 0) for a
+/// panel with the original highlight.
+///
+/// - `key`: unit direction toward the key light in panel space (x to the
+///   right, y down, z toward the viewer) in `xyz`, intensity 0...1 in `w`.
+/// - `keyColor`: its color (`xyz`) and Blinn-Phong exponent (`w`).
+/// - `rim`, `rimColor`: the optional second light as `key`, `keyColor`;
+///   intensity 0 draws no rim light.
+/// - `tint`: the chrome tint in linear light (`xyz`, `w` zero).
+/// - `prism`: the prismatic finish's spread in turns of hue around the rim
+///   (`x`), saturation 0...1 (`y`), phase in turns (`z`), `w` zero.
+/// - `finish`: a `GWLightingFinish` value. `environment`: a
+///   `GWLightingEnvironment` value.
+/// - `azimuth`: the key light's azimuth in radians (0 at the top, clockwise),
+///   offset included; the studio rotates with it.
+/// - `f0`: reflectance at normal incidence, `((n - 1) / (n + 1))^2`.
+/// - `fresnel`, `specular`, `reflection`, `bloom`: strengths, 0...1.
+/// - `bloomWidth`: the most the bloom reaches along the surface, in pixels.
+/// - `bevel`, `fieldRadius`: the quarter-round edge the light model uses when
+///   the panel has no lens profile: its width and the corner radius of the
+///   field whose inward distance is the depth.
+/// - `bandWidth`: how deep into the glass the light terms reach, in pixels.
+/// - `footprint`: the angle, in radians, one pixel spans on the surface's
+///   normal; the specular lobe is never narrower than it.
+/// - `contrast`: nonzero draws the Fresnel outline as a crisp hairline that
+///   contrasts with the glass under it (light on dark, dark on light) instead
+///   of adding light; zero adds light.
+/// - `edgeDirection`: the unit vector toward the key light in the panel's
+///   plane (x right, y down), which also orients the original edge highlight.
+///
+/// Layout in bytes: key 0, keyColor 16, rim 32, rimColor 48, tint 64,
+/// prism 80, finish 96, environment 100, azimuth 104, f0 108, fresnel 112,
+/// specular 116, reflection 120, bloom 124, bloomWidth 128, bevel 132,
+/// fieldRadius 136, bandWidth 140, footprint 144, contrast 148,
+/// edgeDirection 152. Size 160, alignment 16, stride 160.
+typedef struct GWLightingUniforms {
+    simd_float4 key;
+    simd_float4 keyColor;
+    simd_float4 rim;
+    simd_float4 rimColor;
+    simd_float4 tint;
+    simd_float4 prism;
+    uint32_t finish;
+    uint32_t environment;
+    float azimuth;
+    float f0;
+    float fresnel;
+    float specular;
+    float reflection;
+    float bloom;
+    float bloomWidth;
+    float bevel;
+    float fieldRadius;
+    float bandWidth;
+    float footprint;
+    float contrast;
+    simd_float2 edgeDirection;
+} GWLightingUniforms;
+
 /// Per-draw parameters for one rounded glass panel, in target pixels.
 ///
 /// Coordinate space: target pixels, origin at the top-left corner of the
@@ -286,6 +369,13 @@ typedef struct GWLensInlay {
 /// - `lensInlayCount`: 0 to 2.
 /// - `lensInlays`: the inlays; unused ones are zero.
 ///
+/// Light model (GW-23), appended after the GW-22 fields, which keep their
+/// layout. `lighting.finish` 0 disables the whole light model (every other
+/// field of the record is then zero); the panel is then drawn by a pipeline
+/// variant that does not contain the light model, as it was in GW-22. See
+/// docs/glass-optics.md for the math.
+/// - `lighting`: a `GWLightingUniforms` record.
+///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
 /// maxDisplacement 76, edgeHighlight 80, explicit padding 84, 88, 92 (set
@@ -307,8 +397,8 @@ typedef struct GWLensInlay {
 /// lensThickness 1012, lensBevel 1016, lensFieldRadius 1020, lensIOR 1024,
 /// lensMaximumOffset 1028, lensOffsetScale 1032, lensProfileA 1036,
 /// lensProfileB 1040, lensDispersion 1044, lensTapCount 1048, lensInlayCount 1052,
-/// lensInlays 1056 (2 × 48 bytes).
-/// Size 1152, alignment 16, stride 1152.
+/// lensInlays 1056 (2 × 48 bytes); lighting 1152 (160 bytes).
+/// Size 1312, alignment 16, stride 1312.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
     simd_float2 targetSize;
@@ -377,6 +467,7 @@ typedef struct GWGlassUniforms {
     uint32_t lensTapCount;
     uint32_t lensInlayCount;
     GWLensInlay lensInlays[2];
+    GWLightingUniforms lighting;
 } GWGlassUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

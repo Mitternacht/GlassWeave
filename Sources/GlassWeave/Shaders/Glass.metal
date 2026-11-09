@@ -5,7 +5,9 @@ using namespace metal;
 
 // The shader's view of the shared record must match the host layout asserted
 // in GlassWeaveShaderTypes.c.
-static_assert(sizeof(GWGlassUniforms) == 1152, "GWGlassUniforms size");
+static_assert(sizeof(GWGlassUniforms) == 1312, "GWGlassUniforms size");
+static_assert(sizeof(GWLightingUniforms) == 160, "GWLightingUniforms size");
+static_assert(alignof(GWLightingUniforms) == 16, "GWLightingUniforms alignment");
 static_assert(sizeof(GWLensInlay) == 48, "GWLensInlay size");
 static_assert(alignof(GWLensInlay) == 16, "GWLensInlay alignment");
 static_assert(sizeof(GWLightEmitter) == 112, "GWLightEmitter size");
@@ -721,9 +723,11 @@ static void gw_lens_add_inlays(float2 q, constant GWGlassUniforms &uniforms, thr
 }
 
 /// The inlays' rim light, as a fraction of the way to white: a thin line at
-/// the base and a brighter bevel inside it, both lit from the upper left
-/// like the panel's edge. Exactly 0 beyond half a pixel outside every base.
-static float gw_lens_inlay_highlight(float2 q, constant GWGlassUniforms &uniforms) {
+/// the base and a brighter bevel inside it, both lit from the direction of the
+/// panel's edge light (`lightDirection`, the upper left, or the key light's
+/// azimuth with the light model). Exactly 0 beyond half a pixel outside every
+/// base.
+static float gw_lens_inlay_highlight(float2 q, float2 lightDirection, constant GWGlassUniforms &uniforms) {
     float light = 0.0;
     for (uint i = 0u; i < min(uniforms.lensInlayCount, 2u); ++i) {
         constant GWLensInlay &inlay = uniforms.lensInlays[i];
@@ -733,7 +737,7 @@ static float gw_lens_inlay_highlight(float2 q, constant GWGlassUniforms &uniform
         if (r >= radius + 0.5 || inlay.shape.w <= 0.0 || inlay.shape.x <= 0.0) {
             continue;
         }
-        const float facing = r > 1e-4 ? saturate(dot(offset / r, gw_light_direction)) : 0.0;
+        const float facing = r > 1e-4 ? saturate(dot(offset / r, lightDirection)) : 0.0;
         const float lit = 0.35 + 0.65 * facing;
         // A line about 1.5 pixels wide at the base, antialiased on both sides.
         const float line = saturate(1.0 - abs(r - (radius - 0.75)) / 1.25);
@@ -819,6 +823,222 @@ static float3 gw_lens_glass(
     return color;
 }
 
+// MARK: Light model (GW-23)
+//
+// One movable light (docs/glass-optics.md): a Fresnel outline, a specular
+// streak, an analytic studio reflected on the rim, chrome and prismatic
+// finishes, a soft knee, and a bloom. The code exists only in the `lighting`
+// pipeline variant: the host builds this function with `gw_lighting_constant`
+// true for a panel whose `GlassLighting` is not `.legacy`, and with it unset
+// otherwise, in which case everything below is compiled out and the shader is
+// the one of GW-22, byte for byte (a frozen copy in the tests proves it). The
+// shader is the reference of the model; there is no CPU mirror.
+
+constant bool gw_lighting_constant [[function_constant(1)]];
+constant bool gw_lighting = is_function_constant_defined(gw_lighting_constant) ? gw_lighting_constant : false;
+
+/// The surface normal of the panel at `q`, from the slope of its height
+/// field: the lens's (host profile and inlays) or, without a lens profile, a
+/// quarter-round edge `lighting.bevel` wide. `outward` receives the outline's
+/// unit normal at `q`.
+static float3 gw_light_normal(float2 q, constant GWGlassUniforms &uniforms, thread float2 &outward) {
+    constant GWLightingUniforms &lighting = uniforms.lighting;
+    GWLensField field;
+    field.height = 0.0;
+    field.gradient = float2(0.0);
+    if (uniforms.lensProfile != GWLensProfileRim) {
+        const GWShapeSample shape = gw_shape_rounded_rect(q, uniforms);
+        field = gw_lens_host(shape, uniforms);
+        outward = shape.normal;
+    } else {
+        outward = gw_rounded_rect_normal(q, uniforms.panelHalfSize, lighting.fieldRadius);
+        const float depth = max(-gw_rounded_rect_distance(q, uniforms.panelHalfSize, lighting.fieldRadius), 0.0);
+        const float t = lighting.bevel > 0.0 ? saturate(depth / lighting.bevel) : 1.0;
+        if (t < 1.0) {
+            const float2 profile = gw_lens_profile(GWLensProfileCircular, t, 0.0, 0.0);
+            // Thickness equals the bevel, so the slope is the profile's.
+            field.gradient = -outward * clamp(profile.y, -gw_lens_max_slope, gw_lens_max_slope);
+        }
+    }
+    if (uniforms.lensInlayCount > 0u) {
+        gw_lens_add_inlays(q, uniforms, field);
+    }
+    return normalize(float3(-field.gradient, 1.0));
+}
+
+/// The soft knee: identity up to 0.8, then a shoulder that is C1 there
+/// (slope 1) and rises monotonically toward 1 without reaching it.
+static float3 gw_light_knee(float3 x) {
+    const float3 shoulder = 0.8 + 0.2 * (1.0 - exp(-(x - 0.8) * 5.0));
+    return select(shoulder, x, x <= 0.8);
+}
+
+/// A soft rectangle in the studio's (azimuth, elevation) space, 1 inside and
+/// 0 outside, with edges `soft` radians wide. `center` is (azimuth,
+/// elevation) and `extent` the half width and half height, in radians.
+static float gw_studio_box(float2 azel, float2 center, float2 extent, float soft) {
+    const float2 d = abs(azel - center);
+    const float2 inside = 1.0 - smoothstep(extent - soft, extent + soft, d);
+    return inside.x * inside.y;
+}
+
+/// The studio seen along the unit direction `R` (x right, y down, z toward the
+/// viewer), turned by `azimuth` radians with the key light: the sky, the
+/// horizon line, and the floor in `base`, and the key softbox (`x`) and the two
+/// tall strips at either side (`y`) in `boxes`, each at its brightness. Light
+/// studio: a pale sky, a dark floor, white boxes. Dark studio: a near-black
+/// room with gray boxes.
+static void gw_studio(float3 R, float azimuth, uint environment, thread float3 &base, thread float2 &boxes) {
+    const float elevation = asin(clamp(R.z, -1.0, 1.0));
+    float az = precise::atan2(R.x, -R.y) - azimuth;
+    az = az - 2.0 * M_PI_F * round(az / (2.0 * M_PI_F));
+    const bool dark = environment == GWLightingEnvironmentStudioDark;
+    const float up = saturate(R.z);
+    const float3 sky = dark ? mix(float3(0.020, 0.022, 0.030), float3(0.040, 0.044, 0.056), up)
+                            : mix(float3(0.50, 0.51, 0.55), float3(0.30, 0.31, 0.35), up);
+    const float3 floorColor = dark ? float3(0.006, 0.006, 0.008) : float3(0.20, 0.20, 0.23);
+    const float3 horizonColor = dark ? float3(0.12, 0.125, 0.14) : float3(0.95, 0.95, 0.97);
+    const float horizon = exp(-pow(elevation / 0.09, 2.0));
+    base = mix(floorColor, sky, smoothstep(-0.06, 0.06, elevation)) + horizonColor * horizon;
+    const float keyBox = gw_studio_box(float2(az, elevation), float2(0.0, 0.66), float2(0.70, 0.26), 0.10);
+    const float stripLeft = gw_studio_box(float2(az, elevation), float2(-1.68, 0.45), float2(0.22, 0.55), 0.08);
+    const float stripRight = gw_studio_box(float2(az, elevation), float2(1.68, 0.45), float2(0.22, 0.55), 0.08);
+    boxes = float2(keyBox * (dark ? 1.5 : 2.0), max(stripLeft, stripRight) * (dark ? 1.3 : 3.2));
+}
+
+/// A thin-film palette at `h` turns, as a color that multiplies a reflection:
+/// white at `saturation` 0, the full rainbow at 1.
+static float3 gw_light_film(float h, float saturation) {
+    const float3 rainbow = 0.5 + 0.5 * cos(2.0 * M_PI_F * (h + float3(0.0, 1.0 / 3.0, 2.0 / 3.0)));
+    return mix(float3(1.0), rainbow, saturation);
+}
+
+/// A Blinn-Phong lobe of one light, with its exponent limited by the pixel
+/// footprint so it is never narrower than a pixel's change of normal, and its
+/// peak lowered to match (the lobe's energy stays the same).
+static float3 gw_light_lobe(float3 N, float4 direction, float4 color, float footprint) {
+    if (direction.w <= 0.0) {
+        return float3(0.0);
+    }
+    const float3 H = normalize(direction.xyz + float3(0.0, 0.0, 1.0));
+    const float p = max(color.w, 1.0);
+    const float effective = 1.0 / (1.0 / p + footprint * footprint);
+    return color.xyz * direction.w * ((effective + 2.0) / (p + 2.0)) * pow(saturate(dot(N, H)), effective);
+}
+
+/// The bright lines of the light model at a point inside the band, in linear
+/// light before the knee: the Fresnel outline and the specular streaks of the
+/// key and rim lights. `depth` pixels inside the outline, `N` the surface
+/// normal there.
+static float3 gw_light_lines(float3 N, float depth, constant GWGlassUniforms &uniforms) {
+    constant GWLightingUniforms &lighting = uniforms.lighting;
+    const float band = lighting.bandWidth;
+    if (band <= 0.0 || depth >= band) {
+        return float3(0.0);
+    }
+    const float mask = 1.0 - smoothstep(0.75 * band, band, depth);
+    const float edge = 1.0 - N.z;
+    const float edge2 = edge * edge;
+    const float outline = edge2 * edge2 * edge;
+    const float2 direction = N.xy / max(length(N.xy), 1e-4);
+    const float facing = 0.65 + 0.35 * (0.5 + 0.5 * dot(direction, lighting.edgeDirection));
+    const float3 outlineColor = mix(float3(1.0), lighting.keyColor.xyz, 0.6);
+    float3 energy = outlineColor * (lighting.fresnel * outline * facing * (lighting.contrast > 0.0 ? 0.0 : 1.0));
+    const float3 lobes = gw_light_lobe(N, lighting.key, lighting.keyColor, lighting.footprint)
+                       + gw_light_lobe(N, lighting.rim, lighting.rimColor, lighting.footprint);
+    energy += lobes * lighting.specular;
+    return energy * mask;
+}
+
+/// The glass with the light model composited: reflections of the studio on
+/// the rim (glass mixed with the Fresnel reflection, or chrome or the
+/// prismatic finish replacing it), then the bright lines and their bloom added
+/// through the soft knee, `G + (1 - G) K(E)`, which never darkens a channel
+/// and never exceeds 1. Returns the changed color and, in `touched`, whether
+/// this pixel is changed at all (then it is dithered like the glow).
+static float3 gw_light_model(
+    float3 glass, float2 q, float depth, constant GWGlassUniforms &uniforms, thread float &touched)
+{
+    constant GWLightingUniforms &lighting = uniforms.lighting;
+    const float band = lighting.bandWidth;
+    const float reach = band + (lighting.bloom > 0.0 ? lighting.bloomWidth : 0.0);
+    touched = 0.0;
+    if (reach <= 0.0 || depth >= reach) {
+        return glass;
+    }
+    float2 outward;
+    const float3 N = gw_light_normal(q, uniforms, outward);
+    const float bandMask = band > 0.0 ? 1.0 - smoothstep(0.75 * band, band, depth) : 0.0;
+
+    // Reflections.
+    if (lighting.reflection > 0.0 && bandMask > 0.0) {
+        const float3 R = float3(2.0 * N.z * N.xy, 2.0 * N.z * N.z - 1.0);
+        float3 base;
+        float2 boxes;
+        gw_studio(R, lighting.azimuth, lighting.environment, base, boxes);
+        const float F = lighting.f0 + (1.0 - lighting.f0) * pow(1.0 - N.z, 5.0);
+        if (lighting.finish == GWLightingFinishDielectric) {
+            // The part of the reflectance that grows toward the outline is
+            // boosted up to five times at `reflection` 1, so a studio shows on
+            // glass as it does in a photograph of it; at N.z = 1 it is F0.
+            const float reflectance = saturate(lighting.f0 + (F - lighting.f0) * (1.0 + 4.0 * lighting.reflection));
+            const float alpha = reflectance * lighting.reflection * bandMask;
+            glass = glass * (1.0 - alpha) + gw_light_knee(base + boxes.x + boxes.y) * alpha;
+            touched = max(touched, alpha);
+        } else {
+            float3 environment = (base + boxes.x + boxes.y) * lighting.tint.xyz;
+            if (lighting.finish == GWLightingFinishPrismatic) {
+                const float turn = precise::atan2(N.x, -N.y) * (0.5 / M_PI_F) - lighting.azimuth * (0.5 / M_PI_F);
+                const float hue = lighting.prism.z + lighting.prism.x * (turn - floor(turn)) + 0.5 * (1.0 - N.z);
+                const float3 film = gw_light_film(hue, lighting.prism.y);
+                const float3 mild = gw_light_film(hue, 0.25 * lighting.prism.y);
+                environment = (base * mild + boxes.x * mix(float3(1.0), film, 0.5) + boxes.y * film) * lighting.tint.xyz;
+            }
+            const float metal = 0.85 + 0.15 * F;
+            const float alpha = lighting.reflection * smoothstep(0.005, 0.08, 1.0 - N.z) * bandMask;
+            glass = mix(glass, gw_light_knee(environment * metal), alpha);
+            touched = max(touched, alpha);
+        }
+    }
+
+    // The contrasting hairline (accessibility): the outline mixes toward light
+    // on dark glass and toward dark on light glass.
+    if (lighting.contrast > 0.0 && band > 0.0) {
+        const float edge = 1.0 - N.z;
+        const float edge2 = edge * edge;
+        const float hairline = saturate(1.5 * lighting.fresnel * edge2 * edge2 * edge) * bandMask;
+        const float luminance = dot(glass, float3(0.2126, 0.7152, 0.0722));
+        const float3 target = luminance > 0.5 ? float3(0.10, 0.10, 0.12) : float3(0.96, 0.96, 0.98);
+        glass = mix(glass, target, hairline);
+        touched = max(touched, hairline);
+    }
+
+    // The bright lines, and the bloom spread along the surface from them.
+    float3 energy = gw_light_lines(N, depth, uniforms);
+    if (lighting.bloom > 0.0 && lighting.bloomWidth > 0.0) {
+        float3 spill = float3(0.0);
+        for (uint i = 1u; i <= 3u; ++i) {
+            const float weight = (1.0 - float(i) * 0.25) * (1.0 - float(i) * 0.25);
+            const float k = lighting.bloomWidth * float(i) * 0.25;
+            for (uint side = 0u; side < 2u; ++side) {
+                const float2 tap = q + outward * (side == 0u ? k : -k);
+                const float tapDistance = gw_rounded_rect_distance(tap, uniforms.panelHalfSize, uniforms.cornerRadius);
+                if (tapDistance > 0.0) {
+                    continue;
+                }
+                float2 ignored;
+                spill += weight * gw_light_lines(gw_light_normal(tap, uniforms, ignored), -tapDistance, uniforms);
+            }
+        }
+        energy += spill * (0.6 * lighting.bloom);
+    }
+    if (energy.x > 0.0 || energy.y > 0.0 || energy.z > 0.0) {
+        glass = glass + (1.0 - glass) * gw_light_knee(energy);
+        touched = 1.0;
+    }
+    return glass;
+}
+
 /// One rounded glass panel over the background.
 ///
 /// Inside the rim (`bezelWidth` pixels inward from the outline) the sample
@@ -880,6 +1100,13 @@ static float3 gw_lens_glass(
 /// screens it, `G + color * a * (1 - G)`, which never darkens a channel;
 /// `.paint` mixes toward the color by `min(a, 0.85)`. Pixels it lights are
 /// dithered like the glow; elsewhere the bytes are those without light.
+///
+/// With the light model (GW-23, the `lighting` pipeline variant and
+/// `lighting.finish` above 0), the panel's edge highlight and the inlays' rim
+/// light follow the key light, and the model is composited last, over the glow,
+/// the interior, and the inner light, inside the band `lighting.bandWidth`
+/// deep (see "Light model" above). Pixels it changes are dithered like the
+/// glow; elsewhere the bytes are those without it.
 fragment float4 gw_glass_fragment(
     GWGlassVertexOut in [[stage_in]],
     constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]],
@@ -934,11 +1161,14 @@ fragment float4 gw_glass_fragment(
     }
 
     glass = mix(glass, uniforms.tint.xyz, uniforms.tint.w);
-    const float facing = saturate(dot(normal, gw_light_direction));
+    // The edge light: the upper left, or the key light with the light model.
+    const float2 edgeLight = (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone)
+        ? uniforms.lighting.edgeDirection : gw_light_direction;
+    const float facing = saturate(dot(normal, edgeLight));
     const float highlight = uniforms.edgeHighlight * rim * rim * rim * (0.4 + 0.6 * facing);
     glass = glass + (1.0 - glass) * highlight;
     if (gw_optics && uniforms.lensInlayCount > 0u) {
-        glass = glass + (1.0 - glass) * gw_lens_inlay_highlight(q, uniforms);
+        glass = glass + (1.0 - glass) * gw_lens_inlay_highlight(q, edgeLight, uniforms);
     }
 
     float glowAlpha = 0.0;
@@ -996,8 +1226,14 @@ fragment float4 gw_glass_fragment(
         }
     }
 
+    // The light model (GW-23), over everything below, inside its band.
+    float lightingAlpha = 0.0;
+    if (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone) {
+        glass = gw_light_model(glass, q, depth, uniforms, lightingAlpha);
+    }
+
     float3 encoded = gw_glass_encode_srgb(mix(outside, glass, coverage));
-    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0) {
+    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0) {
         const uint2 cell = uint2(pixel) & 3u;
         encoded = saturate(encoded + ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0);
     }

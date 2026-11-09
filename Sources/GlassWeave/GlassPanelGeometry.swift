@@ -38,6 +38,9 @@ struct GlassPanelGeometry: Equatable {
     /// The thick lens in target pixels, or `nil` for the original rim
     /// refraction (GW-22; the model is in GlassLensModel.swift).
     var lens: Lens?
+    /// The light model in target pixels, or `nil` for the original highlight
+    /// (GW-23; resolved in GlassLighting.swift).
+    var lighting: Lighting?
 
     /// A visible ``GlassGlow`` converted to target pixels and linear light.
     struct Glow: Equatable {
@@ -81,7 +84,9 @@ struct GlassPanelGeometry: Equatable {
     ///   - displayScale: Pixels per point, finite and positive.
     ///   - effectTime: Seconds on the effect clock, finite; sets the pulse
     ///     level and the interior's phase.
-    init(panel: GlassPanel, displayScale: Double, effectTime: Double = 0) {
+    ///   - lightOffset: The azimuth and elevation, in degrees, added to the
+    ///     lights (``GlassRenderer/setLightOffset(azimuth:elevation:)``).
+    init(panel: GlassPanel, displayScale: Double, effectTime: Double = 0, lightOffset: GlassLightOffset = GlassLightOffset()) {
         precondition(displayScale.isFinite && displayScale > 0, "The display scale must be finite and positive")
         let frame = panel.frame
         let parameters = panel.parameters
@@ -98,9 +103,19 @@ struct GlassPanelGeometry: Equatable {
             Self.decodeSRGB(parameters.tint.blue)
         )
         tintStrength = parameters.tint.strength
+        lens = Lens(
+            parameters.lens, displayScale: displayScale, cornerRadius: cornerRadius,
+            bezelWidth: bezelWidth, halfSize: halfSize
+        )
+        lighting = Lighting(
+            parameters.lighting, offset: lightOffset, displayScale: displayScale,
+            bezelWidth: bezelWidth, cornerRadius: cornerRadius, halfSize: halfSize, lens: lens
+        )
+        // One light: the glow follows the key light unless told otherwise.
+        let glowAngle = lighting.flatMap { $0.drivesGlow ? $0.keyAzimuthDegrees : nil } ?? parameters.glow.lightAngle
         glow = Self.glow(
             parameters.glow, displayScale: displayScale, effectTime: effectTime,
-            cornerRadius: cornerRadius, halfSize: halfSize
+            cornerRadius: cornerRadius, halfSize: halfSize, lightAngle: glowAngle
         )
         interior = Interior(
             parameters.interior, displayScale: displayScale, effectTime: effectTime,
@@ -110,15 +125,12 @@ struct GlassPanelGeometry: Equatable {
             parameters.light, displayScale: displayScale, effectTime: effectTime,
             halfSize: halfSize, bezelWidth: bezelWidth
         )
-        lens = Lens(
-            parameters.lens, displayScale: displayScale, cornerRadius: cornerRadius,
-            bezelWidth: bezelWidth, halfSize: halfSize
-        )
     }
 
     /// Converts a normalized glow, or returns `nil` when it draws nothing.
     private static func glow(
-        _ glow: GlassGlow, displayScale: Double, effectTime: Double, cornerRadius: Double, halfSize: SIMD2<Double>
+        _ glow: GlassGlow, displayScale: Double, effectTime: Double, cornerRadius: Double, halfSize: SIMD2<Double>,
+        lightAngle: Double
     ) -> Glow? {
         guard glow.isVisible else { return nil }
         let pulse = glow.pulseLevel(at: effectTime)
@@ -126,7 +138,7 @@ struct GlassPanelGeometry: Equatable {
         let rimWidth = glow.rimWidth * displayScale
         let rimFeather = max(glow.rimSoftness * displayScale, 1)
         let innerRadius = glow.innerGlowRadius * displayScale
-        let light = glow.lightAngle * .pi / 180
+        let light = lightAngle * .pi / 180
         return Glow(
             colorsLinear: glow.colors.map { SIMD3(decodeSRGB($0.red), decodeSRGB($0.green), decodeSRGB($0.blue)) },
             stopTurns: glow.colors.map { $0.angle / 360 },
@@ -377,7 +389,8 @@ struct GlassPanelGeometry: Equatable {
             lensDispersion: Float(lens?.dispersion ?? 0),
             lensTapCount: lens?.tapCount ?? 0,
             lensInlayCount: UInt32(lens?.inlays.count ?? 0),
-            lensInlays: lens?.inlayRecords ?? (Lens.Inlay.empty, Lens.Inlay.empty)
+            lensInlays: lens?.inlayRecords ?? (Lens.Inlay.empty, Lens.Inlay.empty),
+            lighting: lighting?.record ?? Lighting.empty
         )
     }
 

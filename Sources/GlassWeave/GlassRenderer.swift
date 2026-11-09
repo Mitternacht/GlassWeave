@@ -37,8 +37,12 @@ public final class GlassRenderer {
     /// The panel pipeline with the thick-lens code (GW-22), or `nil` when the
     /// panel library has no such variant (a frozen earlier shader).
     private let opticsPipeline: (any MTLRenderPipelineState)?
+    /// The panel pipeline with the thick-lens code and the light model
+    /// (GW-23), or `nil` when the panel library has no such variant.
+    private let lightingPipeline: (any MTLRenderPipelineState)?
 
-    /// The panel pipeline variants (GW-22), both built at initialization.
+    /// The panel pipeline variants (GW-22, GW-23), all built at
+    /// initialization.
     public enum PipelineVariant: String, Hashable, Sendable {
         /// The shader without the thick-lens code: exactly the shader of
         /// GW-21. Draws every panel whose ``GlassParameters/lens`` is
@@ -47,6 +51,10 @@ public final class GlassRenderer {
         /// The shader with the thick-lens code. Draws every panel whose lens
         /// has a profile other than ``GlassLens/Profile/rim``.
         case optics
+        /// The shader with the thick-lens code and the light model
+        /// (GW-23). Draws every panel whose ``GlassParameters/lighting`` is
+        /// not ``GlassLighting/legacy``, with or without a lens.
+        case lighting
     }
 
     /// The variant that drew each panel of the last draw that rendered any,
@@ -100,6 +108,33 @@ public final class GlassRenderer {
         effectTime = seconds
     }
 
+    /// The azimuth and elevation, in degrees, that following draws add to the
+    /// key and rim lights of every panel whose ``GlassParameters/lighting``
+    /// is not ``GlassLighting/legacy``; `(0, 0)` until set.
+    public var lightOffset: (azimuth: Double, elevation: Double) {
+        (offsetOfLight.azimuth, offsetOfLight.elevation)
+    }
+
+    private var offsetOfLight = GlassLightOffset()
+
+    /// Moves the light for the following draws (GW-23): tilt, a dragged
+    /// light, or a sweep. The offset is added to the key light's and the rim
+    /// light's azimuth (degrees, any finite value) and elevation (degrees; the
+    /// sum is clamped to 0...90), and it turns the studio and the glow's light
+    /// angle with the key light. It changes only the light terms: nothing a
+    /// panel draws without light depends on it. Changing it does not request
+    /// a draw.
+    ///
+    /// A non-finite value throws ``GlassParameterError/nonFiniteLighting(_:)``
+    /// naming ``GlassLighting/Field/lightOffsetAzimuth`` or
+    /// ``GlassLighting/Field/lightOffsetElevation`` and leaves the offset as
+    /// it was. Experimental.
+    public func setLightOffset(azimuth: Double, elevation: Double) throws(GlassParameterError) {
+        guard azimuth.isFinite else { throw .nonFiniteLighting(.lightOffsetAzimuth) }
+        guard elevation.isFinite else { throw .nonFiniteLighting(.lightOffsetElevation) }
+        offsetOfLight = GlassLightOffset(azimuth: GlassGlow.reducedAngle(azimuth), elevation: min(max(elevation, -90), 90))
+    }
+
     /// Creates a renderer that submits to `commandQueue` on its device.
     /// Loads the package shader library and builds both pipelines now.
     public convenience init(commandQueue: any MTLCommandQueue) throws {
@@ -114,23 +149,33 @@ public final class GlassRenderer {
     /// `panelLibrary`. The package uses its own glass shader; tests use this
     /// to draw with a frozen earlier version of it (the panel record's
     /// earlier layout is a prefix of the current one).
+    ///
+    /// `opticsConstant` names the function constant (index 0) that selects the
+    /// thick-lens variant in `panelLibrary`; a frozen shader keeps its own
+    /// name for it.
     init(
         commandQueue: any MTLCommandQueue, library: any MTLLibrary,
-        panelLibrary: any MTLLibrary, panelVertex: String, panelFragment: String
+        panelLibrary: any MTLLibrary, panelVertex: String, panelFragment: String,
+        opticsConstant: String = GlassRenderer.opticsConstantName
     ) throws {
         let clock = ContinuousClock()
         let start = clock.now
         // A panel library with the function constant has two variants; a
         // frozen earlier shader has one.
-        let hasOptics = panelLibrary.makeFunction(name: panelFragment)?
-            .functionConstantsDictionary[Self.opticsConstantName] != nil
+        let constants = panelLibrary.makeFunction(name: panelFragment)?.functionConstantsDictionary ?? [:]
+        let hasOptics = constants[opticsConstant] != nil
+        let hasLighting = hasOptics && constants[Self.lightingConstantName] != nil
         panelPipeline = try Self.makePanelPipeline(
             device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel",
-            vertex: panelVertex, fragment: panelFragment, optics: hasOptics ? false : nil
+            vertex: panelVertex, fragment: panelFragment, optics: hasOptics ? false : nil, lighting: hasLighting ? false : nil
         )
         opticsPipeline = hasOptics ? try Self.makePanelPipeline(
             device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (optics)",
-            vertex: panelVertex, fragment: panelFragment, optics: true
+            vertex: panelVertex, fragment: panelFragment, optics: true, lighting: hasLighting ? false : nil
+        ) : nil
+        lightingPipeline = hasLighting ? try Self.makePanelPipeline(
+            device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (lighting)",
+            vertex: panelVertex, fragment: panelFragment, optics: true, lighting: true
         ) : nil
         let elapsed = clock.now - start
         pipelineCreationSeconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
@@ -140,14 +185,17 @@ public final class GlassRenderer {
     }
 
     /// The shader's name for the function constant that selects the variant.
-    private static let opticsConstantName = "gw_optics_constant"
+    static let opticsConstantName = "gw_optics_constant"
+    /// The shader's name for the function constant that adds the light model.
+    private static let lightingConstantName = "gw_lighting_constant"
 
-    /// Builds one variant of the panel pipeline. `optics` sets the shader's
-    /// function constant; `nil` builds the function as it is (a library
-    /// without the constant).
+    /// Builds one variant of the panel pipeline. `optics` and `lighting` set
+    /// the shader's function constants; `nil` leaves a constant unset (a
+    /// library without it), and `nil` for `optics` builds the function as it
+    /// is.
     private static func makePanelPipeline(
         device: any MTLDevice, library: any MTLLibrary, label: String,
-        vertex: String, fragment: String, optics: Bool?
+        vertex: String, fragment: String, optics: Bool?, lighting: Bool? = nil
     ) throws -> any MTLRenderPipelineState {
         guard let optics else {
             return try BackgroundRenderer.makePipeline(
@@ -160,6 +208,9 @@ public final class GlassRenderer {
         let constants = MTLFunctionConstantValues()
         var flag = optics
         constants.setConstantValue(&flag, type: .bool, index: 0)
+        if var lightingFlag = lighting {
+            constants.setConstantValue(&lightingFlag, type: .bool, index: 1)
+        }
         let fragmentFunction: any MTLFunction
         do {
             fragmentFunction = try library.makeFunction(name: fragment, constantValues: constants)
@@ -364,15 +415,16 @@ public final class GlassRenderer {
     ) -> BackgroundRenderOutcome {
         let panels = panels
         let effectTime = effectTime
+        let lightOffset = offsetOfLight
         var variants: [PipelineVariant] = []
-        let outcome = background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline, opticsPipeline] encoder, frame, backgroundUniforms, targetSize in
+        let outcome = background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline, opticsPipeline, lightingPipeline] encoder, frame, backgroundUniforms, targetSize in
             // Converted only once a target exists, so the skips that run
             // before (including a zero display scale's zero-size target)
             // never see the scale.
             var textureSet = false
             var current: PipelineVariant?
             for panel in panels {
-                let geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime)
+                let geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime, lightOffset: lightOffset)
                 guard !geometry.isEmpty else { continue }
                 var uniforms = geometry.uniforms(
                     background: backgroundUniforms,
@@ -380,12 +432,18 @@ public final class GlassRenderer {
                 )
                 let length = MemoryLayout<GWGlassUniforms>.stride
                 let uniformsIndex = Int(GWGlassBindingIndexUniforms.rawValue)
-                // A lens needs the optics variant; a library without one
-                // draws every panel with its only pipeline.
-                let variant: PipelineVariant = geometry.lens != nil && opticsPipeline != nil ? .optics : .base
+                // A lens needs the optics variant and the light model the
+                // lighting variant; a library without one draws every panel
+                // with its only pipeline.
+                let variant: PipelineVariant = geometry.lighting != nil && lightingPipeline != nil
+                    ? .lighting : (geometry.lens != nil && opticsPipeline != nil ? .optics : .base)
                 encoder.pushDebugGroup("GlassWeave glass panel")
                 if current != variant {
-                    encoder.setRenderPipelineState(variant == .optics ? opticsPipeline ?? panelPipeline : panelPipeline)
+                    switch variant {
+                    case .base: encoder.setRenderPipelineState(panelPipeline)
+                    case .optics: encoder.setRenderPipelineState(opticsPipeline ?? panelPipeline)
+                    case .lighting: encoder.setRenderPipelineState(lightingPipeline ?? panelPipeline)
+                    }
                     current = variant
                 }
                 if !textureSet {

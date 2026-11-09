@@ -44,6 +44,7 @@ public struct GlassTint: Hashable, Sendable {
 /// | ``interior`` | see ``GlassInterior`` | see ``GlassInterior`` | An animated energy, rays, or embers pattern inside the outline, screened over the glass and the glow, fading toward the middle; ``GlassInterior/none`` (the default) draws nothing. |
 /// | ``light`` | see ``GlassLight`` | see ``GlassLight`` | Up to four emitters of colored light inside the glass (a band along an edge, an arc, an orb, or a four-corner field), over the interior; ``GlassLight/none`` (the default) draws nothing. Experimental. |
 /// | ``lens`` | see ``GlassLens`` | see ``GlassLens`` | The glass as a solid: a height profile, thickness, and index of refraction that magnify and bend what is behind it, optional chromatic dispersion, and inlaid domes; ``GlassLens/none`` (the default) keeps the original rim refraction. Experimental. |
+/// | ``lighting`` | see ``GlassLighting`` | see ``GlassLighting`` | One movable light: a Fresnel outline, a specular streak, studio reflections on the rim, a chrome or prismatic finish, and bloom; ``GlassLighting/legacy`` (the default) keeps the original edge highlight. Experimental. |
 ///
 /// **Normalization rule.** When a renderer accepts parameters, a non-finite
 /// value (NaN or infinity) anywhere is rejected with
@@ -51,8 +52,8 @@ public struct GlassTint: Hashable, Sendable {
 /// value. A finite value outside its range is clamped to the nearest valid
 /// value: negative lengths become zero, lengths longer than half the
 /// panel's shorter side become that half, and coefficients and tint
-/// components are clamped to 0...1. ``GlassGlow``, ``GlassInterior``, and
-/// ``GlassLight``, and ``GlassLens`` document the same rule for their fields. The renderer reports the values it actually uses through
+/// components are clamped to 0...1. ``GlassGlow``, ``GlassInterior``,
+/// ``GlassLight``, ``GlassLens``, and ``GlassLighting`` document the same rule for their fields. The renderer reports the values it actually uses through
 /// ``GlassRenderer/panel``.
 public struct GlassParameters: Hashable, Sendable {
     /// Outline corner radius, in points.
@@ -78,6 +79,11 @@ public struct GlassParameters: Hashable, Sendable {
     /// refraction that bend what is behind the panel; ``GlassLens/none`` for
     /// the original rim refraction. Experimental.
     public var lens: GlassLens
+    /// The light model (GW-23): one movable light with a Fresnel outline, a
+    /// specular streak, studio reflections, a chrome or prismatic finish, and
+    /// bloom; ``GlassLighting/legacy`` for the original edge highlight.
+    /// Experimental.
+    public var lighting: GlassLighting
 
     /// The most edge illumination can brighten the outline: this fraction of
     /// the way from the glass color to white, at ``edgeHighlight`` 1.
@@ -92,7 +98,8 @@ public struct GlassParameters: Hashable, Sendable {
         glow: GlassGlow = .none,
         interior: GlassInterior = .none,
         light: GlassLight = .none,
-        lens: GlassLens = .none
+        lens: GlassLens = .none,
+        lighting: GlassLighting = .legacy
     ) {
         self.cornerRadius = cornerRadius
         self.bezelWidth = bezelWidth
@@ -103,6 +110,7 @@ public struct GlassParameters: Hashable, Sendable {
         self.interior = interior
         self.light = light
         self.lens = lens
+        self.lighting = lighting
     }
 
     /// Whether a host must keep drawing new frames for this panel's glow
@@ -188,8 +196,13 @@ public enum GlassParameterError: Error, Hashable, Sendable, CustomStringConverti
     /// field list too.
     case nonFiniteLens(GlassLens.Field)
 
+    /// A value of a ``GlassLighting``, or a light offset, is NaN or infinite.
+    case nonFiniteLighting(GlassLighting.Field)
+
     public var description: String {
         switch self {
+        case let .nonFiniteLighting(field):
+            "The glass lighting parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case let .nonFiniteLens(field):
             "The glass lens parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case let .nonFiniteLight(field):
@@ -220,6 +233,7 @@ extension GlassParameters {
         let interior = try interior.normalized()
         let light = try light.normalized(maximumLength: maximumLength)
         let lens = try lens.normalized(maximumLength: maximumLength)
+        let lighting = try lighting.normalized(maximumLength: maximumLength)
         let length = { (value: Double) in min(max(value, 0), maximumLength) }
         let unit = { (value: Double) in min(max(value, 0), 1) }
         return GlassParameters(
@@ -234,7 +248,8 @@ extension GlassParameters {
             glow: glow,
             interior: interior,
             light: light,
-            lens: lens
+            lens: lens,
+            lighting: lighting
         )
     }
 }
