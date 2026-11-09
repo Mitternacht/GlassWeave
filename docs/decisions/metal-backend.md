@@ -87,10 +87,12 @@ What was built (the narrow form of the proposal's fallback):
 
 # Decision: the submission backend (GW-11)
 
-Status: experiment built, correctness proved, comparison harness built and run
-as a smoke on 2026-11-09. **The shipped-backend decision is pending the quiet
-timing run** (the last section states the rule it will be judged by). Until
-then the conventional path stays the only backend any host uses.
+Status: decided on 2026-11-09 after the one quiet timing run. **The
+conventional path stays the only shipped backend.** Metal 4 did not meet the
+margin the rule below set before the run: on the same workload its p95 was
+higher than the conventional control's, on both cases and on both measures.
+`Metal4Renderer` stays as a package-level characterization arm that no host
+can reach. The last section has the numbers and the decision line.
 
 ## Question
 
@@ -232,18 +234,21 @@ cannot open a workspace on this Mac):
   creates no pipelines of its own: it reuses the renderer's, so its
   pipeline-creation cost is zero beyond the conventional path's.
 
-**Not measured, and not claimed:** every timing. The smoke durations, another
-agent building on this Mac at the same time, and Debug validation make the
-smoke p50/p95 values unusable as data, so none is quoted. Not measured at all: a physical iPhone or iPad, on-screen presentation
-through a `CAMetalLayer`, a cold shader cache, thermal behavior over minutes,
-power, frost, grounding, shapes, fills and touch (not encoded), Instruments
+**Timing:** the one quiet run was taken after this smoke; its numbers are in
+the last section. The smoke's own values (1 s windows, Debug, validation on,
+another agent building) are not data and none is quoted.
+
+**Not measured, and not claimed:** a physical iPhone or iPad, on-screen
+presentation through a `CAMetalLayer`, a cold shader cache, thermal behavior
+beyond the 21 minutes of the quiet run (the state stayed nominal), power
+draw, frost, grounding, shapes, fills and touch (not encoded), Instruments
 traces.
 
 ## Support matrix
 
 | Class | Metal 4 family | Experiment | Status |
 |---|---|---|---|
-| My Mac, the GPU it reports as "Apple M3 Max" (Apple family 9, macOS 27.2) | yes | runs | agreement proved; smoke harness run; timing pending the quiet run. The task brief called this machine an Apple M5; the device's own `MTLDevice.name` says M3 Max and this record uses what the device reports. |
+| My Mac, the GPU it reports as "Apple M3 Max" (Apple family 9, macOS 27.2) | yes | runs; characterization only | agreement proved again on the merged tree (0 of 12,648,528 bytes differ in each of four cases); quiet timing taken (see Decision): no benefit, so no host uses it. The task brief called this machine an Apple M5; the device's own `MTLDevice.name` says M3 Max and this record uses what the device reports. |
 | iOS Simulator (iPhone 18 Pro, iOS 27.2) | no, by construction | compiled out | conventional path only; the two Metal 4 tests skip with a stated reason |
 | Physical iPhone or iPad with the Metal 4 family | per `supportsMetal4` at runtime | compiles (iPhoneOS 27.2 SDK) | not run, not measured |
 | Any GPU without the Metal 4 family | no | declines at `Metal4Renderer.init` | conventional path only |
@@ -312,19 +317,138 @@ and encode p50 and p95).
 
 ## Decision
 
-**Pending the quiet timing run.** Until it is taken and the rule above is
-applied, the shipped backend is the conventional path, the Metal 4 path stays a
-package-level experiment with no host using it, and nothing in this record
-claims a measured Metal 4 advantage or disadvantage.
+**The conventional `MTLCommandQueue` path stays the only shipped backend.
+Metal 4 does not meet the rule's margin on this workload and this machine, so
+no host uses it and nothing is shipped.** `Metal4Renderer` and its harness stay
+in the repository as a characterization-only arm (package access, no public
+API, compiled out for the simulator) so the same comparison can be repeated on
+a physical device or on another GPU. The rule's own wording for this outcome
+was: "keep the conventional path as the sole shipped backend, and either
+delete `Metal4Renderer` or keep it as a characterization-only arm that no host
+can reach." It is kept for the second reason: a device might differ, and
+deleting the harness would throw away the only code that can show it.
 
-Numbers to fill in after the quiet run (do not edit the rule afterwards):
+### The quiet run (2026-11-09)
+
+One run, `xcodebuild test` of the `GlassWeaveCharacterization` scheme on My
+Mac, Release (no Metal API validation), the test
+`Metal4ComparisonTests/compareBackends()` alone in its process; 3 runs, 60 s
+measured after 10 s of warm-up per window, 2 cases, 3 arms (18 windows,
+10,800 frames per arm and case, 1,272 s in all); the arm order rotated per run
+and case. Workload version 2 (1206 x 2622 at scale 3, 60 Hz, in-flight bound
+2, three render targets). Zero failed and zero skipped command buffers in every
+window. The harness reports the machine as Apple M3 Max, macOS 27.2 (26B123),
+conventional queue `AGXG15XFamilyCommandQueue`, Metal 4 queue
+`AGXG15XFamilyCommandQueue_mtlnext`.
+
+Conditions: AC power attached (battery 80 percent, not charging) before, during
+(mid-run) and after; thermal state nominal at the start and at the end (the
+harness) and no thermal or performance warning level recorded (`pmset -g
+therm`); Low Power Mode off. One-minute load average 2.76 at the start (the
+five-minute settling wait I allowed after the build ended without the figure
+reaching 2.0), 2.02 at the middle and 2.60 at the end (five- and
+fifteen-minute figures 7.76 and 9.13 at the start, carrying the test batch
+that ended before the build; 3.25 and 5.84 mid-run; 2.65 and 4.06 at the
+end). The remaining load was the desktop session itself: `WindowServer` at 45
+to 48 percent of a core and the Claude app's helper processes at 9 to 60
+percent of a core each, present for every arm alike. No simulator was booted, nothing was
+building, and `xctest` itself used 3 percent mid-run. Spotlight workers
+(`mdworker_shared`, about 20 and 17 percent) show only in the snapshot taken at
+the end of the run, not in the middle one, so the last window may have overlapped
+them. Raw report: the result bundle's `glassweave-metal4-comparison.txt`
+attachment (kept outside the repository).
+
+**Pooled over the 3 runs, ms, p50 / p95 / p99 (max in brackets):**
+
+| Case | Arm | GPU | CPU encode |
+|---|---|---|---|
+| panel | conventional (shipped) | 0.376 / 0.726 / 1.784 (4.594) | 0.213 / 0.405 / 0.833 (2.856) |
+| panel | conventionalRaw (control) | 0.376 / 0.964 / 1.882 (4.565) | 0.127 / 0.235 / 0.723 (4.804) |
+| panel | metal4 | 0.394 / 1.244 / 1.749 (4.727) | 0.128 / 0.307 / 0.803 (2.628) |
+| lens | conventional (shipped) | 0.443 / 1.311 / 1.950 (4.602) | 0.231 / 0.608 / 1.056 (5.062) |
+| lens | conventionalRaw (control) | 0.442 / 1.327 / 1.929 (4.453) | 0.145 / 0.243 / 0.756 (2.823) |
+| lens | metal4 | 0.439 / 1.449 / 1.979 (4.526) | 0.142 / 0.293 / 0.787 (7.381) |
+
+**The rule, `metal4` against `conventionalRaw` (the API-only comparison):**
 
 | Case | Measure | conventionalRaw | metal4 | Difference | Ratio | Rule |
 |---|---|---|---|---|---|---|
-| panel | CPU encode p50 / p95 | | | | | |
-| panel | GPU p50 / p95 | | | | | |
-| lens | CPU encode p50 / p95 | | | | | |
-| lens | GPU p50 / p95 | | | | | |
-| both | Extra memory, drift, failures | | | | | |
+| panel | CPU encode p50 / p95 | 0.127 / 0.235 | 0.128 / 0.307 | +0.001 / +0.072 ms | 1.005 / 1.307 | benefit not met (p95 higher) |
+| panel | GPU p50 / p95 | 0.376 / 0.964 | 0.394 / 1.244 | +0.017 / +0.280 ms | 1.046 / 1.291 | benefit not met (p95 higher) |
+| lens | CPU encode p50 / p95 | 0.145 / 0.243 | 0.142 / 0.293 | -0.002 / +0.050 ms | 0.984 / 1.204 | benefit not met (p95 higher) |
+| lens | GPU p50 / p95 | 0.442 / 1.327 | 0.439 / 1.449 | -0.003 / +0.123 ms | 0.993 / 1.092 | benefit not met (p95 higher) |
+| both | Extra memory, drift, failures | | ring 196,608 B plus command allocators 4,828,712 B (5,025,320 B, 4.79 MiB) | 0 failed command buffers; GPU first third p50 / p95 0.407 / 1.364, last third 0.404 / 1.389 (no drift) | | extra memory above the 4 MiB bound |
 
-Decision line: _pending the quiet timing run._
+Reading the rule:
+
+1. **Benefit: not met.** It needed a p95 lower by at least 20 percent and 0.20
+   ms on both cases, in each of the three runs. Metal 4's pooled p95 is higher
+   on all four (GPU +29 percent and +9 percent, encode +31 percent and +20
+   percent). Per run, its p95 is lower than the control's in 1 of 3 runs for the
+   lens GPU time and 1 of 3 for the lens encode time, and in none for the panel
+   (the per-run p95 values of one arm vary by a factor of two or more between
+   runs, so single windows are noise; the pooled figures are the decision's basis).
+   The p50 values are equal within 5 percent: the API does not change the typical
+   frame.
+2. **No harm** is moot once the benefit fails, and it also fails on its own:
+   Metal 4's p95 is more than 5 percent worse on both measures, and its extra
+   memory is 4.79 MiB (the command allocators report 4.6 MiB after the run, 2.3 MiB
+   after the 1 s smoke), above the 4 MiB bound. It had no failed
+   command buffers and no drift between the first and last third of a window.
+3. **Correctness** passed: the agreement test on this machine class, again on
+   the merged tree (largest 8-bit difference 0, and 0 of 12,648,528 bytes
+   differ, in each of the four cases; the frosted panel is declined with
+   `unsupportedPanels`).
+
+Two more facts the run showed, neither of which changes the decision:
+
+- Against the **shipped** path the Metal 4 path encodes cheaper (CPU encode p95
+  -0.098 ms on the panel, -0.315 ms on the lens; ratios 0.76 and 0.48), and
+  its GPU p95 is higher (+0.518 and +0.138 ms). The encode gap is the shipped
+  path's lease and validation machinery (`conventional` against
+  `conventionalRaw`: encode p50 +0.086 ms on both cases, p95 +0.170 and +0.364
+  ms), not the API, which is why the rule compared against the control. It
+  marks where the shipped path has CPU headroom if encode time ever matters
+  (0.09 ms at the median and 0.17 to 0.36 ms at p95 per frame on this machine);
+  a submission API switch is not what recovers it.
+- Pipeline creation (a fresh process, the order alternated per pipeline, a warm
+  on-disk shader cache): `MTL4Compiler` took 0.127 s for the base pipeline
+  (second in its order, after the conventional 0.0025 s) and 0.101 s for the
+  optics pipeline (first in its order, before the conventional 0.0002 s); every
+  later creation by either API took 0.0001 to 0.0002 s. So the Metal 4
+  compiler's first call was about 0.1 s slower in both orders. The experiment
+  reuses the conventional pipelines, so it pays none of this. A cold-cache
+  comparison was not taken.
+
+Why this is a Mac result only: the workload is small (GPU p50 about 0.4 ms
+and CPU encode p50 about 0.13 ms per frame, at most a few percent of a 16.7 ms
+frame),
+the machine is a desktop-class M3 Max, and nothing here says what an iPhone's
+GPU and driver do. The record therefore makes no claim about devices; it
+decides only that this experiment, on this workload, gives no reason to
+carry a second backend.
+
+### Support matrix after the decision
+
+| Class | Backend any host uses | Metal 4 experiment |
+|---|---|---|
+| My Mac (Apple M3 Max, macOS 27.2) | conventional | runs in the characterization target only; no benefit measured |
+| iOS Simulator | conventional | compiled out |
+| Physical iPhone or iPad | conventional | compiles for the iPhoneOS 27.2 SDK; not run, not measured |
+| GPU without the Metal 4 family | conventional | declines at `Metal4Renderer.init` |
+
+### What would reopen it
+
+Only a measurement: the same harness run on a physical device (or another GPU
+class) showing the rule's margin, together with Metal 4 encodings of the
+variants the experiment declines (frost, grounding, shapes, fills, touch) and
+on-screen presentation through the layer (`waitForDrawable`, `signalDrawable`,
+the layer's residency set), none of which exists. Until then the conventional
+path is the only backend in use.
+
+Decision line: **2026-11-09, quiet run on My Mac (Apple M3 Max, Release, 3 runs
+of 60 s per window, 10,800 frames per arm and case): Metal 4 submission is
+slower at p95 than the conventional control on both cases and both measures
+(encode p95 +0.072 and +0.050 ms, GPU p95 +0.280 and +0.123 ms), so the margin
+(at least 20 percent and 0.20 ms) is not met; the conventional path is the sole
+shipped backend and `Metal4Renderer` remains a characterization-only arm.**

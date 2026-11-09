@@ -60,7 +60,7 @@ The user explicitly asked for glass that can take tints and glows at its edges i
 - The work is experimental and post-v0.1. It does not change the v0.1 candidate's scope, its release notes, or its open device items, and nothing in it counts as GW-09 device evidence.
 - Glow is off by default, and the default panel must render exactly what it rendered before the change.
 - It pulls GW-14 (enhanced-native) forward and extends it with color: a colored halo and rim drawn around genuine native glass, because `UIGlassEffect` cannot be recolored at its edge or made transparent in the middle.
-- GW-11, GW-12, GW-13, GW-15, and GW-16 keep their order. (Update, 2026-11-09: GW-12, GW-13 and GW-15 were built afterwards, see the round summary below; GW-11 and GW-16 remain unstarted.)
+- GW-11, GW-12, GW-13, GW-15, and GW-16 keep their order. (Update, 2026-11-09: GW-12, GW-13, GW-15 and GW-11 were built afterwards, see the round summary below; GW-16 remains unstarted.)
 
 | Stage | Tasks | Result |
 | --- | --- | --- |
@@ -74,9 +74,9 @@ Proposed next round, in this order:
 
 1. **Measure.** One combined M5 characterization run (every effect's cost, per tier), then a physical baseline device: the cost and shimmer sign-offs, the GW-27 120 Hz trace, and a live VoiceOver pass. No performance claim exists until then.
 2. **Test the skipped groups**, each opt-in effect against a CPU mirror: lens and dispersion, light model, frost (calibration and temporal stability), shadows, shapes, fill; the 1,000-background legibility sweeps; the accessibility audit and largest-text runs for the studies.
-3. **Close the visual gaps** named in the final verdict (HANDOFF.md): a chunkier chrome ring, a stronger lens bend over detailed content, a dome button that overlaps a pill's end, the white-hot sheet edges and the specular spot on the liquid's surface.
+3. **Close the visual gaps** named in the final verdict (HANDOFF.md; the POLISH pass since made every bend subtle and blended, enlarged the chrome ring and enriched the liquid): a chunkier chrome ring, a stronger lens bend over detailed content, a dome button that overlaps a pill's end, the white-hot sheet edges and the specular spot on the liquid's surface.
 4. **Clear the known test issues** (see HANDOFF.md): give the gallery's dark audit the skip guard its sibling audits have (or fix the header colors), fix the race in `FrameLifecycleTests` "100 hide and show cycles...", consider building the extra renderer pipelines lazily or in the background, then run the CI workflow on GitHub for the first time.
-5. **Resume the unstarted tasks**: GW-11 and GW-16. GW-12 (touch response), GW-13 (merging two custom surfaces) and GW-15 (the optional SwiftUI product) are built on `implement/glass-beyond`, experimental and unreleased: see [interaction](../docs/interaction.md) and [swiftui](../docs/swiftui.md). Their open items (device tap, drag and cancel checks, cost, frost and fill under touch, two simultaneous touches, live VoiceOver through the adapter) are listed with reasons in [the checklist](todo.md).
+5. **Resume the unstarted task**: GW-16. (GW-11, the Metal 4 experiment, was built and decided on 2026-11-09: the quiet run on My Mac showed no benefit, so the conventional path is the only shipped backend; see [the record](../docs/decisions/metal-backend.md#decision). A device run of the same harness is the only thing that would reopen it.) GW-12 (touch response), GW-13 (merging two custom surfaces) and GW-15 (the optional SwiftUI product) are built on `implement/glass-beyond`, experimental and unreleased: see [interaction](../docs/interaction.md) and [swiftui](../docs/swiftui.md). Their open items (device tap, drag and cancel checks, cost, frost and fill under touch, two simultaneous touches, live VoiceOver through the adapter) are listed with reasons in [the checklist](todo.md).
 
 ## Dependency map
 
@@ -139,7 +139,7 @@ For each slice: read the relevant Apple skill, consult current Apple documentati
 These do not block repository preparation:
 
 1. Select and record a physical baseline device from the iOS 26 support range before GW-09; use the oldest available representative device and a modern higher-refresh device.
-2. Decide whether Metal 4's measured benefit justifies adopting it, preserving a conventional path, or raising the supported GPU floor.
+2. ~~Decide whether Metal 4's measured benefit justifies adopting it~~ Decided 2026-11-09 for My Mac (no benefit; conventional stays the sole shipped backend, see [the record](../docs/decisions/metal-backend.md#decision)); the same question for a physical device stays open until a device run exists.
 3. Decide which optical parameters belong in a public API after the first control remains usable in a real app.
 4. Revisit macOS/visionOS adapters only after the iOS integration is demonstrated; no schedule is promised for them.
 

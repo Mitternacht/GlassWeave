@@ -63,12 +63,16 @@ performance budget is met or failed; see
 
 ### What is planned, not built
 
-Physical-device qualification (GW-09), a Metal 4 backend experiment (GW-11),
-and external texture interoperability (GW-16). None of these is part of v0.1.
-The glow work, the glass-beyond work, the touch response (GW-12), merging of
-two custom surfaces (GW-13) and the SwiftUI adapter (GW-15) are experimental
-and built after v0.1; they are described below. See
-[the task list](tasks/todo.md).
+Physical-device qualification (GW-09) and external texture interoperability
+(GW-16). Neither is part of v0.1. The glow work, the glass-beyond work, the touch
+response (GW-12), merging of two custom surfaces (GW-13), the SwiftUI adapter
+(GW-15) and the Metal 4 submission experiment (GW-11) are experimental and built
+after v0.1; they are described below. GW-11 is built and decided: on My Mac
+Metal 4 was no faster than conventional Metal on the same workload, so the
+conventional path is the only shipped backend and the Metal 4 code is a
+characterization arm that no host reaches
+([the record](docs/decisions/metal-backend.md#decision)); no device was
+measured. See [the task list](tasks/todo.md).
 
 ## Glow (experimental)
 
@@ -130,6 +134,7 @@ no physical device, no M5 cost run, no live VoiceOver pass.
 | Native glass in the `.clear` style for comparison (GW-29) | `NativeGlassView.Configuration.style` | [studies](docs/studies.md) |
 | Touch response: a soft finger light, one travelling ring that bends the backdrop by at most `ripple x 8` points, a rim gleam; an observer that never takes the touch from native controls (GW-12) | `GlassTouch` (`GlassParameters.touch`), `GlassTouchObserver`, `GlassSurfaceView.beginTouch(id:at:)` | [interaction](docs/interaction.md) |
 | Two custom surfaces that merge into one pill and separate again, drawn as one panel so every effect follows the outline; an interruptible spring on the effect clock (GW-13) | `GlassSurfaceMerge`, `SurfaceTransition` | [interaction](docs/interaction.md#merging-two-surfaces-gw-13), [glass-optics](docs/glass-optics.md) |
+| Bends that blend: a smooth window and a soft ceiling on the lens offset, so refraction fades in from the rim with no start line, kink or smear; a calmer touch response; a restrained surface finish for the liquid (POLISH) | `GlassLens.softness`, `GlassFill.richness`, the touch defaults | [glass-optics](docs/glass-optics.md#polish-subtle-blended-bends-a-calm-touch-the-chrome-ring-and-the-liquid-finish-polish) |
 | A SwiftUI view over the UIKit host, in an optional product (GW-15) | `GlassSurface`, `GlassSurfaceConfiguration`, `GlassSurfaceContent` (product `GlassWeaveSwiftUI`) | [swiftui](docs/swiftui.md) |
 
 Reduce Transparency, Increase Contrast and Reduce Motion each have a

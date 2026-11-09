@@ -9,19 +9,20 @@ open; [the task checklist](tasks/todo.md) records what is verified. The rest
 of this page is the original handoff. The user deliberately reserved
 implementation for Claude.
 
-## Pick up here (2026-11-09, after the glass-beyond round and the interaction round)
+## Pick up here (2026-11-09, after the glass-beyond, interaction, polish and Metal 4 rounds)
 
 **Branches.** Nothing is merged into `main`, nothing is pushed, nothing is tagged.
 
 - `implement/milestone-1`: the v0.1 candidate, GW-01 to GW-10.
 - `implement/glow`: that candidate plus the glow work, GW-14 and GW-17 to GW-20.
 - `implement/glass-beyond`: **continue here.** The glow branch plus GW-21 to GW-29,
-  the REFINE and ENHANCE-LOOK looks, the amber vessel, and now GW-12 (touch response),
-  GW-13 (merging) and GW-15 (the SwiftUI adapter). The vessel work and GW-15 were built on
-  `implement/glass-host` and joined with real merge commits.
-- `implement/glass-host`: fully merged into `glass-beyond` (GW-15 is its last commit). Its
-  sibling worktree folder (`GlassWeave-host`) still exists next to the main checkout and was
-  not removed; remove it after review.
+  the REFINE and ENHANCE-LOOK looks, the amber vessel, GW-12 (touch response),
+  GW-13 (merging), GW-15 (the SwiftUI adapter), the POLISH pass (subtle, blended bends)
+  and GW-11 (the Metal 4 submission experiment and its decision). The vessel work, GW-15
+  and GW-11 were built on `implement/glass-host` and joined with real merge commits.
+- `implement/glass-host`: fully merged into `glass-beyond` (GW-11 is its last commit, merged
+  by `59750fa`). Its sibling worktree folder (`GlassWeave-host`) still exists next to the main
+  checkout and was not removed; remove it after review.
 
 **The user's goal.** GlassWeave's own Metal glass must be far more capable and more
 visually interesting than Apple's `UIGlassEffect`, in Apple's own restraint: a mostly
@@ -50,49 +51,90 @@ and for how to open every lab page with its launch argument, and
   follows the merged outline. GW-15: the optional `GlassWeaveSwiftUI` product (`GlassSurface`),
   which owns no rendering; the core gained one read-only SPI, `GlassRendererCensus`, that
   counts renderers.
+- POLISH (the user's feedback "the bends are way too visible, not well blended"): the cause
+  was the lens falloff, which climbed to its peak within a pixel of the rim and had a kink
+  where the bevel ended (stretched dots on a grid, a smear on a soft backdrop, a start line).
+  `GlassLens.softness` (opt-in, default 0) gives the bend a quintic window and a soft ceiling;
+  the lab's lenses use it with small offsets and faint fringes (`RefinedLook.blend`). Touch is
+  now a barely-there pool, ring (at most about 2.6 points of displacement) and gleam; the
+  chrome ring is larger with prismatic glints; `GlassFill.richness` (opt-in) adds a restrained
+  surface window and warm sheet edges to the liquid.
+- GW-11, the Metal 4 experiment (package level, My Mac only, compiled out for the simulator, no
+  host uses it, no public API): `Metal4Renderer` submits the GW-09 workload through
+  `MTL4CommandQueue` with the same shader library, pipelines and records as the conventional
+  path; the agreement test shows 0 of 12,648,528 bytes differing in each of four reference
+  cases. The comparison harness, the timing result and the decision are in
+  [the record](docs/decisions/metal-backend.md).
 - Each task has one safety test (the new path off is byte-identical to a frozen copy of
   the previous shader; GW-15's is `AdapterLifecycleTests`, which counts renderers). Every other acceptance item that needs a further test, a CPU
   mirror, an M5 run or a device is unchecked in [the checklist](tasks/todo.md) with a
   reason (fast pass: not tested, device only, ...).
 
-**Latest verification run (VERIFY-ROUND2, one quiet batch, `xcresulttool` counts).**
+**Latest verification run (VERIFY-ROUND3, one batch on the merged tree `59750fa`, `xcresulttool` counts).**
 
 Xcode MCP could not open a workspace here, so everything used `xcodebuild`; counts are from
 `xcresulttool`.
 
 | Destination | Result |
 | --- | --- |
-| Package scheme, My Mac | 208 passed, 1 failed (`FrameLifecycleTests` "100 hide and show cycles...", the known race below); that suite rerun alone passed 3 of 3 |
-| Package scheme, iPhone 18 Pro simulator (iOS 27.2) | 292 passed, 0 failed |
+| Package scheme, My Mac | 211 passed, 0 failed, 0 skipped. (The first attempt did not run any test of `GlassWeaveTests`: xctest could not load the bundle, "executable couldn't be located", an infrastructure error right after the merge rebuild; the whole scheme was rerun once and passed.) |
+| Package scheme, iPhone 18 Pro simulator (iOS 27.2) | 292 passed, 0 failed, 2 skipped (the two Metal 4 tests, which skip on the simulator with a stated reason) |
 | All lab UI tests, iPhone 18 Pro simulator | 50 results: 46 passed, 1 failed (the gallery dark audit below), 3 skipped (two dark audits that skip because the system appearance does not reach the app, and the iPad-only two-scene test) |
-| Studies and versus smoke, iPad Pro 13-inch (M5) simulator | 2 passed, 0 failed; the Touch, Merge and SwiftUI pages have no UI test and were captured and inspected on the iPad |
+| Studies and versus smoke, iPad Pro 13-inch (M5) simulator | 2 passed, 0 failed |
 | `scripts/consumer_check.sh` at the merged commit, My Mac | passed |
 
-The previous round (VERIFY-FINAL) recorded 206 on My Mac, 288 on the iPhone package run and the
-same 50 lab results. The pulse-resume test (changed in VERIFY-FINAL) passed in this round's iPhone run.
-
 All nine frozen-shader safety suites (`GlassBaselineGW20` to `GW25`, `GW28`, `GW12` and `GW13`)
-pass on both package destinations; GW-15's `AdapterLifecycleTests` passes on the iPhone one (the
-adapter compiles to nothing on My Mac).
+pass on both package destinations; GW-15's `AdapterLifecycleTests` passes on the iPhone one. The
+Metal 4 agreement test passes on My Mac (0 of 12,648,528 bytes differ in each of four cases).
+The previous round (VERIFY-ROUND2) recorded 208 passed and 1 failed on My Mac and 292 on the
+iPhone package run; `FrameLifecycleTests` "100 hide and show cycles..." passed this time.
+
+**GW-11, the Metal 4 decision (the one quiet timing run, My Mac, Apple M3 Max, Release).**
+Metal 4 submission was not better than the conventional control: pooled over 3 runs of 60 s per
+window (10,800 frames per arm and case), CPU encode p95 was 0.235 against 0.307 ms (panel) and
+0.243 against 0.293 ms (lens), and GPU p95 0.964 against 1.244 ms and 1.327 against 1.449 ms;
+the p50 values were equal within 5 percent. The rule needed a p95 lower by 20 percent and 0.20
+ms in every run, so **the conventional path stays the only shipped backend** and
+`Metal4Renderer` stays a package-level characterization arm that no host reaches. It is one
+Mac, not a device. Record: [metal-backend](docs/decisions/metal-backend.md#decision); raw report
+and conditions: [metal4-quiet-run](docs/evidence/metal4-quiet-run.md).
+
+**The visual state after POLISH (simulator, merged tree, the twelve pages were pixel-compared
+with the committed captures: identical outside the status-bar clock).** Every bend is now subtle
+and blends from the rim into the flat middle with no start line, kink or smear; the touch is a
+soft pool. Still short: see the verdict below.
 
 **Still open.**
 
 1. Every physical-device item: the GW-09 qualification, every effect's cost and
    shimmer, the GW-27 120 Hz trace, a live VoiceOver pass.
-2. One combined M5 characterization run for all effects and tiers; no cost claim exists.
+2. One combined M5 characterization run for all effects and tiers; no cost claim exists. (The
+   machine here reports itself as Apple M3 Max, not M5; the GW-11 run used what the device reports.)
 3. The skipped test groups: CPU-mirror comparisons for the lens, dispersion, light
    model, frost, shadows, shapes and fill; the 1,000-background legibility sweeps; the
    accessibility audit, largest-text and right-to-left runs for the studies; the
    controlled-clock UIKit tests; the numeric tests for the refined and enhanced terms.
 4. The gallery's dark accessibility audit (pre-existing) and two timing-sensitive tests, below.
 5. CI has never run on GitHub.
-6. GW-11 and GW-16 have not started. GW-12, GW-13 and GW-15 are built with their one safety
+6. GW-16 has not started. GW-11 is built and decided for My Mac; a device run of the same
+   harness is open (device only), as are Metal 4 encodings of frost, grounding, shapes, fills and
+   touch, which exist only if a device run ever reopens it. GW-12, GW-13 and GW-15 are built with their one safety
    test each; open for them: a finger on a device (tap, drag and cancel through the observer),
    their cost, frost and fill panels under touch (they carry no touch code), two simultaneous
    touches (implemented, only looked at pinned), merging with frost, fill or touch on the
    merged panel, a real-scene visibility test and a live VoiceOver pass through the adapter, an
    Xcode preview, and the CPU-mirror and controlled-clock tests the fast pass skipped.
 7. Visual gaps against the references: see [the plan](tasks/plan.md).
+
+Checklist counts, ticked/open per section of `tasks/todo.md` at VERIFY-ROUND3 (127 ticked, 142 open
+in all; every unticked task box has a reason on its line, while the 13 open lines under the six
+Checkpoint headings are the plan's original gates, which wait on the physical-device qualification
+and carry no reason of their own): GW-01 2/1; GW-02 2/1; GW-03 3/0; Checkpoint A
+0/2; GW-04 3/0; GW-05 3/0; GW-06 2/1; Checkpoint B 0/2; GW-07 3/0; GW-08 2/1; GW-09 0/3; Checkpoint C
+0/3; GW-10 2/1; Checkpoint D 1/1; GW-11 7/2; GW-12 4/5; GW-13 8/3; Checkpoint E 0/2; GW-14 6/1; GW-15
+2/1; GW-16 0/3; Checkpoint F 0/3; GW-17 5/0; GW-18 3/0; GW-19 3/0; GW-20 3/0; GW-21 2/11; GW-22 1/16;
+GW-23 1/10; GW-24 4/16; GW-25 1/7; GW-26 1/7; REFINE 6/3; ENHANCE-LOOK 6/3; POLISH 9/3; GW-27 3/5;
+GW-28 1/10; GW-29 2/7; Merge 4/1; VERIFY-FINAL 7/2; VERIFY-ROUND2 7/2; VERIFY-ROUND3 8/3.
 
 **The two known failures.**
 
@@ -115,7 +157,8 @@ adapter compiles to nothing on My Mac).
   cycles..." (a race in the test: it reads the scheduler's in-flight count while a GPU
   completion handler can change it; the test and `FrameScheduler` are unchanged since GW-07;
   1 of 7 simulator runs and 1 of 4 My Mac runs, passes alone 3 of 3). It failed again
-  in VERIFY-ROUND2's one full My Mac run and passed alone 3 of 3.
+  in VERIFY-ROUND2's one full My Mac run and passed alone 3 of 3. It passed in VERIFY-ROUND3's
+  Mac and iPhone package runs.
 
 **Visual verdict (simulator captures `docs/evidence/captures/gw-final-*`, compared with a real
 `UIGlassEffect` on the same backdrop and, locally, with the four private references).**
@@ -148,6 +191,25 @@ adapter compiles to nothing on My Mac).
   steel-silver ring with fainter prismatic glints than the chunky polished chrome. Reference 4
   (lens pill): the bend at the edges is weak over soft backdrops, the pooled glow is quieter, and
   the dome button sits inside the pill instead of overlapping its end.
+
+**Visual verdict after POLISH (VERIFY-ROUND3, the merged tree, iPhone 18 Pro simulator, each page
+looked at beside a real `UIGlassEffect` where the page has one).**
+
+- *Improved.* The bends are quiet and blended. On the Focus pill, the Camera pearl and the Open Air
+  shelf the rim shows no start line, kink, smear or stretched petal; the bevel reads as a thin crisp
+  rim over an even body; the dispersion is faint; the touch page is a soft pool with no visible ring.
+  Next to the native capsules the refined glass is calmer and stays in the same family (one light,
+  a thin rim, soft shadows), with hues inside the material (the pill's pink-violet pool, the
+  shelf's clear center over a rainbow) that native glass cannot show.
+- *Still short.* The restraint costs presence: on the Apple vs GlassWeave page over the orbs, the
+  refined capsule and the rounded rectangle read as a clear, slightly gray panel, while the native
+  one shows a stronger, more colorful edge refraction and a livelier body; the thick-lens capsule
+  with its inlaid dome is nearly flat. A high-contrast edge is still visibly pulled when you look
+  closely: at the right cap of the refined capsule on that page the red orb's edge bends about
+  4 points inward inside the bevel and leaves a small gray wedge (faint at normal size, plain when
+  zoomed). The liquid vessel's contour sheets read as topographic rings rather than one clean gel.
+  On the paper desk page two lab captions overlap (a lab layout flaw, not the glass). Nothing
+  here was felt with a finger or seen on a device.
 
 **How to build and run here.** The Xcode MCP bridge times out when it opens a workspace
 on this Mac (`XcodeOpenWorkspace` after 10 s, on every path), so the whole round used

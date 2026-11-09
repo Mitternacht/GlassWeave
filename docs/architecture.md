@@ -245,6 +245,10 @@ append-only with size asserts in C, MSL and Swift. The design notes:
   layout and hit-test policy for native content (GW-12, GW-13).
 - [swiftui.md](swiftui.md): the optional SwiftUI adapter `GlassWeaveSwiftUI`
   (`GlassSurface`), what runs where, its lifecycle and accessibility (GW-15).
+- [decisions/metal-backend.md](decisions/metal-backend.md): how the surface
+  takes its drawable (GW-27) and the Metal 4 submission experiment (GW-11): the
+  method, the verified API list, the support matrix, the decision rule and the
+  recorded decision.
 
 ## Scheduling and resources
 
@@ -298,7 +302,7 @@ consumer's own host. `docs/validation.md` lists what it does not measure.
 
 ## Backend decision
 
-Use conventional Metal command submission to establish the first proof. Evaluate Metal 4 with the same scene, shader behavior, and measurement recipe after that proof. Runtime capability checks must accompany OS availability checks. A Metal 4-only implementation, a conventional implementation, or two supported paths are all possible outcomes of the experiment; no result is presumed. [Understanding the Metal 4 core API](https://developer.apple.com/documentation/metal/understanding-the-metal-4-core-api), [Metal feature tables](https://developer.apple.com/metal/availability/).
+Use conventional Metal command submission to establish the first proof. Evaluate Metal 4 with the same scene, shader behavior, and measurement recipe after that proof. Runtime capability checks must accompany OS availability checks. A Metal 4-only implementation, a conventional implementation, or two supported paths were all possible outcomes of the experiment. Result (GW-11, 2026-11-09, experimental): on My Mac the Metal 4 submission matched the conventional output byte for byte but was not faster at p95, so the conventional path is the sole shipped backend and the Metal 4 code is a package-level characterization arm no host uses; no physical device was measured. See [the record](decisions/metal-backend.md#decision). [Understanding the Metal 4 core API](https://developer.apple.com/documentation/metal/understanding-the-metal-4-core-api), [Metal feature tables](https://developer.apple.com/metal/availability/).
 
 ## Native behavior and accessibility
 

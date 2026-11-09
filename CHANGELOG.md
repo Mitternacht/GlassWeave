@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15)
+## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH)
 
 Requested by the user on 2026-11-09, on the branch `implement/glass-beyond`
 (nothing merged into `main`, nothing tagged). Every API is experimental, every
@@ -38,6 +38,24 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   core gained one read-only SPI (`@_spi(Census) GlassRendererCensus`) that
   the example and the test use to count renderers. The core and UIKit
   products do not import the adapter.
+- Subtle, blended bends (POLISH, after the feedback "the bends are way too
+  visible, not well blended"): `GlassLens.softness` (0...1, default 0, off is
+  the previous bytes) multiplies the lens offset by a quintic window that is 0
+  at the outline and the flat middle and replaces the hard offset ceiling by a
+  smooth one, so refraction fades in from the rim without a start line, a kink
+  or a smear; `GlassFill.richness` (0...1, default 0) adds a restrained surface
+  window, warm sheet edges and a long soft reflection to a translucent liquid.
+  Neither changes a record's size.
+- The Metal 4 submission experiment (GW-11), package level and without public
+  API: `Metal4Renderer` (`MTL4CommandQueue`, per-slot command allocators,
+  argument tables, a residency set, commit feedback), `ConventionalPlanRenderer`
+  (a control), `SubmissionBackend` and
+  `RenderCapabilities.submissionBackend(preferringMetal4:)`. It runs only on a
+  device that reports the Metal 4 family (My Mac here) and is compiled out for
+  the iOS Simulator. No host uses it. The agreement test (four reference cases,
+  0 of 12,648,528 bytes differ) and the interleaved comparison harness are in
+  the characterization target; the recorded decision is in
+  [the record](docs/decisions/metal-backend.md).
 - Laboratory pages: Touch (`-lab.touch YES`), Merge (`-lab.merge YES`) and the
   SwiftUI example (`-lab.swiftui YES`), each with a menu button (see the
   README for the other arguments).
@@ -85,6 +103,12 @@ only. Design notes: [glass optics](docs/glass-optics.md),
 - `GlassSurfaceView` runs its effect clock while any presented panel is
   animated (`GlassParameters.isAnimated`: glow, interior, light, wobble,
   fill), and `isEffectClockPaused` holds it for pinned captures.
+- POLISH retuned the laboratory's glass (`RefinedLook.blend` and the studies):
+  lower offsets, faint fringes, the soft window on every lens, a calmer touch
+  (light 0.55, ripple 0.32, at most about 2.6 points of displacement), a larger
+  chrome ring (98 points), a scrim that keeps its chroma as it darkens, and a
+  merged pill that matches the buttons' brightness. These are opt-in values;
+  a panel that sets none of them draws the previous bytes.
 - GW-04 item 3 (the drawable stall) is closed by the GW-27 heartbeat test.
 - The `EnhancedNativeGlassViewTests` check "The pulse resumes where it stopped" measures how long the pulse ran instead of assuming 0.3 s, so a busy main actor no longer fails it.
 

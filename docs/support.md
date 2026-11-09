@@ -42,7 +42,7 @@ functional evidence only.
 | Clean consumer, SwiftPM git dependency | Tested | `Examples/ConsumerCheck`, run by `scripts/consumer_check.sh`, resolved the candidate revision and ran native and custom mode tests on My Mac and the iPhone 18 Pro simulator; see [the pre-alpha notes](evidence/pre-alpha.md#clean-consumer-check). |
 | Xcode 27.2 (27B52), Swift 6.4.2 | Used for every result | Other toolchains are untested. |
 | GitHub Actions `macos-26` | **Not run** | The workflow is written; it has not run on GitHub. It selects `/Applications/Xcode_27.2.app` and fails if that Xcode is missing or reports another version, so a hosted run uses the recorded toolchain or stops. Whether the hosted image provides Xcode 27.2 is not known. |
-| Metal 4 | Not used | `RenderCapabilities` reports it; the renderer uses conventional Metal (GW-11 decides). |
+| Metal 4 | Not used by any host (experiment only) | `RenderCapabilities` reports the family. GW-11 built a package-level Metal 4 submission experiment (My Mac only, compiled out for the simulator, no public API) that agrees with the conventional path byte for byte on four reference cases. The quiet timing run on My Mac (Apple M3 Max, Release) found no benefit (its p95 was higher on both cases), so the conventional path is the only shipped backend: [the decision](decisions/metal-backend.md#decision). A physical device was not run. |
 | VoiceOver, live navigation | **Untested** | The Simulator has no VoiceOver; element structure and audits pass in UI tests. |
 
 ### API coverage
@@ -72,10 +72,15 @@ functional evidence only.
 
 ## Rendering backend
 
-GlassWeave renders through conventional Metal command submission. Metal 4 is a
-later, measured experiment (GW-11). The capability survey reports Metal 4
-availability so that experiment can choose a supported path; it does not switch
-the backend today.
+GlassWeave renders through conventional Metal command submission, and that is
+the only backend any host uses. Metal 4 was measured as an experiment (GW-11,
+experimental, unreleased): the package contains a Metal 4 submission path for the
+characterization tests (package access, no public API, My Mac only) and the
+recorded decision, from one quiet run on My Mac, is to keep the conventional path
+as the sole shipped backend because Metal 4 did not meet the rule's margin; see
+[the record](decisions/metal-backend.md#decision). The capability survey still
+reports Metal 4 availability; it does not switch the backend. No device was
+measured.
 
 ## Modules
 
