@@ -8,8 +8,9 @@ has been measured; see [the pre-alpha notes](docs/evidence/pre-alpha.md).
 ### Added
 
 - Swift package (tools 6.2, Swift 6 language mode) with the `GlassWeave` core
-  and `GlassWeaveUIKit` products for iOS/iPadOS 26, and core compilation and
-  GPU tests on macOS 26 (GW-01).
+  and `GlassWeaveUIKit` products. Declared floors: iOS/iPadOS 26 and macOS 26,
+  neither of which has been run; tests ran on the iOS 27.2 simulator and on
+  macOS 27.2, where the core is compiled and GPU-tested (GW-01).
 - `RenderCapabilities`, a runtime survey of the rendering `MTLDevice`'s GPU
   families, kept separate from the OS deployment floor (GW-01).
 - The UIKit laboratory app, `GlassWeaveLab`, consuming the package through a
@@ -46,8 +47,13 @@ has been measured; see [the pre-alpha notes](docs/evidence/pre-alpha.md).
 
 - No physical iPhone or iPad has been measured; no device is qualified and
   every performance budget is unmeasured on hardware.
-- Results so far come from the iOS 27.2 Simulator and an Apple M5 Mac; no
-  iOS 26 runtime was available.
+- Results so far come from the iOS 27.2 Simulator and an Apple M5 Mac on
+  macOS 27.2; no iOS 26 runtime was available and macOS 26 was not run.
+- iPad presentation is not claimed: only the iPad Pro 13-inch (M5) simulator
+  ran, in full-screen apps mode, and no physical iPad.
+- `GlassSurfaceView` acquires drawables on the main thread, which can wait
+  for a free drawable (normally at most about one display refresh, up to one
+  second when none is free).
 - One source format (`bgra8Unorm_srgb`, opaque); no wide color, HDR,
   transparency, or video.
 - Same-queue ordering only; no cross-queue or external producer.

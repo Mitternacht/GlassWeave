@@ -6,8 +6,12 @@ the validation record is not complete: the physical-device qualification of
 Milestone 1 (GW-09) has not been done. See
 [the Milestone 1 report](milestone-1.md).
 
-Candidate revision for the checks below: `4767ed7` on `implement/milestone-1`.
-Later commits on the branch change documentation only.
+Candidate revision for the checks below: `9b2c0c4` on `implement/milestone-1`
+(2026-11-09, after review fixes to the scheduler, the legibility rule, the
+benchmark workload, and the evidence). Later commits change documentation
+and comments only. The first candidate, `6c2ac6a` (recorded as `4767ed7`
+before the branch's author identity was rewritten on 2026-11-09; the
+rewrite changed no tree), is superseded.
 
 ## API status
 
@@ -27,7 +31,10 @@ and which of its parameters stay public is still open (plan decision 3).
   released after the last GPU use), on-demand per-scene scheduling with a
   fixed in-flight bound, a bounded producer texture pool, accessibility
   behavior, and opt-in measurement (`RenderMetrics`).
-- iOS/iPadOS 26 presentation; macOS 26 compiles and tests the core only.
+- UIKit presentation with an iOS/iPadOS 26 deployment floor, run only on the
+  iOS 27.2 simulator (no iOS 26 runtime was available); iPad presentation is
+  not claimed. macOS 26 is a declared floor for the core, which was compiled
+  and GPU-tested on macOS 27.2 only; there is no macOS view.
 
 ## Exclusions
 
@@ -67,20 +74,23 @@ None of the following is part of v0.1, and none is required for it:
 
 ## Clean-consumer check
 
-A separate Swift package, created outside the repository, depended on
-GlassWeave as an outside project would:
+The consumer is in the repository, `Examples/ConsumerCheck`, and
+`scripts/consumer_check.sh [revision] [destination]...` repeats the check
+(CI runs it on macOS). It depends on GlassWeave as an outside project would:
 
-- `.package(url: "file://<local clone of this repository>", revision: "4767ed76bac268a97adfa0b194bd8469f221fce0")`,
-  products `GlassWeave` and `GlassWeaveUIKit`, Swift 6 language mode,
-  iOS 26 and macOS 26 floors.
-- Resolution: SwiftPM cloned the repository into the consumer's own
-  `SourcePackages/checkouts` and pinned exactly that revision
-  (`Package.resolved`: one pin, `glassweave`, kind `localSourceControl`). No
-  other package was resolved.
-- It was opened as its own Xcode workspace and built and tested with Xcode
-  MCP (`BuildProject`, `RunAllTests`), with `MTL_DEBUG_LAYER=1` in its test
-  action. The package's Metal shaders compiled from the checkout and loaded
-  from GlassWeave's resource bundle inside the consumer.
+- `.package(url: GLASSWEAVE_URL, revision: GLASSWEAVE_REVISION)` from the
+  environment, products `GlassWeave` and `GlassWeaveUIKit`, Swift 6 language
+  mode, iOS 26 and macOS 26 floors. The script copies the package to a
+  temporary directory and points it at the local clone by a `file://` URL.
+- Resolution at `9b2c0c4`: SwiftPM cloned the repository and pinned exactly
+  that revision; the script requires one pin, `glassweave`, kind
+  `localSourceControl`, at the requested revision, and found it. No other
+  package was resolved. The package's Metal shaders compiled from the
+  checkout and loaded from GlassWeave's resource bundle inside the consumer.
+- The script runs `xcodebuild test` (a terminal check, so the combined
+  workspace stays the only one open in Xcode) with Metal API Validation on;
+  the custom-mode test checks that the command queue is
+  `MTLDebugCommandQueue`.
 - Its tests use public API only (no `@testable import` of GlassWeave):
   - **Custom mode:** the consumer creates its own device and queue, a
     `GlassRenderer`, a `FrameTexturePool`, and a producer, draws one produced
@@ -94,8 +104,13 @@ GlassWeave as an outside project would:
     without producing or submitting anything. A test process has no window
     scene, so the consumer cannot make the surface visible; drawing through
     the surface is covered by the laboratory's UI tests.
-- Results: iPhone 18 Pro simulator 3/3 passed; My Mac 1/1 passed (the two
-  UIKit tests are compiled only where UIKit exists).
+- Results at `9b2c0c4` (2026-11-09): iPhone 18 Pro simulator 3/3 passed;
+  My Mac 1/1 passed (the two UIKit tests are compiled only where UIKit
+  exists). The script also passed from a shallow clone in a directory with
+  another name, as a CI checkout would be.
+- The first run (2026-11-08, at `6c2ac6a`, then `4767ed7`) used the same
+  sources from a package outside the repository, opened in Xcode as its own
+  workspace; it gave the same results.
 
 ## Exported API surface
 
@@ -144,10 +159,13 @@ copies differ.
 
 Xcode MCP `RunAllTests`, Metal API Validation on:
 
-- `GlassWeave` package, My Mac (Apple M5): 118 test functions passed.
-- `GlassWeave` package, iPhone 18 Pro simulator: 147 passed.
+- `GlassWeave` package, My Mac (Apple M5): 126 test functions passed.
+- `GlassWeave` package, iPhone 18 Pro simulator: 155 passed.
 - `GlassWeaveLab`, iPhone 18 Pro and iPad Pro 13-inch (M5) simulators: 18
-  passed and 1 skipped each, run at the GW-09 commit `120bafc`; between it
-  and the candidate, package sources changed only in documentation comments.
+  passed and 1 skipped each.
+
+All at `9b2c0c4`. At the first candidate the counts were 118 and 147, with
+the laboratory run at the GW-09 commit (`afb66d6`, recorded as `120bafc`
+before the identity rewrite).
 
 No tag was created, nothing was pushed, and nothing was released.
