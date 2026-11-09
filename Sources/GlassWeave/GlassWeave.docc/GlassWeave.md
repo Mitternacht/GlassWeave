@@ -441,8 +441,9 @@ hidden (nor any ancestor), with an alpha above zero, and with its *own* window
 scene in the foreground, so a hidden surface never pauses one in another
 scene. At most two frames are in flight; a draw at that bound waits for a
 completion instead of queueing. Every texture a submitted frame uses stays
-alive until that frame completes, and no path waits for GPU work. Acquiring
-a drawable can still wait on the main thread (see the failure table). ``FrameStatistics`` (the surface's `frameStatistics`) counts requests,
+alive until that frame completes, and no path waits for GPU work. A drawable is
+taken on a background queue (`GlassSurfaceView.drawableTimeouts` counts
+waits that ran out), so acquiring one never blocks the main thread. ``FrameStatistics`` (the surface's `frameStatistics`) counts requests,
 coalesced requests, submissions, completions, skips, and deferrals.
 
 ### Failure behavior
@@ -451,13 +452,28 @@ coalesced requests, submissions, completions, skips, and deferrals.
 | --- | --- |
 | No source | A defined skip: the surface's opaque `backgroundColor` shows; nothing is drawn. |
 | Zero size or zero display scale | A defined skip before a drawable is requested. |
-| No drawable | A defined skip; a produced frame's writes still run, and the frame is drawn by a later draw. In `GlassSurfaceView` the skip comes only after `CAMetalLayer.nextDrawable()` has waited on the main thread: normally at most about one display refresh, up to the layer's one-second timeout when no drawable is free. |
+| No drawable | A defined skip; a produced frame's writes still run, and the frame is drawn by a later draw. `GlassSurfaceView` does not draw without a drawable: it takes one on a background queue first (`CAMetalLayer.nextDrawable()` waits there, up to the layer's one-second timeout), keeps the frame pending, counts a timeout in `GlassSurfaceView.drawableTimeouts` and asks again after 100 ms, so the main thread never waits. Only the synchronous test path reaches this skip. |
 | No free pooled texture | The producer returns `nil`; the current frame is drawn again (counted in ``RenderMetrics/Counts/declinedProductions``). |
 | A source that breaks the contract | ``BackgroundSourceError`` names the fix; the previous source stays. A rejected produced frame is reported in the surface's `lastProducedFrameError`, and its writes still complete before release. |
 | Non-finite panel parameters | ``GlassParameterError``; the previous panel stays. Finite out-of-range values are clamped, and ``GlassRenderer/panel`` reports what is drawn. |
 | Missing shader library or pipeline | ``BackgroundRendererError`` when the renderer is created, never while drawing. |
 
 See ``BackgroundRenderSkipReason`` and ``BackgroundRenderOutcome``.
+
+### Pacing and quality (experimental)
+
+An app declares motion with ``GlassMotionClass``: `GlassSurfaceView.beginInteraction()`
+and `endInteraction()` ask the display for 80 to 120 Hz while the user moves the
+glass, `motionClass` sets the resting class (ambient 30 to 60 Hz by default),
+and ``GlassFrameRate`` is the range the surface asks for. ``GlassQuality``
+(`.full`, `.balanced`, `.minimal`) is a fixed set of reductions the app picks;
+Low Power Mode and the thermal state can only lower it
+(``GlassQualityResolution``, ``GlassQualityEnvironment``), changes wait for the
+end of an interaction, and the accessibility policy is applied after the tier.
+Frost, dispersion and liquid fill do not exist yet, so only the effect clock's
+rates and the glow interiors follow the tier. An iPhone above 60 Hz needs the
+app's `CADisableMinimumFrameDurationOnPhone` Info.plist key. See
+`docs/presentation.md`.
 
 ### Accessibility
 

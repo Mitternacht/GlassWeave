@@ -20,7 +20,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         case "light": window.overrideUserInterfaceStyle = .light
         default: break
         }
-        window.rootViewController = LabViewController()
+        // `-lab.presentation YES` opens GW-27's presentation screen.
+        window.rootViewController = UserDefaults.standard.bool(forKey: "lab.presentation")
+            ? PresentationLabViewController()
+            : LabViewController()
         window.makeKeyAndVisible()
         self.window = window
     }

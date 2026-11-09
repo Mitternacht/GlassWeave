@@ -118,13 +118,15 @@ by the laboratory and tests; it is not yet a frozen public API.
 Defined skips (`BackgroundRenderOutcome.skipped`): no source, zero-size
 target, no drawable, released source, or no encoder. Missing-source and
 zero-size checks run before a drawable is requested. No path waits for GPU
-completion. Known limit, still open: `GlassSurfaceView` acquires its drawable
-on the main thread through `MTKView.currentRenderPassDescriptor`
-(`CAMetalLayer.nextDrawable()`), which blocks until a drawable is free or the
-layer's one-second timeout passes, so the host's no-drawable skip comes only
-after a main-thread wait. GW-07's two-frame in-flight bound normally keeps
-that wait to about one display refresh; it does not remove it (GW-04's third
-acceptance item stays open).
+completion. Since GW-27 `GlassSurfaceView` no longer waits for a drawable on
+the main thread either: a background queue takes it from the layer
+(`CAMetalLayer.nextDrawable()` waits there, up to the layer's one-second
+timeout), the draw runs on the main thread when it arrives, and a timed-out
+wait is counted (`drawableTimeouts`) and retried. Its own draws therefore
+reach `.skipped(.drawableUnavailable)` no more; only the synchronous test
+path (`renderNow()`) can. See [presentation.md](presentation.md) and
+[decisions/metal-backend.md](decisions/metal-backend.md) (GW-04's third
+acceptance item).
 
 ### Synchronization progression
 
@@ -243,7 +245,7 @@ public) bounds a producer's textures; the laboratory's moving source uses it.
 | --- | --- |
 | On demand | The `MTKView` is paused with `enableSetNeedsDisplay`. A draw happens only after a request (new source, panel, pixel size, display scale, producer, `requestFrame()`, or, since GW-18, a tick of the surface's effect clock, which runs only while a visible presented glow pulses or, since GW-19, a visible presented interior moves, on a panel that can change a pixel of the drawable, with a source or producer, and Reduce Motion is off). Requests before the next display pass merge into one (`FrameStatistics.coalesced`). A display pass with nothing requested (one UIKit starts itself, or a second wake-up for a request an earlier pass drew) draws nothing and calls no producer, so a stationary source with a settled surface submits nothing. |
 | Visibility per host | A surface draws only while it is in a window, neither it nor an ancestor is hidden or at alpha ≈ 0, and its *own* window scene is `foregroundActive` or `foregroundInactive` (an inactive scene beside an active one is still on screen). It observes only that scene's `UIScene` messages (typed `NotificationCenter` messages, re-subscribed in `didMoveToWindow`), so another scene's state never affects it. Requests while not visible leave one pending frame, drawn once when visible again. An ancestor's `isHidden` is not observable; it is checked on every request, layout pass, and draw. |
-| In-flight bound | At most `GlassSurfaceView.maximumFramesInFlight` (2) frames are committed and not completed. A display pass at the bound is deferred (`deferredAtLimit`) and its frame stays pending; the next completion schedules it. A request or completion that arrives during a draw (from the producer or `renderObserver`) leaves its wake-up to the end of the draw: a committed draw's completion schedules the pending frame, and a skipped draw, which has no completion, schedules it itself before `renderObserver` runs. Display passes asked for from inside a draw are requested after the draw returns. Nothing queues and nothing waits. Two leaves one of the layer's three drawables free while one is on screen; a completed frame not yet presented can still make the next drawable wait for a display refresh, never for GPU work. |
+| In-flight bound | At most `GlassSurfaceView.maximumFramesInFlight` (2) frames are committed and not completed. A display pass at the bound is deferred (`deferredAtLimit`) and its frame stays pending; the next completion schedules it. A request or completion that arrives during a draw (from the producer or `renderObserver`) leaves its wake-up to the end of the draw: a committed draw's completion schedules the pending frame, and a skipped draw, which has no completion, schedules it itself before `renderObserver` runs. A pass that needs a drawable starts a background acquisition, so a request made inside a draw never re-enters it. Nothing queues on the main thread and nothing waits there. Two leaves one of the layer's three drawables free while one is on screen; a completed frame not yet presented can still make the next drawable wait for a display refresh (on the background queue), never for GPU work. |
 | Texture bound | `FrameTexturePool` holds at most `capacity` textures, counting those in use, and takes a texture back only when GlassWeave releases its frame (after the last GPU use). With every texture in use, `checkout` returns `nil` and the producer skips that frame. A new size discards free textures of the old size at once and in-use ones when released; `trim()` discards free textures and marks in-use ones. |
 | Hidden resources | Leaving the visible state stops drawing and calls the app's `visibilityHandler`; GlassWeave itself frees nothing. The `CAMetalLayer` keeps its drawable pool (up to three drawables at the drawable size, about 7 MiB each at the laboratory's 1206 × 1524 px iPhone stage), because `MTKView.releaseDrawables()` releases only depth/stencil and multisample textures, which the surface does not create (an earlier version called it to no effect). The laboratory trims its source pool in the handler and stops its clock, so a hidden stage keeps only the presented frame's source texture plus the layer's drawables. Dropping the layer's drawables while hidden is not implemented or measured. |
 | Teardown | Command buffers retain every texture they use; leases keep frames until their last submission completes; the pool's ledger outlives the pool for late returns. Dropping the renderer, scheduler, and pool while a frame is in flight releases nothing until the GPU finishes. No path calls `waitUntilCompleted`; CI rejects it in package and laboratory sources. |
