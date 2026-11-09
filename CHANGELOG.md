@@ -60,7 +60,8 @@ evidence only.
   presented panel animates.
 - The laboratory's glow gallery (GW-20), from its Glow gallery button or
   `-lab.gallery YES`: a light/dark switch with a glass knob, three element
-  capsules with their own edge colors and interiors, an energy orb, and
+  capsules with their own edge colors and interiors (and a check under the
+  selected one, which shows the selection without the glow), an energy orb, and
   native glass with a colored rim, drawn by one surface in one pass under
   native controls, submitting no frames at rest.
 
