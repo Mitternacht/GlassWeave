@@ -98,8 +98,11 @@ enum GalleryStyle {
     // MARK: Theme toggle knob
 
     /// The round glass knob: a warm rim light concentrated on its top edge and
-    /// a soft halo, warmer and brighter by day, softer at night. `theme` is 0
-    /// for light and 1 for dark.
+    /// a soft halo, `theme` 0 for light and 1 for dark. The day parameters are
+    /// warmer and stronger, but the halo is light screened over the
+    /// background, so by day it shows only as a faint warm haze inside the
+    /// sky track and not at all over the near-white page (light adds nothing
+    /// to white); at night it spills visibly over the track and the page.
     static func knob(diameter: Double, theme: Double) -> GlassParameters {
         let day = SIMD3(1.0, 0.70, 0.26)
         let night = SIMD3(1.0, 0.80, 0.56)

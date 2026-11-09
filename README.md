@@ -72,7 +72,11 @@ What works (simulator and Mac evidence):
   rim, an inner glow that fades toward an exactly see-through middle, an
   optional center fill, a halo outside the shape, and a pulse, in one sRGB
   color or an angular gradient of up to four, blended in linear light; and
-  animated energy, rays, or embers inside, fading toward the middle.
+  animated energy, rays, or embers inside, fading toward the middle. The
+  halo is light screened over the background: it glows on dark and
+  mid-tone backgrounds, washes toward white over bright colors, and does
+  not show over white or near-white ones (the gallery's knob halo is
+  invisible on its light page). No halo mode for light interfaces exists yet.
 - **Several shapes in one pass**: `GlassRenderer.setPanels(_:)` and
   `GlassSurfaceView.setPanels(_:)` draw up to eight panels over one frame.
 - **Native glass** (`EnhancedNativeGlassView`): the same rim and halo around

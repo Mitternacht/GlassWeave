@@ -389,7 +389,7 @@ The user asked for glass that takes tints and glows at its edges in any color wh
 **Dependencies:** GW-14, GW-17, GW-18, GW-19, GW-08. **Scope:** Medium, four files plus UI tests.
 
 **Acceptance criteria:**
-- [x] The gallery shows original designs: a theme toggle with a soft glass knob, a warm top rim light, a halo, and a smooth transition between themes; three element capsules with their own edge colors, where the selected one brightens with a fill, a bloom, and its animated interior over a faint floor reflection; and an energy-orb button with filaments, a pulsing glow, and a bright rim on a dark bar.
+- [x] The gallery shows original designs: a theme toggle with a soft glass knob, a warm top rim light, a halo (light screened over the background: it glows at night, and by day shows only faintly inside the sky track and not over the near-white page), and a smooth transition between themes; three element capsules with their own edge colors, where the selected one brightens with a fill, a bloom, and its animated interior over a faint floor reflection; and an energy-orb button with filaments, a pulsing glow, and a bright rim on a dark bar.
 - [x] Every control is a native UIKit control with a VoiceOver label, value, and traits; the decorative surface adds no element; the accessibility audit passes in light and dark; the largest text size keeps content and targets; Reduce Motion, Reduce Transparency, and Increase Contrast follow the glow design.
 - [x] The shapes are drawn as the design specifies (one surface, several panels in one pass), with halos unclipped; the screen submits nothing when settled, hidden, or backgrounded; captures on the iPhone 18 Pro simulator are inspected and committed.
 
