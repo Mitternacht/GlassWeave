@@ -55,12 +55,28 @@ public enum GlassAccessibilityPolicy {
             presented.parameters.refraction = 0
             presented.parameters.edgeHighlight = 0
             presented.parameters.tint = opaqueSurfaceTint(for: traits)
-            presented.parameters.glow = rimOnly(panel.parameters.glow, maximumWidth: reducedTransparencyRimWidth)
+        }
+        presented.parameters.glow = presentedGlow(for: panel.parameters.glow, settings: settings, traits: traits)
+        return presented
+    }
+
+    /// The glow to draw for `glow` under `settings` and `traits`, the glow
+    /// rows of the table above. The custom panel
+    /// (``presentedPanel(for:settings:traits:)``) and
+    /// ``EnhancedNativeGlassView`` share it.
+    static func presentedGlow(
+        for glow: GlassGlow,
+        settings: GlassAccessibilitySettings,
+        traits: UITraitCollection
+    ) -> GlassGlow {
+        var presented = glow
+        if settings.reduceTransparency {
+            presented = rimOnly(glow, maximumWidth: reducedTransparencyRimWidth)
         } else if traits.accessibilityContrast == .high {
-            presented.parameters.glow = rimOnly(panel.parameters.glow, maximumWidth: nil)
+            presented = rimOnly(glow, maximumWidth: nil)
         }
         if settings.reduceMotion {
-            presented.parameters.glow = presented.parameters.glow.steadyAtMeanPulseLevel()
+            presented = presented.steadyAtMeanPulseLevel()
         }
         return presented
     }

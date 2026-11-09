@@ -213,7 +213,7 @@ public struct GlassGlow: Hashable, Sendable {
 extension GlassGlow {
     /// Applies the normalization rule. Lengths are capped at `maximumLength`
     /// (half the panel's shorter side).
-    func normalized(maximumLength: Double) throws(GlassParameterError) -> GlassGlow {
+    package func normalized(maximumLength: Double) throws(GlassParameterError) -> GlassGlow {
         for stop in colors {
             for (field, value) in [
                 (GlassParameterError.Field.glowColorRed, stop.red),
@@ -285,5 +285,49 @@ extension GlassGlow {
         // -1e-20 + 360 rounds to 360; keep the range half-open.
         // Adding zero also turns -0 into 0.
         return positive >= 360 ? 0 : positive + 0
+    }
+}
+
+/// The glow's color model on the CPU: the sRGB transfer function and the
+/// angular gradient, interpolated in linear light. The custom panel's CPU
+/// model (`GlassPanelGeometry`, mirrored by `Glass.metal`) and the
+/// enhanced-native view in GlassWeaveUIKit both use it, so one `GlassGlow`
+/// gives the same colors in both modes.
+package enum GlowColorModel {
+    /// The sRGB transfer function, encoded to linear light.
+    package static func decodeSRGB(_ encoded: Double) -> Double {
+        encoded <= 0.04045 ? encoded / 12.92 : Foundation.pow((encoded + 0.055) / 1.055, 2.4)
+    }
+
+    /// The sRGB transfer function, linear light (clamped to 0...1) to
+    /// encoded.
+    package static func encodeSRGB(_ linear: Double) -> Double {
+        let c = min(max(linear, 0), 1)
+        return c <= 0.0031308 ? c * 12.92 : 1.055 * Foundation.pow(c, 1 / 2.4) - 0.055
+    }
+
+    /// A normalized glow's stop colors in linear light and their angles in
+    /// turns (0 at the top, clockwise), in the glow's order (ascending angle).
+    package static func linearStops(of glow: GlassGlow) -> (colors: [SIMD3<Double>], turns: [Double]) {
+        (
+            glow.colors.map { SIMD3(decodeSRGB($0.red), decodeSRGB($0.green), decodeSRGB($0.blue)) },
+            glow.colors.map { $0.angle / 360 }
+        )
+    }
+
+    /// The gradient color at an angle in turns, in linear light: linear
+    /// interpolation between the neighbouring stops around the circle (the
+    /// last stop blends back into the first). One stop is a solid color; no
+    /// stops is black.
+    package static func color(atTurn turn: Double, colorsLinear colors: [SIMD3<Double>], stopTurns turns: [Double]) -> SIMD3<Double> {
+        guard colors.count > 1 else { return colors.first ?? .zero }
+        // `following` stops lie at or before `turn`; the next one is after.
+        let following = turns.lastIndex { $0 <= turn }.map { $0 + 1 } ?? 0
+        let previous = (following + colors.count - 1) % colors.count
+        let next = following % colors.count
+        let start = following == 0 ? turns[previous] - 1 : turns[previous]
+        let end = following == colors.count ? turns[next] + 1 : turns[next]
+        let fraction = min(max((turn - start) / max(end - start, 1e-6), 0), 1)
+        return colors[previous] + (colors[next] - colors[previous]) * fraction
     }
 }

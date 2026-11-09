@@ -208,16 +208,7 @@ struct GlassPanelGeometry: Equatable {
     /// interpolation between the neighbouring stops around the circle.
     func glowColor(atTurn turn: Double) -> SIMD3<Double> {
         guard let glow else { return .zero }
-        let colors = glow.colorsLinear, turns = glow.stopTurns
-        guard colors.count > 1 else { return colors[0] }
-        // `following` stops lie at or before `turn`; the next one is after.
-        let following = turns.lastIndex { $0 <= turn }.map { $0 + 1 } ?? 0
-        let previous = (following + colors.count - 1) % colors.count
-        let next = following % colors.count
-        let start = following == 0 ? turns[previous] - 1 : turns[previous]
-        let end = following == colors.count ? turns[next] + 1 : turns[next]
-        let fraction = min(max((turn - start) / max(end - start, 1e-6), 0), 1)
-        return colors[previous] + (colors[next] - colors[previous]) * fraction
+        return GlowColorModel.color(atTurn: turn, colorsLinear: glow.colorsLinear, stopTurns: glow.stopTurns)
     }
 
     /// The light factor at a pixel:
@@ -339,12 +330,11 @@ struct GlassPanelGeometry: Equatable {
 
     /// The sRGB transfer function, encoded to linear light.
     static func decodeSRGB(_ encoded: Double) -> Double {
-        encoded <= 0.04045 ? encoded / 12.92 : Foundation.pow((encoded + 0.055) / 1.055, 2.4)
+        GlowColorModel.decodeSRGB(encoded)
     }
 
     /// The sRGB transfer function, linear light to encoded.
     static func encodeSRGB(_ linear: Double) -> Double {
-        let c = min(max(linear, 0), 1)
-        return c <= 0.0031308 ? c * 12.92 : 1.055 * Foundation.pow(c, 1 / 2.4) - 0.055
+        GlowColorModel.encodeSRGB(linear)
     }
 }
