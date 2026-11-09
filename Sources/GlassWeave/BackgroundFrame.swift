@@ -126,8 +126,15 @@ public struct BackgroundFrame {
     /// frame, so a rejected frame produces an actionable
     /// ``BackgroundSourceError`` instead of an incorrect image.
     ///
-    /// - Parameter validRect: The valid content in texture pixels. Pass `nil`
-    ///   for the whole texture.
+    /// - Parameters:
+    ///   - texture: The source pixels; see ``texture``.
+    ///   - frameID: The producer's sequence number; see ``frameID``.
+    ///   - timestamp: When the content was generated; see ``timestamp``.
+    ///   - validRect: The valid content in texture pixels. Pass `nil` for the
+    ///     whole texture.
+    ///   - orientation: How the stored pixels relate to the upright image.
+    ///   - colorConvention: The declared color and alpha convention.
+    ///   - readiness: How the producer's writes are ordered before sampling.
     public init(
         texture: any MTLTexture,
         frameID: UInt64,

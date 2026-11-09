@@ -37,7 +37,7 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | VoiceOver | The surface is decorative: it and its Metal view expose no accessibility elements, so VoiceOver reaches only the native content placed above it. |
 /// | Reduce Transparency | The panel keeps its frame and corner radius but becomes an opaque surface: no refraction, no edge illumination, and a tint of ``opaqueSurfaceTint(for:)`` at full strength. Native content on it keeps its behavior. |
 /// | Reduce Motion | Nothing changes in the panel, which never moves on its own; ``GlassSurfaceView`` reports the setting so the app can stop its source's nonessential motion. |
-/// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with ``GlassTint/minimumStrength(forContrast:againstTextLuminance:)``. |
+/// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
     /// The panel to draw for `panel` under `settings`, resolved for `traits`.
     public static func presentedPanel(

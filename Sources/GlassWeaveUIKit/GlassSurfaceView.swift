@@ -60,7 +60,8 @@ public final class GlassSurfaceView: UIView {
 
     /// Encodes a new source frame into the draw's command buffer and returns
     /// its lease, or `nil` to produce nothing this time. See
-    /// ``GlassRenderer/drawProducing(targetPixelSize:displayScale:produce:acquireTarget:)``.
+    /// `GlassRenderer.drawProducing(targetPixelSize:displayScale:produce:acquireTarget:)`
+    /// in GlassWeave.
     public typealias FrameProducer = (
         _ commandBuffer: any MTLCommandBuffer,
         _ pixelSize: (width: Int, height: Int)
@@ -211,7 +212,7 @@ public final class GlassSurfaceView: UIView {
     }
 
     /// The panel the app set, in this view's points, after the
-    /// ``GlassParameters`` normalization rule; `nil` for none.
+    /// `GlassParameters` normalization rule; `nil` for none.
     public var panel: GlassPanel? {
         requestedPanel
     }

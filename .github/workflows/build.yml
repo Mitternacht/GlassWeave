@@ -48,6 +48,11 @@ jobs:
             exit 1
           fi
 
+      # GW-10: every Swift example in the DocC catalog must be one the test
+      # targets compile and run (Tests/*/DocumentationExamples.swift).
+      - name: Check the documentation examples are compiled
+        run: python3 scripts/check_doc_examples.py
+
       # GW-09: the offscreen characterization renders the laboratory's
       # background shader from its own copy; the two must not drift apart.
       - name: Check the characterization shader matches the laboratory's

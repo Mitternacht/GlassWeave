@@ -79,7 +79,11 @@ public final class FrameTexturePool {
     private let ledger: PoolLedgerBox
     private var textures: [Int: PooledTexture] = [:]
 
-    /// - Parameter capacity: At least one.
+    /// - Parameters:
+    ///   - device: The device the textures are created on: the renderer's.
+    ///   - descriptor: How each texture is created.
+    ///   - capacity: The most textures the pool holds, in use or free. At
+    ///     least one.
     public init(device: any MTLDevice, descriptor: Descriptor, capacity: Int) {
         precondition(capacity > 0, "A texture pool needs a capacity of at least one")
         self.device = device
