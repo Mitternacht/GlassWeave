@@ -4,7 +4,7 @@ import MetalKit
 import UIKit
 
 /// Presents an explicit background source, with rounded glass panels over
-/// it, through an `MTKView`, on demand.
+/// it, through an `MTKView`'s Metal layer, on demand.
 ///
 /// The view draws only when something changes: a new source, new panels, a
 /// new pixel size, a display-scale change, an app request through
@@ -25,8 +25,10 @@ import UIKit
 /// drawable (it has area, and its quad, the panel grown by one pixel and its
 /// halo radius, overlaps the view's bounds), the view has a source or a
 /// frame producer, and the view is visible, the view runs one `UIUpdateLink`
-/// created for itself, so it follows its own window's display. Each update advances the effect time by the update's model time
-/// and calls ``requestFrame()``, so ticks go through the same scheduler as
+/// created for itself, so it follows its own window's display, and asks that
+/// display for the frame rate range of its motion class (``motionClass``,
+/// ``beginInteraction()``, ``quality``). Each update advances the effect time
+/// by the update's model time and calls ``requestFrame()``, so ticks go through the same scheduler as
 /// every other request: they coalesce, wait while hidden, and never exceed
 /// the in-flight bound. Each draw evaluates the glow and the interior at the
 /// effect time (`GlassRenderer.effectTime`). The link is removed as soon as
@@ -55,6 +57,17 @@ import UIKit
 ///   trimming its texture pool. Every texture a submitted frame uses stays
 ///   alive until that frame completes, and no path waits for the GPU.
 ///
+/// Drawables (GW-27): the view never waits for one on the main thread. When a
+/// frame is pending and can be drawn, a background queue takes the drawable
+/// from the Metal layer (`CAMetalLayer.nextDrawable()` waits there, up to the
+/// layer's one-second timeout), the draw runs on the main thread when it
+/// arrives, and a drawable that is no longer wanted is released. If the wait
+/// times out the view counts it (``drawableTimeouts``) and asks again shortly,
+/// so a request made while every drawable is held elsewhere draws as soon as
+/// one is free, and the main thread, its run loop and its animations keep
+/// running meanwhile. The producer and the observer run on the main thread as
+/// before.
+///
 /// Defined skips. None waits for GPU work; the first two return before a
 /// drawable is requested:
 /// - No source: the Metal view is hidden and the opaque `backgroundColor`
@@ -63,16 +76,13 @@ import UIKit
 /// - Zero-size bounds or a zero display scale: no drawable is requested and
 ///   the outcome is `.skipped(.zeroSizeTarget)`.
 /// - No drawable available: the outcome is `.skipped(.drawableUnavailable)`
-///   and the producer's lease counts the skipped use. This skip is reached
-///   only after a wait on the main thread: the view acquires its drawable
-///   through `MTKView.currentRenderPassDescriptor`, which calls
-///   `CAMetalLayer.nextDrawable()`, and that call blocks until a drawable is
-///   free or the layer's one-second timeout passes. With at most
-///   ``maximumFramesInFlight`` frames in flight the wait is normally at most
-///   about one display refresh; when no drawable is free it can last up to
-///   one second. A running effect clock draws more often but within the
-///   same bound, so it does not lengthen that wait; it does not remove it
-///   either.
+///   and the producer's lease counts the skipped use. The view's own draws
+///   no longer reach this skip: they start only once a drawable is in hand
+///   (a timed-out wait is retried, not skipped, and is counted in
+///   ``drawableTimeouts``), so the pending frame is kept and the producer is
+///   not asked for a frame it could not present. Only the synchronous test
+///   path (`renderNow()`), which asks the layer on the calling thread, can
+///   still skip here.
 ///
 /// The surface is decorative: neither it nor its Metal view is an
 /// accessibility element (its accessibility elements are hidden), and it
@@ -123,6 +133,13 @@ public final class GlassSurfaceView: UIView {
         scheduler.statistics
     }
 
+    /// How many times the layer's drawable wait ran out (its one-second
+    /// timeout) while a frame was pending. The wait happens on a background
+    /// queue and the view asks again, so it never stalls the main thread; a
+    /// count that keeps rising means something else holds the layer's
+    /// drawables.
+    public private(set) var drawableTimeouts = 0
+
     /// Whether the view currently draws: in a window, not hidden, and with its
     /// window scene in the foreground.
     public private(set) var isVisible = false
@@ -160,21 +177,41 @@ public final class GlassSurfaceView: UIView {
     /// requests a frame on every display update of its window; otherwise the
     /// glow is drawn only when something else requests a frame.
     public var isAnimating: Bool {
-        effectLink != nil
+        effectClockRunning
     }
 
     /// The effect clock's time, in seconds, given to the renderer at each
     /// draw. It advances only while ``isAnimating``.
     private(set) var effectClock = EffectClock()
-    /// The update link that ticks the effect clock; present only while it
-    /// runs.
-    private var effectLink: UIUpdateLink?
+    /// Whether the effect clock runs (``isAnimating``).
+    private var effectClockRunning = false
+    /// The update link that ticks the effect clock and tells the display the
+    /// motion class's frame rate range; present only while the clock runs or
+    /// an interaction is active.
+    private var updateLink: UIUpdateLink?
+
+    // MARK: Pacing and quality state (GW-27)
+
+    /// The app's declared resting motion class. See ``motionClass``.
+    private var restingMotionClass: GlassMotionClass = .ambient
+    /// Open ``beginInteraction()`` calls.
+    private var interactionCount = 0
+    /// An environment change arrived during an interaction and waits for
+    /// its end.
+    private var environmentRefreshDeferred = false
+    private var requestedQuality: GlassQuality = .full
+    private var requestedQualityEnvironmentSource: QualityEnvironmentSource = .fixed(.nominal)
 
     /// The panels as the app set them, after the normalization rule.
     private var requestedPanels: [GlassPanel] = []
 
     let scheduler = FrameScheduler(isVisible: false)
     private let metalView: MTKView
+    private let metalLayer: CAMetalLayer
+    /// Takes drawables off the main thread; see ``DrawableAcquirer``.
+    private let acquirer: DrawableAcquirer
+    /// A drawable acquisition or a deferred pass is outstanding.
+    private var isPassOutstanding = false
     private let drawDelegate = DrawDelegate()
     /// The window scene whose lifecycle messages are observed, and the
     /// observations. Replacing the tokens ends the previous observations.
@@ -184,6 +221,12 @@ public final class GlassSurfaceView: UIView {
     public init(renderer: GlassRenderer) {
         self.renderer = renderer
         self.metalView = MTKView(frame: .zero, device: renderer.device)
+        // An `MTKView`'s backing layer is a `CAMetalLayer`.
+        guard let metalLayer = metalView.layer as? CAMetalLayer else {
+            preconditionFailure("MTKView's layer is not a CAMetalLayer")
+        }
+        self.metalLayer = metalLayer
+        self.acquirer = DrawableAcquirer(layer: metalLayer)
         super.init(frame: .zero)
 
         metalView.colorPixelFormat = GlassRenderer.outputPixelFormat
@@ -221,7 +264,17 @@ public final class GlassSurfaceView: UIView {
         ] {
             center.addObserver(self, selector: #selector(systemAccessibilitySettingsChanged), name: name, object: nil)
         }
+        for name in [ProcessInfo.thermalStateDidChangeNotification, .NSProcessInfoPowerStateDidChange] {
+            center.addObserver(self, selector: #selector(systemQualityEnvironmentChanged), name: name, object: nil)
+        }
         refreshAccessibilitySettings()
+        qualityEnvironment = environmentFromSource()
+        qualityResolution = GlassQualityResolution(requested: requestedQuality, environment: qualityEnvironment)
+    }
+
+    /// Thermal and power notifications can arrive on any thread.
+    @objc private nonisolated func systemQualityEnvironmentChanged() {
+        Task { @MainActor [weak self] in self?.refreshQualityEnvironment() }
     }
 
     @objc private func systemAccessibilitySettingsChanged() {
@@ -318,9 +371,17 @@ public final class GlassSurfaceView: UIView {
     /// Draws ``panels`` as the accessibility policy says, redrawing if that
     /// changes what is drawn, and starts or stops the effect clock.
     private func presentPanels() {
+        // The quality tier first, then the accessibility policy: Reduce
+        // Transparency and Increase Contrast draw their opaque body at every
+        // tier, and Reduce Motion stills whatever the tier left moving.
+        let tier = qualityResolution.quality
         let presented = requestedPanels.map {
-            GlassAccessibilityPolicy.presentedPanel(for: $0, settings: accessibilitySettings, traits: traitCollection)
+            GlassAccessibilityPolicy.presentedPanel(for: tier.reduced($0), settings: accessibilitySettings, traits: traitCollection)
         }
+        // Reduce Transparency presents any frost as none: its body is opaque,
+        // so no pyramid is built. Increase Contrast and Reduce Motion leave
+        // the frost as it is (it is static and has no text scrim yet).
+        renderer.isFrostSuppressed = accessibilitySettings.reduceTransparency
         if presented != renderer.panels {
             // A presented panel derives from a normalized one and keeps every
             // value in range, so the renderer never rejects it.
@@ -328,6 +389,155 @@ public final class GlassSurfaceView: UIView {
             scheduleFrame()
         }
         updateEffectClock()
+    }
+
+    // MARK: Pacing and quality (GW-27, experimental)
+
+    /// The motion class while no interaction is active: ``GlassMotionClass/ambient``
+    /// by default. It sets the frame rate range the effect clock asks the
+    /// display for (``effectFrameRate``). Setting `.interaction` here keeps the
+    /// interaction rates on for good.
+    public var motionClass: GlassMotionClass {
+        get { restingMotionClass }
+        set {
+            guard newValue != restingMotionClass else { return }
+            restingMotionClass = newValue
+            updateEffectClock()
+        }
+    }
+
+    /// The class in force now: ``GlassMotionClass/interaction`` while an
+    /// interaction is open, ``motionClass`` otherwise.
+    public var activeMotionClass: GlassMotionClass {
+        isInteracting ? .interaction : restingMotionClass
+    }
+
+    /// Whether an interaction is open (``beginInteraction()``).
+    public var isInteracting: Bool {
+        interactionCount > 0
+    }
+
+    /// The app says the user is moving the glass, or what is under it, with a
+    /// finger. The surface takes no touches itself, so it cannot know.
+    ///
+    /// While at least one interaction is open the surface asks the display
+    /// for the interaction rates (80 to 120 Hz at ``GlassQuality/full``) by
+    /// running its update link, even when no effect moves; it requests no
+    /// frames of its own for that, the app still calls ``requestFrame()`` or
+    /// produces its source. Calls nest: each ``beginInteraction()`` needs an
+    /// ``endInteraction()``. An iPhone above 60 Hz also needs the app's
+    /// `CADisableMinimumFrameDurationOnPhone` Info.plist key.
+    ///
+    /// A change of the power or thermal environment that arrives during an
+    /// interaction waits for its end, so the tier never changes under the
+    /// user's finger.
+    public func beginInteraction() {
+        interactionCount += 1
+        if interactionCount == 1 { updateEffectClock() }
+    }
+
+    /// Closes one ``beginInteraction()``. Without an open interaction it does
+    /// nothing. When the last one closes, a deferred environment change is
+    /// applied and the frame rate range returns to the resting class.
+    public func endInteraction() {
+        guard interactionCount > 0 else { return }
+        interactionCount -= 1
+        guard interactionCount == 0 else { return }
+        if environmentRefreshDeferred { applyQualityEnvironment() }
+        updateEffectClock()
+    }
+
+    /// The frame rate range the effect clock asks the display for now: the
+    /// ``activeMotionClass``'s range, capped by the quality tier and the
+    /// thermal state.
+    public var effectFrameRate: GlassFrameRate {
+        activeMotionClass.frameRate(for: qualityResolution)
+    }
+
+    /// The tier the app asked for; ``GlassQuality/full`` by default. The
+    /// tier in force can be lower (``effectiveQuality``). Changing it
+    /// redraws the panels at the new tier.
+    public var quality: GlassQuality {
+        get { requestedQuality }
+        set {
+            guard newValue != requestedQuality else { return }
+            requestedQuality = newValue
+            applyQuality()
+        }
+    }
+
+    /// Where ``qualityEnvironment`` comes from.
+    public enum QualityEnvironmentSource: Hashable, Sendable {
+        /// Low Power Mode and the thermal state, updated when the system
+        /// posts a change.
+        case system
+        /// Fixed values, for tests, previews, and comparison runs.
+        case fixed(GlassQualityEnvironment)
+    }
+
+    /// Where ``qualityEnvironment`` comes from. The default is
+    /// `.fixed(.nominal)`: nothing is downgraded and nothing changes for an
+    /// app that does not ask. Set `.system` to follow Low Power Mode and the
+    /// thermal state. Setting it applies the new environment at once (or at
+    /// the end of an open interaction).
+    public var qualityEnvironmentSource: QualityEnvironmentSource {
+        get { requestedQualityEnvironmentSource }
+        set {
+            requestedQualityEnvironmentSource = newValue
+            refreshQualityEnvironment()
+        }
+    }
+
+    /// The power and thermal environment currently applied.
+    public private(set) var qualityEnvironment = GlassQualityEnvironment.nominal
+
+    /// The tier and rate cap in force: ``quality`` after the environment's
+    /// downgrade (``GlassQualityResolution``).
+    public private(set) var qualityResolution = GlassQualityResolution(requested: .full, environment: .nominal)
+
+    /// The tier drawn now.
+    public var effectiveQuality: GlassQuality {
+        qualityResolution.quality
+    }
+
+    /// Called when ``effectiveQuality`` changes, for example so the app can
+    /// show a note or lighten its own source.
+    public var qualityHandler: ((GlassQuality) -> Void)?
+
+    private func environmentFromSource() -> GlassQualityEnvironment {
+        switch requestedQualityEnvironmentSource {
+        case .system: .system
+        case let .fixed(environment): environment
+        }
+    }
+
+    /// Reads the environment from its source and applies it, unless an
+    /// interaction is open, which defers it to the interaction's end.
+    private func refreshQualityEnvironment() {
+        if isInteracting {
+            environmentRefreshDeferred = true
+        } else {
+            applyQualityEnvironment()
+        }
+    }
+
+    private func applyQualityEnvironment() {
+        environmentRefreshDeferred = false
+        qualityEnvironment = environmentFromSource()
+        applyQuality()
+    }
+
+    /// Resolves the tier from the request and the environment, and redraws
+    /// and re-rates if it changed.
+    private func applyQuality() {
+        let resolution = GlassQualityResolution(requested: requestedQuality, environment: qualityEnvironment)
+        guard resolution != qualityResolution else { return }
+        let previous = qualityResolution.quality
+        qualityResolution = resolution
+        presentPanels()
+        if resolution.quality != previous {
+            qualityHandler?(resolution.quality)
+        }
     }
 
     // MARK: Effect clock
@@ -370,26 +580,38 @@ public final class GlassSurfaceView: UIView {
         }
     }
 
-    /// Starts or stops the effect clock to match ``wantsEffectClock``.
+    /// Starts or stops the effect clock and the update link to match
+    /// ``wantsEffectClock`` and the active interaction, and tells the link the
+    /// frame rate range of the active motion class.
     private func updateEffectClock() {
-        if wantsEffectClock {
-            guard effectLink == nil else { return }
-            // The link belongs to this view, so it follows this view's own
-            // window and display (never a global display link), and its
-            // handler holds the view weakly.
-            let link = UIUpdateLink(view: self) { [weak self] _, info in
-                self?.effectTick(modelTime: info.modelTime)
+        let wantsClock = wantsEffectClock
+        if wantsClock != effectClockRunning {
+            effectClockRunning = wantsClock
+            if wantsClock { effectClock.start() }
+        }
+        // An interaction also needs the link, to ask the display for its
+        // high rates even when no effect moves; it requests no frames itself.
+        if wantsClock || (isInteracting && isVisible) {
+            if updateLink == nil {
+                // The link belongs to this view, so it follows this view's
+                // own window and display (never a global display link), and
+                // its handler holds the view weakly.
+                let link = UIUpdateLink(view: self) { [weak self] _, info in
+                    self?.effectTick(modelTime: info.modelTime)
+                }
+                // Without continuous updates the link only observes updates
+                // something else causes; the pulse needs every one.
+                link.requiresContinuousUpdates = true
+                link.isEnabled = true
+                updateLink = link
             }
-            // Without continuous updates the link only observes updates
-            // something else causes; the pulse needs every one.
-            link.requiresContinuousUpdates = true
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-            link.isEnabled = true
-            effectClock.start()
-            effectLink = link
-        } else if let effectLink {
-            effectLink.isEnabled = false
-            self.effectLink = nil
+            let rate = effectFrameRate
+            updateLink?.preferredFrameRateRange = CAFrameRateRange(
+                minimum: rate.minimum, maximum: rate.maximum, preferred: rate.preferred
+            )
+        } else if let updateLink {
+            updateLink.isEnabled = false
+            self.updateLink = nil
         }
     }
 
@@ -397,9 +619,14 @@ public final class GlassSurfaceView: UIView {
     /// request a frame through the scheduler. Ignored when the clock is not
     /// running.
     func effectTick(modelTime: Double) {
-        guard effectLink != nil else { return }
+        guard effectClockRunning else { return }
         effectClock.advance(toModelTime: modelTime)
         requestFrame()
+    }
+
+    /// The frame rate range the update link asks for, for tests.
+    var updateLinkFrameRateRange: CAFrameRateRange? {
+        updateLink?.preferredFrameRateRange
     }
 
     /// Makes every draw produce its own frame first.
@@ -462,19 +689,68 @@ public final class GlassSurfaceView: UIView {
         }
     }
 
-    /// Whether ``render(in:)`` is drawing: the app's producer or observer
-    /// may request a frame from inside the draw.
-    private var isDrawing = false
-
-    /// Asks the Metal view for a display pass. From inside a draw, the ask
-    /// is made after the draw returns, so the pass that is running cannot
-    /// absorb it.
+    /// Asks for a draw as soon as one can happen, without waiting for a
+    /// drawable on the main thread.
+    ///
+    /// When a frame is pending, the view is visible and below the in-flight
+    /// bound, and the draw needs a drawable, a background queue takes one
+    /// from the layer (``DrawableAcquirer``) and the draw runs on the main
+    /// thread when it arrives. A draw that needs none (no source, no area)
+    /// runs on the next main-thread turn and skips as ``lastRenderOutcome``
+    /// says. At most one such pass is outstanding; requests meanwhile merge
+    /// into the pending frame. A surface that is not in a window never
+    /// draws by itself (tests draw it with `renderNow()`).
     private func requestDisplayPass() {
-        if isDrawing {
-            Task { @MainActor [weak self] in self?.metalView.setNeedsDisplay() }
+        guard window != nil, !isPassOutstanding else { return }
+        let ledger = scheduler.snapshot
+        guard ledger.hasPendingFrame, ledger.isVisible,
+              ledger.statistics.framesInFlight < ledger.maxFramesInFlight
+        else { return }
+        isPassOutstanding = true
+        if wantsDrawable {
+            acquirer.acquire { [weak self] acquired in
+                self?.drawableAcquired(acquired.drawable)
+            }
         } else {
-            metalView.setNeedsDisplay()
+            Task { @MainActor [weak self] in self?.drawableAcquired(nil, wasRequested: false) }
         }
+    }
+
+    /// Whether a draw now would take a drawable: it has a source or a
+    /// producer, and a target with area.
+    private var wantsDrawable: Bool {
+        (renderer.currentFrame != nil || frameProducer != nil) && pixelSize.width > 0 && pixelSize.height > 0
+    }
+
+    /// The acquisition finished (`drawable` is `nil` when the layer timed
+    /// out), or a pass that needs no drawable is due.
+    private func drawableAcquired(_ drawable: (any CAMetalDrawable)?, wasRequested: Bool = true) {
+        isPassOutstanding = false
+        if !wasRequested {
+            // The state may have changed while the pass waited: a draw that
+            // now needs a drawable must get one first, or it would skip and
+            // lose the pending frame.
+            if wantsDrawable { requestDisplayPass() } else { render(.none) }
+            return
+        }
+        guard let drawable else {
+            // Nothing was free for the layer's whole timeout. The frame is
+            // still pending; look again shortly, as long as it can draw.
+            drawableTimeouts += 1
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(100))
+                self?.requestDisplayPass()
+            }
+            return
+        }
+        // The layer was resized while the drawable was on its way: it has
+        // the old size, and the resize's own request must not draw into it.
+        let layerSize = metalLayer.drawableSize
+        guard wantsDrawable, drawable.texture.width == Int(layerSize.width), drawable.texture.height == Int(layerSize.height) else {
+            requestDisplayPass()
+            return
+        }
+        render(.provided(drawable))
     }
 
     /// Stands in for the window and window scene, for tests: a test process
@@ -518,7 +794,10 @@ public final class GlassSurfaceView: UIView {
             requestDisplayPass()
         }
         updateEffectClock()
-        // Hiding frees nothing here: `MTKView.releaseDrawables()` releases
+        // A hidden surface gives back its frost pyramids (none exist
+        // unless frost was requested); the next draw builds them again.
+        if !visible { renderer.trimFrostResources() }
+        // Hiding frees nothing else here: `MTKView.releaseDrawables()` releases
         // only depth/stencil and multisample textures, which this view does
         // not create, and the layer keeps its drawable pool. Memory a hidden
         // surface can give back is the app's (see `visibilityHandler`).
@@ -574,21 +853,41 @@ public final class GlassSurfaceView: UIView {
         scheduleFrame()
     }
 
-    /// Draws through the same path the `MTKView` delegate uses, if the
-    /// scheduler permits a draw now.
-    func render(in view: MTKView) {
+    /// Where a draw gets its drawable.
+    private enum DrawableSource {
+        /// One the background acquisition delivered.
+        case provided(any CAMetalDrawable)
+        /// None: the draw must skip before it needs one.
+        case none
+        /// Asked from the layer on the calling thread, which can wait up to
+        /// the layer's timeout. Only `renderNow()` does this.
+        case synchronous
+    }
+
+    /// Draws if the scheduler permits a draw now.
+    private func render(_ source: DrawableSource) {
         // An ancestor's hidden state is not observable; check it here so a
         // hidden surface never draws.
         refreshVisibility()
         // A pass with nothing requested draws nothing (on demand).
         guard scheduler.beginDraw() == .draw else { return }
-        isDrawing = true
-        defer { isDrawing = false }
         // Acquire the drawable as late as possible: after the checks and
         // after any frame production has been encoded.
-        let acquireTarget = { () -> BackgroundDrawTarget? in
-            guard let descriptor = view.currentRenderPassDescriptor else { return nil }
-            return BackgroundDrawTarget(renderPassDescriptor: descriptor, drawable: view.currentDrawable)
+        let acquireTarget = { [metalView] () -> BackgroundDrawTarget? in
+            switch source {
+            case let .provided(drawable):
+                let descriptor = MTLRenderPassDescriptor()
+                descriptor.colorAttachments[0].texture = drawable.texture
+                descriptor.colorAttachments[0].loadAction = .clear
+                descriptor.colorAttachments[0].storeAction = .store
+                descriptor.colorAttachments[0].clearColor = metalView.clearColor
+                return BackgroundDrawTarget(renderPassDescriptor: descriptor, drawable: drawable)
+            case .none:
+                return nil
+            case .synchronous:
+                guard let descriptor = metalView.currentRenderPassDescriptor else { return nil }
+                return BackgroundDrawTarget(renderPassDescriptor: descriptor, drawable: metalView.currentDrawable)
+            }
         }
         var committed = false
         let onCommit = { [scheduler, weak self] (commandBuffer: any MTLCommandBuffer) in
@@ -598,7 +897,7 @@ public final class GlassSurfaceView: UIView {
                 // A frame deferred at the bound is pending; draw it now that
                 // a slot is free.
                 guard scheduler.frameCompleted() else { return }
-                Task { @MainActor [weak self] in self?.metalView.setNeedsDisplay() }
+                Task { @MainActor [weak self] in self?.requestDisplayPass() }
             }
         }
         let scale = traitCollection.displayScale
@@ -632,6 +931,13 @@ public final class GlassSurfaceView: UIView {
         }
     }
 
+    /// The `MTKView` asked to display (UIKit does this on its own at times).
+    /// The surface draws only through its own acquisition, so this is just
+    /// another request for that.
+    fileprivate func displayRequestedBySystem() {
+        requestDisplayPass()
+    }
+
     private func record(_ outcome: BackgroundRenderOutcome) {
         lastRenderOutcome = outcome
         renderObserver?(outcome)
@@ -639,7 +945,7 @@ public final class GlassSurfaceView: UIView {
 
     /// Draws immediately, for tests that cannot wait for a display pass.
     func renderNow() {
-        render(in: metalView)
+        render(.synchronous)
     }
 
     /// The hosted Metal view, for tests.
@@ -693,7 +999,7 @@ private final class DrawDelegate: NSObject, MTKViewDelegate {
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
-        surface?.render(in: view)
+        surface?.displayRequestedBySystem()
     }
 }
 #endif

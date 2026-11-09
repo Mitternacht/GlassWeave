@@ -20,7 +20,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         case "light": window.overrideUserInterfaceStyle = .light
         default: break
         }
-        window.rootViewController = LabViewController()
+        // `-lab.presentation YES` opens GW-27's presentation screen.
+        // `-lab.frost YES` opens GW-24a's frost pyramid screen.
+        window.rootViewController = if UserDefaults.standard.bool(forKey: "lab.frost") {
+            FrostLabViewController()
+        } else if UserDefaults.standard.bool(forKey: "lab.presentation") {
+            PresentationLabViewController()
+        } else {
+            LabViewController()
+        }
         window.makeKeyAndVisible()
         self.window = window
     }

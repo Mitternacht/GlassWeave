@@ -110,6 +110,8 @@ final class LabViewController: UIViewController {
     private let shapesButton = UIButton(configuration: .bordered())
     /// Whether `-lab.bench` or `-lab.lightFields` has opened its screen yet.
     private var openedBenchAtLaunch = false
+    /// Whether `-lab.versus YES` has opened the Apple vs GlassWeave screen yet.
+    private var openedVersusAtLaunch = false
     /// The control rows; vertical at accessibility text sizes.
     private var controlRows: [UIStackView] = []
     /// At accessibility text sizes the custom panel takes the stage's full
@@ -208,6 +210,11 @@ final class LabViewController: UIViewController {
                 openedBenchAtLaunch = true
                 openBench(.lightFields, page: BenchPage.named(defaults.string(forKey: "lab.lightBackdrop")) ?? .charcoal, animated: false)
             }
+        }
+        // `-lab.versus YES` opens the Apple vs GlassWeave screen once (GW-29a).
+        if !openedVersusAtLaunch, VersusViewController.launchRequested {
+            openedVersusAtLaunch = true
+            VersusViewController.present(from: self, animated: false)
         }
     }
 
@@ -572,8 +579,8 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, benchButton, measureButton])
-        stack.axis = .vertical
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, benchButton, measureButton])
+       stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
         controls.addSubview(stack)

@@ -16,6 +16,9 @@
 #include <stdint.h>
 #endif
 
+// The frost pyramid's records (GW-24a) live in their own header.
+#include "GlassWeaveFrostTypes.h"
+
 /// Argument-table indices for the background presentation pass.
 typedef enum GWBackgroundBindingIndex {
     /// Fragment buffer index of `GWBackgroundUniforms`.
