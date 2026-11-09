@@ -152,9 +152,9 @@ final class PillStudyViewController: StudyViewController {
     override func panels(at time: Double) -> [GlassPanel] {
         guard pillAnchor.bounds.width > 0 else { return [] }
         let frame = frame(of: pillAnchor)
-        var parameters = RefinedLook.lens(corner: 999, bezel: 28, thickness: 26, dark: true)
-        parameters.lens.dispersion = 0.32
-        parameters.lens.dispersionTaps = .sixTap
+        // ENHANCE: a thicker lens (the bevel bends what is behind its edge
+        // harder), the enhanced rim, and a soft drop shadow.
+        var parameters = RefinedLook.enhancedLens(corner: 999, bezel: 32, thickness: 42, dispersion: 0.7, dark: true)
         let domeX = (frame.width - Self.pillHeight) / 2
         parameters.lens.inlays = [
             GlassLens.Inlay(
@@ -173,15 +173,15 @@ final class PillStudyViewController: StudyViewController {
         // The pooled glow: four stops along the bottom edge, flowing slowly
         // while the session runs (one turn of the palette per 64 seconds), in quarter seconds so the panel
         // changes four times a second, not on every tick.
-        let sky = GlassLight.Stop(red: 0.22, green: 0.80, blue: 1.0)
-        let violet = GlassLight.Stop(red: 0.56, green: 0.48, blue: 1.0)
-        let rose = GlassLight.Stop(red: 1.0, green: 0.42, blue: 0.70)
-        let amber = GlassLight.Stop(red: 1.0, green: 0.70, blue: 0.28)
+        let sky = GlassLight.Stop(red: 0.16, green: 0.62, blue: 1.0)
+        let violet = GlassLight.Stop(red: 0.50, green: 0.32, blue: 1.0)
+        let rose = GlassLight.Stop(red: 1.0, green: 0.26, blue: 0.62)
+        let amber = GlassLight.Stop(red: 1.0, green: 0.42, blue: 0.46)
         parameters.light = GlassLight(
             emitters: [
-                GlassLight.Emitter(placement: .band(angle: 180, reach: 1.3), colors: [sky, violet, rose, amber], intensity: 1, flow: 1)
+                GlassLight.Emitter(placement: .band(angle: 180, reach: 1.7), colors: [sky, violet, rose, amber], intensity: 0.7, flow: 1)
             ],
-            composite: .light, centerFade: 0.65, piping: 0.4, body: 1, speed: 1, timeOffset: (elapsed(at: time) * 4).rounded() / 4
+            composite: .paint, centerFade: 0.6, piping: 0.45, body: 1, speed: 1, timeOffset: (elapsed(at: time) * 4).rounded() / 4
         )
         parameters.lighting.key.azimuth = RefinedLook.azimuth
         return [GlassPanel(frame: frame, parameters: parameters)]

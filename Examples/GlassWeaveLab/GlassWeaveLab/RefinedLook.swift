@@ -59,4 +59,104 @@ enum RefinedLook {
         )
         return parameters
     }
+
+    // MARK: Enhanced (ENHANCE)
+
+    /// The refined light with its enhancements: a rim that reads as a thick
+    /// slab (a deeper far side, a faint inner light on the lit side), and with
+    /// a polished finish, reflection stripes and small glints.
+    static func enhancedLighting(dark: Bool, finish: GlassLighting.Finish = .dielectric) -> GlassLighting {
+        .enhanced(azimuth: azimuth, environment: dark ? .studioDark : .studioLight, finish: finish)
+    }
+
+    /// A soft shadow that also shows on dark pages: a broad, low drop in a
+    /// deep ink and the faintest contact line, so the glass sits above the
+    /// page (the contact shadow is the line the glass casts, not a halo).
+    static func enhancedGrounding(dark: Bool) -> GlassGrounding {
+        let ink = dark
+            ? GlassGrounding.Color(red: 0.02, green: 0.02, blue: 0.06)
+            : GlassGrounding.Color(red: 0.16, green: 0.17, blue: 0.24)
+        return GlassGrounding(
+            drop: .init(offset: dark ? 7 : 8, blur: dark ? 18 : 22, spread: -3, opacity: dark ? 0.30 : 0.18, color: ink),
+            contact: .init(width: 1, opacity: dark ? 0.12 : 0.06, color: ink),
+            lightAzimuth: azimuth
+        )
+    }
+
+    /// A panel with edge refraction, the enhanced light and a soft shadow.
+    static func enhancedPanel(corner: Double, bezel: Double = 16, dark: Bool) -> GlassParameters {
+        var parameters = panel(corner: corner, bezel: bezel, dark: dark)
+        parameters.lighting = enhancedLighting(dark: dark)
+        parameters.grounding = enhancedGrounding(dark: dark)
+        return parameters
+    }
+
+    /// A thicker, stronger lens than ``lens(corner:bezel:thickness:dark:)``:
+    /// the squircle is rounder (exponent 2.4), so the bending reaches farther
+    /// in from the outline, the index is 1.5, and the six-tap dispersion is
+    /// visible on a high-contrast edge at the bevel and nowhere else.
+    static func enhancedLens(
+        corner: Double = 999, bezel: Double = 28, thickness: Double = 30, dispersion: Double = 0.55, dark: Bool
+    ) -> GlassParameters {
+        var parameters = enhancedPanel(corner: corner, bezel: bezel, dark: dark)
+        parameters.lens = GlassLens(
+            profile: .squircle(exponent: 2.4), thickness: thickness, indexOfRefraction: 1.5, maximumOffset: 64,
+            allowsFold: true, dispersion: dispersion, dispersionTaps: .sixTap
+        )
+        return parameters
+    }
+
+    /// Upgrades a panel the page already built (its finish, tint, frost,
+    /// light and shape are kept) to the enhanced look: the thick-slab rim, a
+    /// firmer rim line, stripes and glints on a polished finish, a soft shadow
+    /// where there is none (`addShadow`), and, for a lens that bends hard at
+    /// the bevel, a thicker glass with visible six-tap dispersion. A panel
+    /// that is not lit by the refined look is returned as it is.
+    static func enhance(_ parameters: GlassParameters, addShadow: Bool = true) -> GlassParameters {
+        var p = parameters
+        guard p.lighting.look == .refined, !p.fill.isActive else { return p }
+        let dark = p.lighting.environment == .studioDark
+        p.lighting.edgeDepth = max(p.lighting.edgeDepth, 0.6)
+        p.lighting.fresnel = max(p.lighting.fresnel, 0.7)
+        p.lighting.specular = max(p.lighting.specular, 0.6)
+        if case .dielectric = p.lighting.finish {} else {
+            p.lighting.banding = max(p.lighting.banding, 0.6)
+            p.lighting.glints = max(p.lighting.glints, 0.6)
+        }
+        if addShadow, p.grounding == .none {
+            p.grounding = enhancedGrounding(dark: dark)
+        }
+        switch p.lens.profile {
+        case .rim, .ring: break
+        default:
+            p.lens.thickness = min(p.lens.thickness * 1.25, 60)
+            p.lens.maximumOffset = max(p.lens.maximumOffset, 64)
+            p.lens.dispersion = max(p.lens.dispersion, 0.55)
+            p.lens.dispersionTaps = .sixTap
+        }
+        return p
+    }
+
+    /// A polished chrome ring button: a thin ring of glass standing at the
+    /// edge, a clear middle, a bright studio reflected in a band with real
+    /// stripes (dark wall, bright band, dark band), a faint thin film, and a
+    /// few small prismatic glints that turn with the key light.
+    static func chromeRing(diameter: Double, azimuth: Double = RefinedLook.azimuth) -> GlassParameters {
+        var ring = panel(corner: diameter / 2, bezel: 13, dark: false)
+        ring.tint = GlassTint(red: 1, green: 1, blue: 1, strength: 0.05)
+        ring.lens = GlassLens(
+            profile: .ring(center: 6.5, width: 11), thickness: 14, indexOfRefraction: 1.5, maximumOffset: 16,
+            allowsFold: false, dispersion: 0.3, dispersionTaps: .sixTap
+        )
+        ring.lighting = .enhanced(
+            azimuth: azimuth, environment: .studioLight, finish: .prismatic(spread: 1.2, saturation: 0.3, phase: 0.06)
+        )
+        ring.lighting.fresnel = 0.8
+        ring.lighting.specular = 0.7
+        ring.lighting.reflection = 0.95
+        ring.lighting.banding = 1
+        ring.lighting.glints = 0.9
+        ring.lighting.bandWidth = 13
+        return ring
+    }
 }

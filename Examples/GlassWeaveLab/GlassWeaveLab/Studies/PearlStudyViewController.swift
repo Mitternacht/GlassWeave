@@ -158,26 +158,9 @@ final class PearlStudyViewController: StudyViewController {
 
     override func panels(at time: Double) -> [GlassPanel] {
         guard plateAnchor.bounds.width > 0 else { return [] }
-        let key = GlassLighting.refined(
-            azimuth: lightAzimuth, environment: .studioLight,
-            finish: .prismatic(spread: 2, saturation: 0.75, phase: 0.06)
-        )
-
-        // The ring button: a thin, polished band at the edge, a clear middle.
-        var ring = RefinedLook.panel(corner: Double(Self.buttonDiameter) / 2, bezel: 12, dark: false)
-        ring.tint = GlassTint(red: 1, green: 1, blue: 1, strength: 0.06)
-        ring.lens = GlassLens(
-            profile: .ring(center: 6, width: 10), thickness: 12, indexOfRefraction: 1.5, maximumOffset: 14,
-            allowsFold: false, dispersion: 0.22, dispersionTaps: .sixTap
-        )
-        ring.lighting = key
-        ring.lighting.fresnel = 0.8
-        ring.lighting.specular = 0.8
-        ring.lighting.reflection = 0.95
-        ring.lighting.bandWidth = 12
-        // The ring reflects a dark studio, so its band reads as polished steel
-        // against the light plate, with the bright strips and the thin film.
-        ring.lighting.environment = .studioDark
+        // ENHANCE: the polished chrome ring (stripes and small prismatic
+        // glints that turn with the light).
+        var ring = RefinedLook.chromeRing(diameter: Double(Self.buttonDiameter), azimuth: lightAzimuth)
         ring.grounding = shadow()
 
         // The milky capsule: a light frost over the plate, a white tint, and
@@ -185,7 +168,7 @@ final class PearlStudyViewController: StudyViewController {
         var pill = RefinedLook.panel(corner: 999, bezel: 16, dark: false)
         pill.tint = GlassTint(red: 1, green: 1, blue: 1, strength: 0.55)
         pill.frost = GlassFrost(profile: .uniform, sigma: 6, grain: 0.03, saturation: 1, brightness: 1.02)
-        pill.lighting = RefinedLook.lighting(dark: false)
+        pill.lighting = RefinedLook.enhancedLighting(dark: false)
         pill.lighting.key.azimuth = lightAzimuth
         pill.grounding = shadow()
 

@@ -283,11 +283,11 @@ final class MaterialBenchViewController: UIViewController {
         switch mode {
         case .bench: demos = Self.benchDemos
         case .lightFields: demos = Self.lightDemos(timeOffset: 0)
-        case .lens: demos = Self.lensDemos
-        case .chrome: demos = Self.chromeDemos
+        case .lens: demos = Self.lensDemos.map(Self.enhanced)
+        case .chrome: demos = Self.chromeDemos.map(Self.enhanced)
         case .paper: demos = Self.paperDemos
         case .compare: demos = Self.compareDemos(dark: page.isDark)
-        case .frost: demos = Self.frostDemos
+        case .frost: demos = Self.frostDemos.map(Self.enhanced)
         }
         super.init(nibName: nil, bundle: nil)
     }
@@ -295,6 +295,13 @@ final class MaterialBenchViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    /// ENHANCE: the demo with the enhanced look (`RefinedLook.enhance`).
+    private static func enhanced(_ demo: Demo) -> Demo {
+        var demo = demo
+        demo.parameters = RefinedLook.enhance(demo.parameters)
+        return demo
     }
 
     // MARK: Demos
@@ -429,15 +436,7 @@ final class MaterialBenchViewController: UIViewController {
     /// light plate, a thick lens pill over the orbs, and a smoky dome over
     /// glowing liquid. One light, from the upper left, for all of them.
     private static let chromeDemos: [Demo] = [
-        Demo(caption: String(localized: "Round button: polished glass edge"), parameters: {
-            var button = RefinedLook.panel(corner: 999, bezel: 15, dark: false)
-            button.refraction = 0.35
-            button.tint = GlassTint(red: 1, green: 1, blue: 1, strength: 0.15)
-            button.lighting = RefinedLook.lighting(dark: false, finish: .prismatic(spread: 1, saturation: 0.3, phase: 0.02))
-            button.lighting.reflection = 0.9
-            button.lighting.fresnel = 0.8
-            return button
-        }()),
+        Demo(caption: String(localized: "Round button: polished chrome ring with small glints"), parameters: RefinedLook.chromeRing(diameter: 84)),
         Demo(caption: String(localized: "Lens pill: thick edge, quiet pooled light, one soft highlight"), parameters: {
             var pill = RefinedLook.lens(bezel: 40, thickness: 34, dark: true)
             pill.light = pooledLight()

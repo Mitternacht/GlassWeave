@@ -223,6 +223,11 @@ fragment float4 study_pill_fragment(
         surface *= 1.0 - 0.34 * smoothstep(0.72, 1.0, d);
         // A soft sheen at the top left.
         surface += float3(0.9, 0.95, 1.0) * 0.05 * pow(lambert, 3.0);
+        // A thin light on the limb that faces the light: a crisp edge for the
+        // glass's bevel to bend (and, with dispersion, to fringe).
+        const float limbFacing = saturate(dot(normalize(d2 + 1e-4), studyLight));
+        const float limb = smoothstep(0.925, 0.972, d) * (1.0 - smoothstep(0.972, 0.995, d));
+        surface += float3(0.85, 0.90, 1.0) * 0.20 * limb * (0.2 + 0.8 * limbFacing * limbFacing);
         color = mix(color, surface, edge);
     }
     // The sphere field is soft: the whole picture settles toward its own
@@ -263,14 +268,14 @@ fragment float4 study_shelf_fragment(
     // The rainbow arc: a band centred far below the screen, so it crosses the
     // upper half as a wide arc. Red lies outside, violet inside, as in sunlight;
     // it is soft and it fades toward both ends.
-    const float2 arcCenter = float2(0.50 * size.x, 0.95 * size.y);
-    const float arcRadius = 0.54 * size.y;
-    const float arcWidth = 0.19 * size.x;
+    const float2 arcCenter = float2(0.50 * size.x, 0.99 * size.y);
+    const float arcRadius = 0.545 * size.y;
+    const float arcWidth = 0.23 * size.x;
     const float ring = (length(p - arcCenter) - arcRadius) / arcWidth + 0.5;     // 0 inner ... 1 outer
-    const float arcFade = smoothstep(0.0, 0.25, 1.0 - abs(uv.x - 0.5) * 1.25);
+    const float arcFade = smoothstep(0.0, 0.2, 1.0 - abs(uv.x - 0.5) * 1.05);
     const float band = smoothstep(0.0, 0.22, ring) * smoothstep(1.0, 0.78, ring);
     const float3 spectrum = studyFilm(0.70 - ring * 0.62);
-    color = mix(color, color * 0.35 + spectrum * 0.90, band * arcFade * 0.50);
+    color = mix(color, color * 0.35 + spectrum * 0.95, band * arcFade * 0.78);
     // A wide halo around the arc.
     const float halo = exp(-pow((ring - 0.5) * 1.5, 2.0));
     color += float3(0.18, 0.15, 0.20) * halo * arcFade * 0.18;

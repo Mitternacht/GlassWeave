@@ -89,17 +89,18 @@ final class ShelfStudyViewController: StudyViewController {
 
     override func panels(at time: Double) -> [GlassPanel] {
         guard shelfAnchor.bounds.width > 0 else { return [] }
-        var parameters = RefinedLook.lens(corner: 999, bezel: 28, thickness: 26, dark: false)
-        parameters.lens.dispersion = 0.42
-        parameters.lens.dispersionTaps = .sixTap
+        // ENHANCE: a thick bevel with visible six-tap dispersion over a frost
+        // that is clear at the rim, so the rainbow and the pebbles bend sharply
+        // at the edge and soften toward the middle.
+        var parameters = RefinedLook.enhancedLens(corner: 999, bezel: 30, thickness: 34, dispersion: 0.7, dark: false)
         parameters.tint = GlassTint(red: 0.86, green: 0.92, blue: 1.0, strength: 0.16)
-        parameters.lighting.fresnel = 0.75
-        parameters.lighting.specular = 0.62
+        parameters.lighting.fresnel = 0.8
+        parameters.lighting.specular = 0.66
         // An even frost, and a scrim over the title and the buttons.
         let textRect = frame(of: titleLabel).union(frame(of: controls)).insetBy(dx: -10, dy: -8)
         parameters.frost = GlassFrost(
-            profile: .uniform, sigma: 6, grain: 0.04, thickness: 0.4, saturation: 1.12, brightness: 1.04
-        ).legibility(text: .white, contrast: 3.5, rect: textRect, feather: 30)
+            profile: .clearRim, sigma: 8, transition: 30, grain: 0.06, thickness: 0.3, saturation: 1.15, brightness: 1.03
+        ).legibility(text: .white, contrast: 3.0, rect: textRect, feather: 30)
         return [GlassPanel(frame: frame(of: shelfAnchor), parameters: parameters)]
     }
 

@@ -1431,6 +1431,82 @@ static float3 gw_refined_lines(float3 N, float depth, constant GWGlassUniforms &
     return energy * mask;
 }
 
+/// The refined look's optional enhancements (`GlassLighting.edgeDepth`,
+/// `.banding`, `.glints`). The host packs them as three 8-bit fields in
+/// `lighting.prism.w`, which was zero padding that nothing read (the record's
+/// layout is unchanged), and zero when none is on, so a panel without them
+/// takes none of the paths below and is drawn as before.
+struct GWEnhance {
+    float depth;
+    float banding;
+    float glints;
+};
+
+static GWEnhance gw_enhance(constant GWLightingUniforms &lighting) {
+    GWEnhance e;
+    const uint packed = uint(max(lighting.prism.w, 0.0) + 0.5);
+    e.depth = float(packed & 255u) * (1.0 / 255.0);
+    e.banding = float((packed >> 8) & 255u) * (1.0 / 255.0);
+    e.glints = float((packed >> 16) & 255u) * (1.0 / 255.0);
+    return e;
+}
+
+/// The thick slab (`edgeDepth`): across the bevel the glass is deeper, a
+/// darker body, toward the side away from the light, and carries a faint inner
+/// light on the lit side, both in the tilt window between the flat top and the
+/// outline hairline. Inside the light model's band only.
+static float3 gw_enhance_slab(
+    float3 glass, float3 N, float depth, float bandMask, constant GWLightingUniforms &lighting, thread float &touched)
+{
+    float lit, back;
+    gw_refined_facing(N, lighting.edgeDirection, lit, back);
+    const float tilt = 1.0 - N.z;
+    const float wall = smoothstep(0.02, 0.32, tilt) * (1.0 - 0.45 * smoothstep(0.7, 0.95, tilt));
+    const float away = 1.0 - lit;
+    const float darkening = depth * 0.52 * wall * (0.16 + 0.84 * away) * bandMask;
+    glass *= 1.0 - darkening;
+    const bool dark = lighting.environment == GWLightingEnvironmentStudioDark;
+    const float3 sky = dark ? float3(0.52, 0.55, 0.64) : float3(0.97, 0.975, 1.0);
+    const float inner = gw_refined_bump(tilt, 0.15, 0.15);
+    const float light = depth * (dark ? 0.20 : 0.13) * inner * lit * bandMask;
+    glass += (1.0 - glass) * sky * light;
+    touched = max(touched, max(darkening, light));
+    return glass;
+}
+
+/// Reflection bands of a polished rim (`banding`): the metal is multiplied by
+/// stripes that are even in the surface angle, as a ring that reflects a studio
+/// of alternating light and dark panels, a little brighter toward the light.
+static float3 gw_enhance_bands(float3 metal, float3 N, float banding, float lit) {
+    const float theta = acos(clamp(N.z, 0.0, 1.0));
+    const float stripe = 0.5 + 0.5 * cos(theta * 10.0 - 1.4);
+    const float shaped = 0.08 + 1.6 * smoothstep(0.15, 0.85, stripe);
+    return metal * mix(1.0, shaped * (0.8 + 0.5 * lit), banding);
+}
+
+/// Small glints of a polished rim (`glints`): narrow lobes around the rim at
+/// fixed angles from the key light (one facing it, a weaker opposite, two faint
+/// at the sides) in a narrow window of the surface tilt, in linear light
+/// before the knee. White for chrome; the thin-film hue turns across each glint
+/// under the prismatic finish.
+static float3 gw_enhance_glints(float3 N, float glints, constant GWLightingUniforms &lighting) {
+    const float tilt = 1.0 - N.z;
+    float t = precise::atan2(N.x, -N.y) * (0.5 / M_PI_F) - lighting.azimuth * (0.5 / M_PI_F);
+    t -= round(t);
+    const float g0 = exp(-pow(t / 0.04, 2.0));
+    const float g1 = 0.6 * exp(-pow((abs(t) - 0.5) / 0.06, 2.0));
+    const float g2 = 0.35 * (exp(-pow((t - 0.26) / 0.04, 2.0)) + exp(-pow((t + 0.26) / 0.04, 2.0)));
+    const float window = gw_refined_bump(tilt, 0.3, 0.2);
+    float3 color = float3(1.0);
+    if (lighting.finish == GWLightingFinishPrismatic) {
+        const float hue = lighting.prism.z + 2.6 * tilt + 0.9 * t;
+        color = gw_light_film(hue, max(lighting.prism.y, 0.7));
+    } else {
+        color = mix(float3(1.0), lighting.tint.xyz, 0.5);
+    }
+    return color * (glints * 1.9 * (g0 + g1 + g2) * window);
+}
+
 /// The refined edge reflection: a smooth gradient, sky toward the light and
 /// floor away from it, mixed in by a soft Fresnel term, so the rim reads as
 /// the edge of a thick clear body. The chrome finishes add one soft reflective
@@ -1475,12 +1551,20 @@ static float3 gw_refined_edge(
     const float wall = smoothstep(0.45, 0.85, tilt);
     const float3 wallColor = floorColor * (dark ? 1.0 : 0.62) * (0.7 + 0.6 * lit);
     float3 metal = mix(reflected * (0.75 + 0.25 * band), wallColor, wall) * lighting.tint.xyz;
+    const GWEnhance enhance = gw_enhance(lighting);
+    if (enhance.banding > 0.0) {
+        metal = gw_enhance_bands(metal, N, enhance.banding, lit);
+    }
     if (lighting.finish == GWLightingFinishPrismatic) {
         const float turn = precise::atan2(N.x, -N.y) * (0.5 / M_PI_F) - lighting.azimuth * (0.5 / M_PI_F);
         const float hue = lighting.prism.z + lighting.prism.x * (turn - floor(turn)) + 0.5 * (1.0 - N.z);
         metal *= mix(float3(1.0), gw_light_film(hue, lighting.prism.y), saturate(band + 0.5 * wall));
     }
-    const float alpha = lighting.reflection * smoothstep(0.01, 0.10, tilt) * (0.30 + 0.42 * band + 0.38 * wall) * bandMask;
+    float alpha = lighting.reflection * smoothstep(0.01, 0.10, tilt) * (0.30 + 0.42 * band + 0.38 * wall) * bandMask;
+    if (enhance.banding > 0.0) {
+        // Stripes need a more opaque band to read; the glass still shows through.
+        alpha = min(alpha * (1.0 + 0.55 * enhance.banding), 0.9 * bandMask);
+    }
     glass = mix(glass, metal, alpha);
     touched = max(touched, alpha);
     return glass;
@@ -1511,6 +1595,10 @@ static float3 gw_light_model(
 
     // Reflections.
     if (refined) {
+        const GWEnhance enhance = gw_enhance(lighting);
+        if (enhance.depth > 0.0 && bandMask > 0.0) {
+            glass = gw_enhance_slab(glass, N, enhance.depth, bandMask, lighting, touched);
+        }
         glass = gw_refined_edge(glass, N, depth, bandMask, uniforms, touched);
     } else if (lighting.reflection > 0.0 && bandMask > 0.0) {
         const float3 R = float3(2.0 * N.z * N.xy, 2.0 * N.z * N.z - 1.0);
@@ -1558,6 +1646,10 @@ static float3 gw_light_model(
     float3 energy = float3(0.0);
     if (refined) {
         energy = gw_refined_lines(N, depth, uniforms);
+        const GWEnhance enhance = gw_enhance(lighting);
+        if (enhance.glints > 0.0 && bandMask > 0.0 && (lighting.finish == GWLightingFinishChrome || lighting.finish == GWLightingFinishPrismatic)) {
+            energy += gw_enhance_glints(N, enhance.glints, lighting) * bandMask;
+        }
     } else {
         energy = gw_light_lines(N, depth, uniforms);
     }

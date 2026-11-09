@@ -935,3 +935,99 @@ pools inside the body, the polished edge carries a faint thin-film glint.
   and no numeric test (fast pass).
 - **The classic model is untouched** and still draws gray wedges when asked
   for; it exists for byte-compatibility.
+
+### Enhanced pass (ENHANCE)
+
+> Experimental. `GlassLighting.edgeDepth`, `.banding`, `.glints` and
+> `GlassLighting.enhanced(azimuth:environment:finish:)` may change before a
+> stable release.
+
+The refined look made the glass calm, and in the side-by-side captures it read
+flat and grey next to Apple's. This pass adds richness without bringing back
+the bubbly look: the same one light, a thin rim, no halos, no strips, no
+glare dot. Everything is opt-in; with the new values at 0 the refined look is
+drawn exactly as before (the classic model never reads them).
+
+**What looked flat (the baseline captures, one line each).**
+
+| Picture | Flat, grey, thin or weak |
+| --- | --- |
+| Pearl study | The ring was a thin pale band with soft grey bands and no glints; the milky capsule was white on white with no thickness. |
+| Pill study (the best one) | The bevel bent little, the pooled light was a thin pastel line (added light over a dark page washes out), and the shadow side of the rim looked like the lit side, so the slab did not read thick. |
+| Shelf study | A flat blue-grey body, the rainbow arc above the capsule instead of behind it, an even frost that blurred the rim too, so no dispersion was readable. |
+| Frost page | The capsule was a flat grey; only its ends showed the rainbow. |
+| Chrome page | A white-faced ring with a faint band, a smoky dome with a single hairline. |
+| Lens page | The bevel bent modestly and every body read flat. |
+| Versus screen | Our rims were thin and equal all round; the finish row's ring was a loud hologram (saturation 1). |
+
+**Shader (refined look only, inside the light model's band, so the legibility
+bound holds).** Three opt-in terms, in `Glass.metal` ("Enhanced edge"):
+
+- `edgeDepth` (0...1), the thick slab. Across the tilt window between the flat
+  top and the hairline the glass is darkened toward the side away from the
+  light (up to `0.52 × edgeDepth`, 16 % of that on the lit side) and carries a
+  faint inner light on the lit side (a soft bump in the tilt, `0.13` on light
+  pages, `0.20` on dark ones), so the shadow side reads as a deeper rim.
+- `banding` (0...1), for `.chrome` and `.prismatic`: the polished band is
+  multiplied by stripes that are even in the surface angle
+  (`acos(N.z)`, 10 radians per turn), and the band is more opaque so they read
+  (alpha up to `1.55×`, at most 0.9, the backdrop still shows through).
+- `glints` (0...1), for `.chrome` and `.prismatic`: narrow lobes around the rim
+  at fixed angles from the key light (one facing it, a weaker one opposite, two
+  faint ones at the sides) in a narrow window of the tilt, added through the
+  soft knee. White for chrome; the thin-film hue turns across each glint under
+  the prismatic finish.
+
+**Record layout unchanged.** The three values ride in `GWLightingUniforms.prism.w`,
+which was zero padding that no shader read, as three 8-bit fields of one
+exactly representable integer (depth bits 0 to 7, banding 8 to 15, glints 16
+to 23); the record stays 160 bytes with its offsets, and `GWGlassUniforms` stays
+1776 bytes (the layout tests are unchanged). The host packs them only for the
+refined look and only when one is nonzero. Normalization: a non-finite value is
+rejected with `GlassParameterError.nonFiniteLighting` naming the field
+(`.edgeDepth`, `.banding`, `.glints`); a finite value is clamped to 0...1.
+Accessibility: Reduce Transparency and Increase Contrast zero all three (the
+policy already removes the finish); Reduce Motion changes nothing (the glints
+move only when the key light does).
+
+**Demos and studies** (`RefinedLook.swift` holds the shared values;
+`enhance(_:)` upgrades a page's existing panel, `chromeRing(diameter:azimuth:)`
+is the polished ring):
+
+| Value | Before | Now |
+| --- | --- | --- |
+| Rim line and highlight (`fresnel`, `specular`) | 0.55 / 0.5 | at least 0.7 / 0.6 |
+| `edgeDepth` | 0 | 0.6 |
+| Lens (pill, shelf) | squircle 3, thickness 26, ior 1.45, offset 44, dispersion 0.3 to 0.42 | squircle 2.4, thickness 42 (34 on the shelf), ior 1.5, offset 64, six-tap dispersion 0.7 |
+| Lens on the other pages | as authored | thickness × 1.25, offset at least 64, six-tap dispersion at least 0.55 |
+| Shadow on dark pages | none | drop 7 pt, blur 18, 0.30, deep ink, a 1 pt contact line |
+| Pill pool | `.light` composite, intensity 1, reach 1.3, amber | `.paint` composite, intensity 0.7, reach 1.7, blue to violet to rose to coral |
+| Chrome ring | prismatic spread 2, saturation 0.75, light bevel | ring profile (center 6.5, width 11), thickness 14, prismatic spread 1.2 at saturation 0.3, `banding` 1, `glints` 0.9 |
+| Shelf frost | uniform, sigma 6, grain 0.04 | clear rim, sigma 8 over a 30 pt transition, grain 0.06 |
+| Shelf backdrop | arc above the capsule, faded ends, opacity 0.5 | arc through the capsule's upper half, wider, opacity 0.78, scrim 3:1 on the title (large text) |
+| Pill backdrop | soft limbs | a thin light on each sphere's lit limb, a crisp edge for the bevel to bend |
+| Versus finish row | spread 3, saturation 1 or 0.65 | spread 2, saturation 0.55 or 0.4 |
+
+**Result.** The pill study is still the calm picture it was, with a visibly
+thicker slab, a deeper pool and a soft drop shadow. The pearl ring reads as a
+polished chrome ring with stripes and small glints. The shelf shows the
+rainbow bending at a clear rim and softening through the frost. Captures
+(iPhone 18 Pro simulator, inspected, four rounds):
+`gw-29-study-{pearl,pill,shelf}-vs-native-*`, `gw-24b-frost-*` (the frost page),
+`gw-23-chrome-page-*`, `gw-22-lens-orbs-*`, `gw-29-versus-lens-light-*` and
+`gw-29-versus-pooled-finish-light-*`, replaced under the same names.
+
+**Limits.**
+
+- The lensing is far stronger on paper than in the pictures: the study
+  backdrops are soft, so the bend shows as a smear and the dispersion shows only
+  where a crisp edge (a sphere limb, a rainbow band) passes behind the bevel.
+- The ring's glints are small and quiet at 84 points; on a larger ring they
+  are easier to see. The stripes and glints are tuned by eye, no CPU mirror.
+- The other pages that call `RefinedLook.lens` or `panel` directly (shapes, the
+  vessel page and study, the paper desk, the comparison page) are unchanged,
+  and their captures are the REFINE ones.
+- The legibility scrim still turns a pale pebble under the shelf's title into
+  a grey-teal smudge, a little less than before (3:1 instead of 3.5:1).
+- Not tested: no new test; the frozen-baseline tests still pass because the
+  new terms are in the refined path only.

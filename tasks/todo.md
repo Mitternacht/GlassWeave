@@ -639,6 +639,32 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 - `Examples/GlassWeaveLab/GlassWeaveLab/RefinedLook.swift` (new), `MaterialBenchViewController.swift`, `ShapesBenchViewController.swift`, `BenchBackgrounds.metal`, `LabViewController.swift`
 - `docs/glass-optics.md`, `docs/evidence/captures/`
 
+## ENHANCE-LOOK: richer glass in Apple's restraint (after REFINE)
+
+**Description:** The Apple-grade pass made the glass calm but flat and grey next to Apple's. Make it "way more enhanced" while keeping the restraint: a thicker-reading bevel, deeper and cleaner color, depth, a stronger frost with a clear rim, a polished chrome ring, and dispersion readable through the shelf's frost. All opt-in; the off paths stay byte-identical.
+
+**Dependencies:** REFINE, GW-29. **Scope:** M, about 12 files, no new tests.
+
+**Acceptance criteria:**
+- [x] The baseline captures were reviewed beside the native glass and one line each on what was flat is in docs/glass-optics.md ("Enhanced pass").
+- [x] Three opt-in light terms exist (`edgeDepth`, `banding`, `glints`), packed into the zero padding `prism.w` (record sizes and offsets unchanged), normalized (non-finite rejected naming the field, finite clamped), zeroed by the Reduce Transparency and Increase Contrast policy.
+- [x] Studies and pages retuned through demo values: thicker lens with six-tap dispersion, deeper slab, saturated soft pooled tint, soft shadow on dark pages, frost with a clear rim, a polished chrome ring, the shelf's rainbow behind the capsule.
+- [x] Recaptured and inspected, four rounds; the captures replace the superseded ones under the same names.
+- [x] The off paths stay byte-identical: the new terms are only in the refined path and read only when nonzero; the frozen-baseline tests pass unmodified.
+- [ ] Numeric tests for the new terms (depth, bands, glints, the packing). (fast pass: not tested)
+- [ ] Accessibility captures of the new terms under Reduce Transparency and Increase Contrast. (fast pass: not tested)
+- [ ] The vessel study and bench page enhanced. (not touched: another agent works on them)
+- [ ] Device sign-off, M5 cost of the extra terms. (device only / fast pass: not run)
+
+**Evidence (2026-11-09, fast pass):** What exists: `GlassLighting.edgeDepth`, `.banding`, `.glints` and `GlassLighting.enhanced(azimuth:environment:finish:)`; the shader's "Enhanced edge" terms in `Glass.metal` (refined look only); the policy rows in `GlassAccessibilityPolicy.presentedLighting`; the lab's `RefinedLook.enhancedLighting/enhancedGrounding/enhancedPanel/enhancedLens/enhance/chromeRing`, retuned pearl, pill and shelf studies and their backdrops, and the lens, chrome, frost and versus pages. Design, the flat-picture list, every changed value and the limits: docs/glass-optics.md "Enhanced pass (ENHANCE)". Safety: no new test; end batch, once: package scheme on My Mac 206 passed, 0 failed (`xcresulttool` summary); on the iPhone 18 Pro simulator 287 passed, 1 failed (`EnhancedNativeGlassViewTests` "The pulse resumes where it stopped", the same wall-clock pulse timing check that failed once in REFINE, nothing to do with the light model) and that suite rerun alone passed 21 of 21, 0 failed. No lab UI test was added or changed, so none was run. Captures (iPhone 18 Pro simulator, inspected, four rounds): `gw-29-study-{pearl,pill,shelf}-vs-native-*`, `gw-24b-frost-iphone18pro-sim.png`, `gw-23-chrome-page-*`, `gw-22-lens-orbs-*`, `gw-29-versus-{lens,pooled-finish}-light-*`. Limits: the Xcode MCP bridge could not open a workspace, so `xcodebuild` was used; soft backdrops hide most of the lensing, so the bend reads as a smear; glints on an 84 point ring are small and quiet; tuned by eye, no CPU mirror; the shapes, paper desk, comparison and vessel pages keep the REFINE values.
+
+**Verification:** `xcodebuild test` for the package scheme on My Mac and the iPhone 18 Pro simulator; by-eye comparison of the captures.
+
+**Likely files:**
+- `Sources/GlassWeave/GlassLighting.swift`, `Shaders/Glass.metal`, `GlassWeaveShaderTypes.h` (comment only), `Sources/GlassWeaveUIKit/GlassAccessibilityPolicy.swift`
+- `Examples/GlassWeaveLab/GlassWeaveLab/RefinedLook.swift`, `MaterialBenchViewController.swift`, `VersusCase.swift`, `Studies/{Pearl,Pill,Shelf}StudyViewController.swift`, `Studies/StudyBackgrounds.metal`
+- `docs/glass-optics.md`, `docs/evidence/captures/`
+
 ## GW-27: Non-blocking presentation, frame pacing and quality tiers (closes GW-04 item 3)
 
 **Description:** No GlassWeave draw stalls the main thread waiting for a drawable. Interaction frames can request up to 120 Hz while ambient motion stays calm, native views over moving glass stay in step, and a quality setting trades extras for frame time.

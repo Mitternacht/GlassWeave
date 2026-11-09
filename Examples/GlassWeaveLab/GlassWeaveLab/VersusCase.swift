@@ -211,7 +211,8 @@ extension VersusCase {
         VersusCase(
             id: id, title: title, symbol: symbol, nativeCaption: nativeCaption, weaveCaption: weaveCaption,
             native: Native(tint: tint, glow: nil, style: style),
-            weave: make(false), height: height, weaveDark: make(true)
+            weave: RefinedLook.enhance(make(false), addShadow: false), height: height,
+            weaveDark: RefinedLook.enhance(make(true), addShadow: false)
         )
     }
 
@@ -279,7 +280,7 @@ extension VersusCase {
             )
             parameters.lighting = GlassLighting.refined(
                 azimuth: RefinedLook.azimuth, environment: .studioLight,
-                finish: .prismatic(spread: 3, saturation: dark ? 0.65 : 1, phase: 0.06)
+                finish: .prismatic(spread: 2, saturation: dark ? 0.4 : 0.55, phase: 0.06)
             )
             parameters.lighting.fresnel = 0.9
             parameters.lighting.specular = 0.95

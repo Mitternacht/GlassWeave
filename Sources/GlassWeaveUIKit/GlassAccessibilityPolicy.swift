@@ -173,6 +173,11 @@ public enum GlassAccessibilityPolicy {
         presented.specular = 0
         presented.rim = nil
         presented.bloom = 0
+        // The enhancements (thick-slab shading, polished bands and glints) are
+        // decoration that could sit under text: removed with the finish.
+        presented.edgeDepth = 0
+        presented.banding = 0
+        presented.glints = 0
         // A hairline that contrasts with the surface, so the boundary shows
         // on an opaque or white surface too.
         presented.crispOutline = true

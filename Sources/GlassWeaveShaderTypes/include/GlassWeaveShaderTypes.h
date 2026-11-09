@@ -222,7 +222,11 @@ typedef enum GWLightingEnvironment {
 ///   the GW-23 model, 1 the refined (Apple-grade) look. The layout is
 ///   unchanged: `w` was zero padding that the GW-23 shader never reads.
 /// - `prism`: the prismatic finish's spread in turns of hue around the rim
-///   (`x`), saturation 0...1 (`y`), phase in turns (`z`), `w` zero.
+///   (`x`), saturation 0...1 (`y`), phase in turns (`z`). `w` was zero padding
+///   that no shader read; with the refined look (`tint.w` 1) it carries the
+///   optional enhancements as one exactly representable integer of three 8-bit
+///   fields (0...255 for 0...1): edge depth in bits 0 to 7, polished banding in
+///   8 to 15, glints in 16 to 23. Zero when none is on. The layout is unchanged.
 /// - `finish`: a `GWLightingFinish` value. `environment`: a
 ///   `GWLightingEnvironment` value.
 /// - `azimuth`: the key light's azimuth in radians (0 at the top, clockwise),
