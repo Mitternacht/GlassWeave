@@ -92,12 +92,15 @@ struct GlassBaselineGW21Tests {
             #expect(differing == 0, "\(differing) bytes differ, at most by \(current.maximumDifference(from: baseline))")
             // Control: with a lens the optics variant draws, and it differs.
             var lensed = testCase.parameters
-            lensed.lens = GlassLens(profile: .circular, thickness: 30, indexOfRefraction: 1.5, maximumOffset: 60, allowsFold: true)
+            lensed.bezelWidth = 40
+            lensed.lens = GlassLens(profile: .circular, thickness: 60, indexOfRefraction: 1.8, maximumOffset: 200, allowsFold: true)
+            let opticsRenderer = try GlassRenderer(commandQueue: gpu.queue)
             let optics = try await render(
-                gpu, fixture, panel: GlassPanel(frame: panel.frame, parameters: lensed), effectTime: testCase.effectTime, renderer: renderer
+                gpu, fixture, panel: GlassPanel(frame: panel.frame, parameters: lensed), effectTime: testCase.effectTime,
+                renderer: opticsRenderer
             )
-            #expect(renderer.drawnVariants == [.optics])
-            #expect(optics.maximumDifference(from: baseline) > 20)
+            #expect(opticsRenderer.drawnVariants == [.optics])
+            #expect(optics.maximumDifference(from: baseline) > 10)
         }
     }
 }

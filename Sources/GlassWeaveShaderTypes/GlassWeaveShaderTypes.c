@@ -13,7 +13,7 @@ _Static_assert(offsetof(GWBackgroundUniforms, uvOrigin) == 16, "uvOrigin offset"
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMin) == 24, "sampleClampMin offset");
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMax) == 32, "sampleClampMax offset");
 
-_Static_assert(sizeof(GWGlassUniforms) == 1056, "GWGlassUniforms size");
+_Static_assert(sizeof(GWGlassUniforms) == 1152, "GWGlassUniforms size");
 _Static_assert(_Alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 _Static_assert(offsetof(GWGlassUniforms, background) == 0, "background offset");
 _Static_assert(offsetof(GWGlassUniforms, targetSize) == 40, "targetSize offset");
@@ -78,7 +78,15 @@ _Static_assert(offsetof(GWGlassUniforms, lensProfileA) == 1036, "lensProfileA of
 _Static_assert(offsetof(GWGlassUniforms, lensProfileB) == 1040, "lensProfileB offset");
 _Static_assert(offsetof(GWGlassUniforms, lensDispersion) == 1044, "lensDispersion offset");
 _Static_assert(offsetof(GWGlassUniforms, lensTapCount) == 1048, "lensTapCount offset");
-_Static_assert(offsetof(GWGlassUniforms, padding11) == 1052, "padding11 offset");
+_Static_assert(offsetof(GWGlassUniforms, lensInlayCount) == 1052, "lensInlayCount offset");
+_Static_assert(offsetof(GWGlassUniforms, lensInlays) == 1056, "lensInlays offset");
+_Static_assert(sizeof(GWLensInlay) == 48, "GWLensInlay size");
+_Static_assert(_Alignof(GWLensInlay) == 16, "GWLensInlay alignment");
+_Static_assert(offsetof(GWLensInlay, geometry) == 0, "geometry offset");
+_Static_assert(offsetof(GWLensInlay, shape) == 16, "shape offset");
+_Static_assert(offsetof(GWLensInlay, profile) == 32, "profile offset");
+_Static_assert(offsetof(GWLensInlay, padding0) == 36, "padding0 offset");
+_Static_assert(offsetof(GWLensInlay, padding2) == 44, "padding2 offset");
 _Static_assert(GWLensProfileRim == 0 && GWLensProfileCircular == 1 && GWLensProfileSquircle == 2 && GWLensProfileChamfer == 3 && GWLensProfileDome == 4 && GWLensProfileRing == 5, "GWLensProfile values");
 
 _Static_assert(sizeof(GWLightEmitter) == 112, "GWLightEmitter size");

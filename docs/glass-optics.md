@@ -129,3 +129,155 @@ and a four-corner field. Captures are in `docs/evidence/captures/gw-21-*`.
   (GW-22).
 - **Not done:** the CPU mirror, the property sweeps and the M5 cost run (see
   the checklist).
+
+## GW-22: Thick-lens optics, chromatic dispersion and inlays
+
+**Implemented** (fast pass; see the checklist for what is not tested).
+
+### What it is
+
+`GlassParameters.lens` (`GlassLens`, default `.none`) turns a panel from a
+thin rim into a **piece of glass with a thickness**: a height field with an
+index of refraction. Content bends hard toward the outline, a dome magnifies,
+a ring stands up at its edge, bright edges split into colored fringes, and a
+dome button can stand on a pill as part of the same glass. Apple's glass is
+a fixed, system-defined shape; this is an authored one. With `.none` (the
+`.rim` profile, no dispersion, no inlays) the panel is drawn by the `base`
+pipeline variant, which is the shader of GW-21 byte for byte.
+
+### The shape-field interface
+
+The optics ask a panel's shape for four things and nothing else
+(`GlassShapeField.swift` on the CPU, `GWShapeSample` and
+`gw_shape_rounded_rect` in `Glass.metal`):
+
+| Quantity | Meaning |
+| --- | --- |
+| `distance` | Signed distance to the outline in pixels, negative inside. Decides coverage. |
+| `normal` | The unit direction in which `lensDepth` falls (outward). |
+| `lensDepth` | Pixels inside the shape. **C1**: the inward distance of the rounded rectangle of radius `max(cornerRadius, bevel)` (at most the inscribed radius), the field `normalRadius` already uses, so its iso-contours keep a corner radius of at least the bevel and the height has no crease along the corner diagonals even when the bevel is wider than the corner. |
+| `inscribedRadius` | Radius of the largest inside circle. A dome's bevel. |
+
+The rounded rectangle is the only kind today. GW-26 adds ellipses, squircles
+and blobs by returning the same four values.
+
+### Profiles and the math
+
+`GlassLens.profile`: `.rim` (default: the original refraction, uses
+`refraction` and `bezelWidth`), `.circular`, `.squircle(exponent:)`,
+`.chamfer`, `.dome`, `.ring(center:width:)`. For every profile but `.rim`,
+`bezelWidth` is the bevel width and `refraction` is ignored (a dome's bevel is
+the inscribed radius; a ring's is its outer edge).
+
+1. `h = H s(t)`, `t = lensDepth / bevel`, `H` the thickness. The profiles:
+   circular `sqrt(1 - (1 - t)^2)`; squircle `(1 - (1 - t)^n)^(1/n)`;
+   chamfer a straight face (slope 1.18) that rounds into the top at
+   `t = 0.7`; ring `sqrt(1 - ((t - c) / w)^2)`, a bump.
+2. `N = normalize(-grad h, 1)`, `grad h = H s'(t) / bevel` along the inward
+   direction; the slope is clamped to 12 (the circular profile is vertical at
+   the outline, where `h` is 0 anyway).
+3. `T = refract(-z, N, 1 / ior)`; the sample moves by `T.xy / (-T.z) * h`
+   toward the interior, scaled by `lensOffsetScale` and at most
+   `maximumOffset` long. IOR 1 leaves the ray straight.
+4. **Fold.** With `allowsFold == false` the CPU samples the profile along the
+   bevel and picks the scale (at most 1) that keeps the sampled depth
+   `d + offset(d)` rising with slope of at least 0.05, so the content is
+   magnified or compressed but never mirrored. With `allowsFold == true` a
+   thick bevel mirrors the content at the edge, as in the fold demo on the
+   lab's lens page.
+5. A ring narrower than 2 pixels is widened to 2.
+
+### Dispersion
+
+`lens.dispersion` 0...1 and `lens.dispersionTaps` (`.threeTap`, `.sixTap`).
+A wavelength `x` (-1 red to +1 blue) sees the index
+`ior + x * dispersion * 0.12`; on the original rim profile, the rim's
+displacement is scaled by `1 + x * dispersion * 0.35`. Three taps give red,
+green and blue their own sample. Six taps sample wavelengths
+-1, -0.6, -0.2, 0.2, 0.6, 1 and blend them with triangle weights centered on
+red, green and blue, normalized so each channel's weights sum to 1 (11/21,
+7/21, 3/21 for red; 0.15, 0.35, 0.35, 0.15 for green; mirrored for blue), so
+white and gray stay neutral. Where red and blue land less than 0.25 pixel
+apart (the flat middle) there is one sample. Every sample keeps the
+valid-rectangle clamp. A dispersion above 0 on the `.rim` profile is the
+rim's displacement split by wavelength, so the default panel can have fringes
+too.
+
+### Inlays
+
+`lens.inlays` (at most 2): a bump of glass added to the panel's height field,
+at `x`, `y` points from the panel's center, with a `radius`, a `height`, a
+profile (`.dome` default; `.circular`, `.squircle`, `.chamfer`, `.ring`) and
+a `rimLine`. The height and the slope add to the host's, so the dome bends
+what is behind it and what the pill's thickness bends: a button on a pill in
+one panel and one pass, with no overlapping quads (the quad is unchanged).
+The height is 0 on the inlay's base, so height and offset are C0 across it;
+outside its radius the field is exactly the host's. The `rimLine` is a line
+about 1.5 px wide at the base plus a brighter inner bevel, both lit from the
+upper left, and exactly 0 beyond half a pixel outside the base. The inlay
+is a bump of the same glass, not a separate object refracting the pill
+(stacking is Later).
+
+### Pipelines
+
+Function constant 0 (`gw_optics_constant`) selects the `optics` variant. Both
+`base` and `optics` are built at initialization; `GlassRenderer.drawnVariants`
+reports the variant that drew each panel of the last draw and
+`pipelineCreationSeconds` the build time. A panel library without the
+constant (a frozen earlier shader) has the one pipeline.
+
+### GPU record
+
+`GWGlassUniforms` grows from 1008 to 1152 bytes, append-only: a 48-byte lens
+header at 1008 (profile, thickness, bevel, field radius, IOR, maximum offset,
+offset scale, two profile parameters, dispersion, tap count, inlay count) and
+two `GWLensInlay` records (48 bytes) at 1056. Sizes and offsets are asserted in
+C, MSL and Swift (`ShaderLayoutTests`, with a distinctive-value round trip
+through `LayoutProbe.metal`). The full record stays bound to both stages.
+
+### Normalization
+
+A non-finite value in the lens or in any inlay (also past the second) throws
+`GlassParameterError.nonFiniteLens(_:)` naming a `GlassLens.Field`. Finite
+values clamp: thickness 0...64 pt, IOR 1...2.4, maximum offset 0...512 pt,
+dispersion 0...1, squircle exponent 1...8, ring center and width 0 to half
+the shorter side; per inlay, position within +-4096 pt, radius 0 to half the
+shorter side, height 0...64 pt, rim line 0...1; inlays with the `.rim`
+profile or radius 0 are dropped; at most two are kept.
+`GlassRenderer.panel` reports the lens that is drawn.
+
+### Accessibility
+
+| Setting | Lens |
+| --- | --- |
+| Reduce Transparency | removed: no profile, no dispersion, no inlays (the opaque surface) |
+| Increase Contrast | dispersion removed; the profile and the inlays are kept (samples stay within the source's own colors) |
+| Reduce Motion | no change; the lens is static |
+
+### Lab
+
+`-lab.lens YES` (or the lab's "Thick lens" button) opens the lens page;
+`-lab.lensBackdrop orbs|dots|checkerboard|ribbons` picks the backdrop (default
+orbs, a new original bench page of shaded spheres whose colored edges show the
+dispersion; the dot grid shows the magnification). Panels: a squircle-bevel
+pill with pooled light (GW-21), six-tap dispersion and an inlaid dome button;
+a dome marble with three-tap dispersion; a ring; and the fold-off and fold-on
+pair. Captures are in `docs/evidence/captures/gw-22-*`.
+
+### Deviations and limits
+
+- **No `GlassOptics.h`.** The optics live in `Glass.metal`, which is the one
+  shader file the package compiles; a header there would only be a second
+  file to keep in step. The profile functions are mirrored by
+  `GlassLensModel.swift` (used for the fold scale and as a CPU reference of
+  the height field), not compared with readback.
+- **Rim line, not a light model.** The inlay's rim line and the panel's edge
+  highlight are the only shading; Fresnel, specular streaks and studio
+  reflections are GW-23.
+- **Fold scale is a 1-D analysis** along a straight bevel (256 samples); a
+  corner or an inlay on a thick pill is checked the same way, with the host
+  height as the inlay's base. It is not proven for every 2-D configuration.
+- **Not done:** the CPU mirror comparison, the corner-crease, monotonicity,
+  centroid and magnification tests, dispersion tests beyond the lab pictures,
+  the pipeline census, the temporal stability run and the M5 cost runs (see
+  the checklist).

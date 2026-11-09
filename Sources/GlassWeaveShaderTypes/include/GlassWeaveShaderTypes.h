@@ -153,6 +153,27 @@ typedef struct GWLightEmitter {
     uint32_t seed;
 } GWLightEmitter;
 
+/// One lens inlay (GW-22): a bump of glass added to the panel's height field,
+/// such as a dome button standing on a pill. Lengths are in pixels.
+///
+/// - `geometry`: the center in pixels from the panel's center, y down (`xy`),
+///   the radius (`z`), and the height of the bump (`w`).
+/// - `shape`: the bevel width, measured inward from the base (`x`), the
+///   profile's two parameters (`yz`, as for `GWLensProfile`), and the
+///   strength of the rim line, 0...1 (`w`).
+/// - `profile`: a `GWLensProfile` value; 0 is no inlay.
+///
+/// Layout in bytes: geometry 0, shape 16, profile 32, explicit padding 36,
+/// 40, 44 (set to zero). Size 48, alignment 16, stride 48.
+typedef struct GWLensInlay {
+    simd_float4 geometry;
+    simd_float4 shape;
+    uint32_t profile;
+    uint32_t padding0;
+    uint32_t padding1;
+    uint32_t padding2;
+} GWLensInlay;
+
 /// Per-draw parameters for one rounded glass panel, in target pixels.
 ///
 /// Coordinate space: target pixels, origin at the top-left corner of the
@@ -262,6 +283,8 @@ typedef struct GWLightEmitter {
 ///   0 draws no dispersion.
 /// - `lensTapCount`: the wavelength samples per pixel where the colors
 ///   separate: 0 (no dispersion), 3 or 6.
+/// - `lensInlayCount`: 0 to 2.
+/// - `lensInlays`: the inlays; unused ones are zero.
 ///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
@@ -283,9 +306,9 @@ typedef struct GWLightEmitter {
 /// to zero), lightEmitters 560 (4 × 112 bytes); lensProfile 1008,
 /// lensThickness 1012, lensBevel 1016, lensFieldRadius 1020, lensIOR 1024,
 /// lensMaximumOffset 1028, lensOffsetScale 1032, lensProfileA 1036,
-/// lensProfileB 1040, lensDispersion 1044, lensTapCount 1048, explicit padding
-/// 1052 (set to zero).
-/// Size 1056, alignment 16, stride 1056.
+/// lensProfileB 1040, lensDispersion 1044, lensTapCount 1048, lensInlayCount 1052,
+/// lensInlays 1056 (2 × 48 bytes).
+/// Size 1152, alignment 16, stride 1152.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
     simd_float2 targetSize;
@@ -352,7 +375,8 @@ typedef struct GWGlassUniforms {
     float lensProfileB;
     float lensDispersion;
     uint32_t lensTapCount;
-    float padding11;
+    uint32_t lensInlayCount;
+    GWLensInlay lensInlays[2];
 } GWGlassUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

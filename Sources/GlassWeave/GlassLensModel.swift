@@ -80,9 +80,11 @@ enum GlassLensModel {
     /// that may not fold never turns the content back: it only compresses or
     /// magnifies it. The profile is sampled along a straight bevel; a
     /// curved one (a corner, a dome) has the same radial profile.
+    /// `baseHeight` is glass the profile stands on (an inlay on a thick
+    /// panel).
     static func foldFreeScale(
         profile code: UInt32, a: Double, b: Double, thickness: Double, bevel: Double,
-        indexOfRefraction ior: Double, maximumOffset: Double
+        indexOfRefraction ior: Double, maximumOffset: Double, baseHeight: Double = 0
     ) -> Double {
         guard thickness > 0, bevel > 0, ior > 1 else { return 1 }
         let count = 256
@@ -93,7 +95,7 @@ enum GlassLensModel {
             for index in 1...count {
                 let t = Double(index) / Double(count)
                 let (height, slope) = profile(code, t: t - 0.5 / Double(count), a: a, b: b)
-                let raw = offset(height: thickness * height, slope: thickness * slope / bevel, indexOfRefraction: ior)
+                let raw = offset(height: baseHeight + thickness * height, slope: thickness * slope / bevel, indexOfRefraction: ior)
                 let current = min(raw * scale, maximumOffset)
                 if index > 1 {
                     steepest = max(steepest, (previous - current) / (bevel / Double(count)))
@@ -104,6 +106,36 @@ enum GlassLensModel {
             scale *= (1 - minimumDepthSlope) / steepest * 0.98
         }
         return scale
+    }
+}
+
+extension GlassPanelGeometry.Lens.Inlay {
+    /// Resolves a normalized inlay. The bevel is the whole radius for every
+    /// profile but the ring, which is measured inward from the base.
+    init(_ inlay: GlassLens.Inlay, displayScale: Double) {
+        let radius = inlay.radius * displayScale
+        var code: UInt32 = GWLensProfileCircular.rawValue
+        var bevel = radius
+        var a = 0.0, b = 0.0
+        switch inlay.profile {
+        case .rim, .circular: break
+        case .dome: code = GWLensProfileDome.rawValue
+        case let .squircle(exponent):
+            code = GWLensProfileSquircle.rawValue
+            a = exponent
+        case .chamfer: code = GWLensProfileChamfer.rawValue
+        case let .ring(center, width):
+            code = GWLensProfileRing.rawValue
+            let widthPixels = max(width * displayScale, 2)
+            let centerPixels = max(center * displayScale, widthPixels / 2)
+            bevel = min(centerPixels + widthPixels / 2, radius)
+            a = min(centerPixels / bevel, 1)
+            b = widthPixels / 2 / bevel
+        }
+        self.init(
+            center: SIMD2(inlay.x, inlay.y) * displayScale, radius: radius, height: inlay.height * displayScale,
+            profileCode: code, bevel: bevel, profileA: a, profileB: b, rimLine: inlay.rimLine
+        )
     }
 }
 
@@ -125,6 +157,37 @@ extension GlassPanelGeometry {
         var dispersion: Double
         /// 0 (no dispersion), 3, or 6.
         var tapCount: UInt32
+        /// The inlays in target pixels, at most two.
+        var inlays: [Inlay]
+
+        /// One inlay in target pixels, relative to the panel's center.
+        struct Inlay: Equatable {
+            var center: SIMD2<Double>
+            var radius: Double
+            var height: Double
+            var profileCode: UInt32
+            var bevel: Double
+            var profileA: Double
+            var profileB: Double
+            var rimLine: Double
+
+            /// The record the shader reads.
+            var record: GWLensInlay {
+                GWLensInlay(
+                    geometry: SIMD4<Float>(Float(center.x), Float(center.y), Float(radius), Float(height)),
+                    shape: SIMD4<Float>(Float(bevel), Float(profileA), Float(profileB), Float(rimLine)),
+                    profile: profileCode, padding0: 0, padding1: 0, padding2: 0
+                )
+            }
+
+            static let empty = GWLensInlay(geometry: .zero, shape: .zero, profile: 0, padding0: 0, padding1: 0, padding2: 0)
+        }
+
+        /// The two inlay records the shader reads; unused ones are zero.
+        var inlayRecords: (GWLensInlay, GWLensInlay) {
+            let records = inlays.map(\.record) + [Inlay.empty, Inlay.empty]
+            return (records[0], records[1])
+        }
 
         /// Resolves a normalized lens, or returns `nil` when it changes
         /// nothing (the original rim without dispersion).
@@ -170,10 +233,24 @@ extension GlassPanelGeometry {
             profileB = b
             dispersion = lens.dispersion
             tapCount = lens.dispersion > 0 ? (lens.dispersionTaps == .sixTap ? 6 : 3) : 0
-            offsetScale = lens.allowsFold || code == GWLensProfileRim.rawValue ? 1 : GlassLensModel.foldFreeScale(
+            let hostScale = lens.allowsFold || code == GWLensProfileRim.rawValue ? 1 : GlassLensModel.foldFreeScale(
                 profile: code, a: a, b: b, thickness: thickness, bevel: self.bevel,
                 indexOfRefraction: indexOfRefraction, maximumOffset: maximumOffset
             )
+            let resolved = lens.inlays.map { Inlay($0, displayScale: displayScale) }
+            inlays = resolved
+            // The inlays share the offset scale; each is checked on top of
+            // the panel's own height.
+            let hostHeight = thickness
+            let limit = maximumOffset
+            let inlayScale = lens.allowsFold ? 1 : resolved.map { inlay in
+                GlassLensModel.foldFreeScale(
+                    profile: inlay.profileCode, a: inlay.profileA, b: inlay.profileB, thickness: inlay.height,
+                    bevel: inlay.bevel, indexOfRefraction: lens.indexOfRefraction, maximumOffset: limit,
+                    baseHeight: hostHeight
+                )
+            }.min() ?? 1
+            offsetScale = min(hostScale, inlayScale)
         }
     }
 
@@ -190,12 +267,31 @@ extension GlassPanelGeometry {
         guard let lens else { return nil }
         let field = shapeField
         let t = lens.bevel > 0 ? min(field.lensDepth(at: pixel) / lens.bevel, 1) : 1
-        let (s, slope) = GlassLensModel.profile(lens.profileCode, t: t, a: lens.profileA, b: lens.profileB)
-        guard t < 1, lens.bevel > 0 else { return (lens.thickness * s, .zero) }
-        let rise = min(max(lens.thickness * slope / lens.bevel, -GlassLensModel.maximumSlope), GlassLensModel.maximumSlope)
-        // The depth falls toward the outline, so the height's gradient
-        // points inward: against the outward normal.
-        return (lens.thickness * s, -field.outwardNormal(at: pixel) * rise)
+        var height = 0.0
+        var gradient = SIMD2<Double>.zero
+        if lens.profileCode != GWLensProfileRim.rawValue {
+            let (s, slope) = GlassLensModel.profile(lens.profileCode, t: t, a: lens.profileA, b: lens.profileB)
+            height = lens.thickness * s
+            if t < 1, lens.bevel > 0 {
+                let rise = min(max(lens.thickness * slope / lens.bevel, -GlassLensModel.maximumSlope), GlassLensModel.maximumSlope)
+                // The depth falls toward the outline, so the height's
+                // gradient points inward: against the outward normal.
+                gradient = -field.outwardNormal(at: pixel) * rise
+            }
+        }
+        for inlay in lens.inlays {
+            let offset = pixel - center - inlay.center
+            let r = (offset.x * offset.x + offset.y * offset.y).squareRoot()
+            guard r < inlay.radius, inlay.bevel > 0 else { continue }
+            let u = min((inlay.radius - r) / inlay.bevel, 1)
+            let (s, slope) = GlassLensModel.profile(inlay.profileCode, t: u, a: inlay.profileA, b: inlay.profileB)
+            height += inlay.height * s
+            if u < 1, r > 1e-4 {
+                let rise = min(max(inlay.height * slope / inlay.bevel, -GlassLensModel.maximumSlope), GlassLensModel.maximumSlope)
+                gradient -= offset / r * rise
+            }
+        }
+        return (height, gradient)
     }
 
     /// Where the lens samples the background for a pixel, before the source

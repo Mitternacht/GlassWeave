@@ -259,13 +259,25 @@ final class MaterialBenchViewController: UIViewController {
     /// The lens page's panels: a thick pill, a dome marble, a ring, and a
     /// fold pair.
     private static let lensDemos: [Demo] = [
-        Demo(caption: String(localized: "Thick lens pill: circular bevel, IOR 1.5, six-tap dispersion"), parameters: GlassParameters(
+        Demo(caption: String(localized: "Thick lens pill with an inlaid dome button, pooled light, six-tap dispersion"), parameters: GlassParameters(
             cornerRadius: 999, bezelWidth: 46, refraction: 0.6, edgeHighlight: 0.8,
-            lens: GlassLens(profile: .squircle(exponent: 3), thickness: 40, indexOfRefraction: 1.5, maximumOffset: 80, allowsFold: true, dispersion: 1, dispersionTaps: .sixTap)
+            light: GlassLight(
+                emitters: [GlassLight.Emitter(
+                    placement: .band(angle: 180, reach: 0.9),
+                    colors: [stop(1.0, 0.60, 0.16), stop(1.0, 0.38, 0.82), stop(0.62, 0.44, 1.0), stop(0.22, 0.88, 1.0)],
+                    intensity: 0.85
+                )],
+                piping: 0.6
+            ),
+            lens: GlassLens(
+                profile: .squircle(exponent: 3), thickness: 40, indexOfRefraction: 1.5, maximumOffset: 80, allowsFold: true,
+                dispersion: 1, dispersionTaps: .sixTap,
+                inlays: [GlassLens.Inlay(radius: 40, height: 16, profile: .dome, rimLine: 0.9)]
+            )
         )),
         Demo(caption: String(localized: "Dome, three-tap"), parameters: GlassParameters(
             cornerRadius: 999, bezelWidth: 60, refraction: 0.6, edgeHighlight: 0.6,
-            lens: GlassLens(profile: .dome, thickness: 48, indexOfRefraction: 1.5, maximumOffset: 80, dispersion: 0.8)
+            lens: GlassLens(profile: .dome, thickness: 60, indexOfRefraction: 1.9, maximumOffset: 120, dispersion: 0.8)
         )),
         Demo(caption: String(localized: "Ring, six-tap"), parameters: GlassParameters(
             cornerRadius: 999, bezelWidth: 20, refraction: 0.6, edgeHighlight: 0.6,
@@ -566,6 +578,11 @@ final class MaterialBenchViewController: UIViewController {
         let panels = demos.map { demo -> GlassPanel in
             var parameters = demo.parameters
             parameters.light.timeOffset = base + elapsed
+            // An inlaid dome button sits at the panel's right end.
+            for index in parameters.lens.inlays.indices {
+                parameters.lens.inlays[index].x = demo.frame.width / 2 - parameters.lens.inlays[index].radius - 10
+                parameters.lens.inlays[index].y = 0
+            }
             // Screened light does not show on white: paint it on the paper.
             if mode == .lightFields {
                 parameters.light.composite = page.isDark ? .light : .paint

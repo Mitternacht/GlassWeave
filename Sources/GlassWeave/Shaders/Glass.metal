@@ -5,7 +5,9 @@ using namespace metal;
 
 // The shader's view of the shared record must match the host layout asserted
 // in GlassWeaveShaderTypes.c.
-static_assert(sizeof(GWGlassUniforms) == 1056, "GWGlassUniforms size");
+static_assert(sizeof(GWGlassUniforms) == 1152, "GWGlassUniforms size");
+static_assert(sizeof(GWLensInlay) == 48, "GWLensInlay size");
+static_assert(alignof(GWLensInlay) == 16, "GWLensInlay alignment");
 static_assert(sizeof(GWLightEmitter) == 112, "GWLightEmitter size");
 static_assert(alignof(GWLightEmitter) == 16, "GWLightEmitter alignment");
 static_assert(alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
@@ -695,6 +697,53 @@ static float2 gw_lens_offset(GWLensField field, float ior, constant GWGlassUnifo
     return offset;
 }
 
+/// Adds the inlays' bumps to the height field: each is a profile over the
+/// depth into the inlay from its base, `t = (radius - r) / bevel`, so the
+/// height is 0 on the base (C0 with the panel) and nothing is added beyond
+/// it. The gradient points toward the inlay's center.
+static void gw_lens_add_inlays(float2 q, constant GWGlassUniforms &uniforms, thread GWLensField &field) {
+    for (uint i = 0u; i < min(uniforms.lensInlayCount, 2u); ++i) {
+        constant GWLensInlay &inlay = uniforms.lensInlays[i];
+        const float2 offset = q - inlay.geometry.xy;
+        const float radius = inlay.geometry.z;
+        const float r = length(offset);
+        if (r >= radius || inlay.shape.x <= 0.0) {
+            continue;
+        }
+        const float t = saturate((radius - r) / inlay.shape.x);
+        const float2 profile = gw_lens_profile(inlay.profile, t, inlay.shape.y, inlay.shape.z);
+        field.height += inlay.geometry.w * profile.x;
+        if (t < 1.0 && r > 1e-4) {
+            const float rise = clamp(inlay.geometry.w * profile.y / inlay.shape.x, -gw_lens_max_slope, gw_lens_max_slope);
+            field.gradient -= offset / r * rise;
+        }
+    }
+}
+
+/// The inlays' rim light, as a fraction of the way to white: a thin line at
+/// the base and a brighter bevel inside it, both lit from the upper left
+/// like the panel's edge. Exactly 0 beyond half a pixel outside every base.
+static float gw_lens_inlay_highlight(float2 q, constant GWGlassUniforms &uniforms) {
+    float light = 0.0;
+    for (uint i = 0u; i < min(uniforms.lensInlayCount, 2u); ++i) {
+        constant GWLensInlay &inlay = uniforms.lensInlays[i];
+        const float2 offset = q - inlay.geometry.xy;
+        const float radius = inlay.geometry.z;
+        const float r = length(offset);
+        if (r >= radius + 0.5 || inlay.shape.w <= 0.0 || inlay.shape.x <= 0.0) {
+            continue;
+        }
+        const float facing = r > 1e-4 ? saturate(dot(offset / r, gw_light_direction)) : 0.0;
+        const float lit = 0.35 + 0.65 * facing;
+        // A line about 1.5 pixels wide at the base, antialiased on both sides.
+        const float line = saturate(1.0 - abs(r - (radius - 0.75)) / 1.25);
+        const float bevel = saturate((radius - r) / inlay.shape.x);
+        const float rim = (1.0 - bevel) * (1.0 - bevel) * (1.0 - bevel);
+        light = max(light, inlay.shape.w * (0.85 * line * lit + 0.35 * rim * lit));
+    }
+    return saturate(light);
+}
+
 /// How far the index of refraction of red and blue light differs from the
 /// base index at dispersion 1.
 constant float gw_lens_ior_spread = 0.12;
@@ -718,10 +767,10 @@ constant float3 gw_lens_tap_weight[6] = {
     float3(0.0, 0.0, 11.0 / 21.0),
 };
 
-/// Whether the thick-lens path draws the panel: a lens profile, or
-/// dispersion on the original rim.
+/// Whether the thick-lens path draws the panel: a lens profile, dispersion
+/// on the original rim, or an inlay.
 static bool gw_lens_active(constant GWGlassUniforms &uniforms) {
-    return uniforms.lensProfile != GWLensProfileRim || uniforms.lensTapCount > 0u;
+    return uniforms.lensProfile != GWLensProfileRim || uniforms.lensTapCount > 0u || uniforms.lensInlayCount > 0u;
 }
 
 /// The glass color at a pixel under a lens, in linear light. `rimNormal` and
@@ -740,7 +789,8 @@ static float3 gw_lens_glass(
     constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
 {
     const GWShapeSample shape = gw_shape_rounded_rect(q, uniforms);
-    const GWLensField field = gw_lens_host(shape, uniforms);
+    GWLensField field = gw_lens_host(shape, uniforms);
+    gw_lens_add_inlays(q, uniforms, field);
     const float2 rim = uniforms.lensProfile == GWLensProfileRim ? -rimNormal * rimDisplacement : float2(0.0);
     const float ior = uniforms.lensIOR;
     const float2 center = rim + gw_lens_offset(field, ior, uniforms);
@@ -887,6 +937,9 @@ fragment float4 gw_glass_fragment(
     const float facing = saturate(dot(normal, gw_light_direction));
     const float highlight = uniforms.edgeHighlight * rim * rim * rim * (0.4 + 0.6 * facing);
     glass = glass + (1.0 - glass) * highlight;
+    if (gw_optics && uniforms.lensInlayCount > 0u) {
+        glass = glass + (1.0 - glass) * gw_lens_inlay_highlight(q, uniforms);
+    }
 
     float glowAlpha = 0.0;
     // Beyond the rim band and the inner glow's radius, with no center fill,

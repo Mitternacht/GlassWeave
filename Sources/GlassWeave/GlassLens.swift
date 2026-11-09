@@ -27,6 +27,7 @@ import Foundation
 /// | ``maximumOffset`` | points | 0 to ``maximumMaximumOffset`` | 48 | The longest any sample moves. |
 /// | ``dispersion`` | normalized | 0...1 | 0 | Chromatic dispersion: how far the index of refraction differs between red and blue light. Where the glass bends hard (its bevel), the background splits into colored fringes; white and gray stay neutral. 0 draws none. |
 /// | ``dispersionTaps`` | ``DispersionTaps`` | — | ``DispersionTaps/threeTap`` | How the spectrum is sampled: one sample each for red, green, and blue, or six wavelengths blended into smooth rainbows. Both keep the weights of every channel summing to 1 in linear light, so white stays white. |
+/// | ``inlays`` | ``Inlay`` | 0 to ``maximumInlays`` | none | Bumps of glass added to the panel's own height: a dome button standing on a pill, part of the same piece of glass, in one panel and one pass. |
 /// | ``allowsFold`` | `Bool` | — | `false` | When `false`, the offsets are scaled down just enough that the sampled position never turns back along the bevel, so content is magnified but never mirrored. When `true`, a thick bevel folds the content over, as a real glass edge can. |
 ///
 /// **The math** (see `docs/glass-optics.md`). The height is
@@ -74,6 +75,42 @@ public struct GlassLens: Hashable, Sendable {
         case sixTap
     }
 
+    /// A bump of glass that stands on the panel: a dome button on a pill, or
+    /// a ring. It adds its height to the panel's height field (so it also
+    /// bends what is behind it, and what the pill's thickness bends) and it
+    /// stays inside the panel's rectangle: the panel's quad does not grow.
+    /// Pixels farther than a pixel outside its ``radius`` are exactly as
+    /// without it.
+    public struct Inlay: Hashable, Sendable {
+        /// The center, in points from the panel's center, x to the right
+        /// and y down.
+        public var x: Double
+        public var y: Double
+        /// The radius of its base, in points, up to half the panel's
+        /// shorter side.
+        public var radius: Double
+        /// How high it stands above the panel's own surface, in points, 0
+        /// to ``GlassLens/maximumThickness``.
+        public var height: Double
+        /// Its profile over its radius: ``Profile/dome`` (the default) and
+        /// ``Profile/circular`` round it; ``Profile/chamfer`` makes a cone;
+        /// ``Profile/ring(center:width:)`` a ring measured inward from its
+        /// base. ``Profile/rim`` draws nothing.
+        public var profile: Profile
+        /// A thin bright line at its base, lit from the upper left, and a
+        /// brighter edge bevel: 0...1.
+        public var rimLine: Double
+
+        public init(x: Double = 0, y: Double = 0, radius: Double = 24, height: Double = 20, profile: Profile = .dome, rimLine: Double = 0.7) {
+            self.x = x
+            self.y = y
+            self.radius = radius
+            self.height = height
+            self.profile = profile
+            self.rimLine = rimLine
+        }
+    }
+
     /// The height profile of the glass.
     public var profile: Profile
     /// The glass height at its thickest, in points.
@@ -88,6 +125,11 @@ public struct GlassLens: Hashable, Sendable {
     public var dispersion: Double
     /// How the spectrum is sampled where the colors separate.
     public var dispersionTaps: DispersionTaps
+    /// Bumps of glass on the panel; only the first ``maximumInlays`` count.
+    public var inlays: [Inlay]
+
+    /// The most inlays one panel has: 2.
+    public static let maximumInlays = 2
 
     /// The thickest glass: 64 points.
     public static let maximumThickness = 64.0
@@ -103,7 +145,8 @@ public struct GlassLens: Hashable, Sendable {
         maximumOffset: Double = 48,
         allowsFold: Bool = false,
         dispersion: Double = 0,
-        dispersionTaps: DispersionTaps = .threeTap
+        dispersionTaps: DispersionTaps = .threeTap,
+        inlays: [Inlay] = []
     ) {
         self.profile = profile
         self.thickness = thickness
@@ -112,6 +155,7 @@ public struct GlassLens: Hashable, Sendable {
         self.allowsFold = allowsFold
         self.dispersion = dispersion
         self.dispersionTaps = dispersionTaps
+        self.inlays = inlays
     }
 
     /// No lens: the panel's original rim refraction.
@@ -119,10 +163,10 @@ public struct GlassLens: Hashable, Sendable {
 
     /// Whether the lens changes the picture: a profile other than
     /// ``Profile/rim``, or dispersion above 0 (on the rim profile it splits
-    /// the rim's displacement by wavelength). A panel without it is drawn by
-    /// the base pipeline.
+    /// the rim's displacement by wavelength), or an inlay. A panel without it
+    /// is drawn by the base pipeline.
     public var isActive: Bool {
-        profile != .rim || dispersion > 0
+        profile != .rim || dispersion > 0 || !inlays.isEmpty
     }
 
     /// The lens parameter that held a rejected value.
@@ -134,6 +178,14 @@ public struct GlassLens: Hashable, Sendable {
         case squircleExponent
         case ringCenter
         case ringWidth
+        case inlayX
+        case inlayY
+        case inlayRadius
+        case inlayHeight
+        case inlayRimLine
+        case inlaySquircleExponent
+        case inlayRingCenter
+        case inlayRingWidth
     }
 
     /// Applies the normalization rule. Lengths in points are capped at
@@ -149,6 +201,17 @@ public struct GlassLens: Hashable, Sendable {
         case let .ring(center, width): checks += [(.ringCenter, center), (.ringWidth, width)]
         case .rim, .circular, .chamfer, .dome: break
         }
+        for inlay in inlays {
+            checks += [
+                (.inlayX, inlay.x), (.inlayY, inlay.y), (.inlayRadius, inlay.radius),
+                (.inlayHeight, inlay.height), (.inlayRimLine, inlay.rimLine),
+            ]
+            switch inlay.profile {
+            case let .squircle(exponent): checks.append((.inlaySquircleExponent, exponent))
+            case let .ring(center, width): checks += [(.inlayRingCenter, center), (.inlayRingWidth, width)]
+            case .rim, .circular, .chamfer, .dome: break
+            }
+        }
         for (field, value) in checks where !value.isFinite {
             throw .nonFiniteLens(field)
         }
@@ -163,6 +226,22 @@ public struct GlassLens: Hashable, Sendable {
         case let .ring(center, width):
             lens.profile = .ring(center: clamp(center, 0, maximumLength), width: clamp(width, 0, maximumLength))
         case .rim, .circular, .chamfer, .dome: break
+        }
+        lens.inlays = inlays.prefix(Self.maximumInlays).compactMap { inlay in
+            guard inlay.profile != .rim else { return nil }
+            var kept = inlay
+            kept.x = clamp(inlay.x, -4096, 4096)
+            kept.y = clamp(inlay.y, -4096, 4096)
+            kept.radius = clamp(inlay.radius, 0, maximumLength)
+            kept.height = clamp(inlay.height, 0, Self.maximumThickness)
+            kept.rimLine = clamp(inlay.rimLine, 0, 1)
+            switch inlay.profile {
+            case let .squircle(exponent): kept.profile = .squircle(exponent: clamp(exponent, 1, 8))
+            case let .ring(center, width):
+                kept.profile = .ring(center: clamp(center, 0, kept.radius), width: clamp(width, 0, kept.radius))
+            case .rim, .circular, .chamfer, .dome: break
+            }
+            return kept.radius > 0 ? kept : nil
         }
         return lens
     }

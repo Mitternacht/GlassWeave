@@ -136,6 +136,32 @@ kernel void gw_test_glass_uniforms_probe(
         values[base + 26] = emitter.intensity;
         seed[1 + i] = emitter.seed;
     }
+    // Thick lens (GW-22).
+    values[238] = float(record.lensProfile);
+    values[239] = record.lensThickness;
+    values[240] = record.lensBevel;
+    values[241] = record.lensFieldRadius;
+    values[242] = record.lensIOR;
+    values[243] = record.lensMaximumOffset;
+    values[244] = record.lensOffsetScale;
+    values[245] = record.lensProfileA;
+    values[246] = record.lensProfileB;
+    values[247] = record.lensDispersion;
+    values[248] = float(record.lensTapCount);
+    values[249] = float(record.lensInlayCount);
+    for (uint i = 0; i < 2; ++i) {
+        const uint base = 250 + 9 * i;
+        const GWLensInlay inlay = record.lensInlays[i];
+        values[base] = inlay.geometry.x;
+        values[base + 1] = inlay.geometry.y;
+        values[base + 2] = inlay.geometry.z;
+        values[base + 3] = inlay.geometry.w;
+        values[base + 4] = inlay.shape.x;
+        values[base + 5] = inlay.shape.y;
+        values[base + 6] = inlay.shape.z;
+        values[base + 7] = inlay.shape.w;
+        values[base + 8] = float(inlay.profile);
+    }
 
     layout[0] = sizeof(GWGlassUniforms);
     layout[1] = alignof(GWGlassUniforms);

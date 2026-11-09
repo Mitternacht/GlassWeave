@@ -376,7 +376,8 @@ struct GlassPanelGeometry: Equatable {
             lensProfileB: Float(lens?.profileB ?? 0),
             lensDispersion: Float(lens?.dispersion ?? 0),
             lensTapCount: lens?.tapCount ?? 0,
-            padding11: 0
+            lensInlayCount: UInt32(lens?.inlays.count ?? 0),
+            lensInlays: lens?.inlayRecords ?? (Lens.Inlay.empty, Lens.Inlay.empty)
         )
     }
 

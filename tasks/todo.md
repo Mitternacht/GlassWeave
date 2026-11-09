@@ -452,7 +452,7 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 **Dependencies:** GW-21. **Scope:** L, three commits (lens, dispersion, inlays), about 10 files plus tests.
 
 **Acceptance criteria:**
-- [ ] `.rim` with dispersion 0 and no inlays is byte-identical; `base` is reported.
+- [x] `.rim` with dispersion 0 and no inlays is byte-identical; `base` is reported. (`GlassBaselineGW21Tests`: three cases, including the `.rim` profile with every other lens setting changed, on a gradient and a checkerboard; the control shows a lens panel is drawn by `optics` and differs.)
 - [ ] IOR 1.0 gives the unrefracted background within one step.
 - [ ] Each profile matches the CPU mirror within one step, excluding the antialiasing band and slope-clamped pixels.
 - [ ] Dot-grid centroids: the offset never exceeds `maximumOffset`. With `allowsFold == false` the mapping is monotonic along normal lines: a CPU property test over 10,000 panels, plus readback of 50.
@@ -466,11 +466,15 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 - [ ] Pipeline census: all built at initialization; creation time recorded.
 - [ ] Base-variant cost, interleaved A/B ≤ max(0.05 ms, spread).
 - [ ] M5 targets: lens ≤ +0.10 ms; 3-tap ≤ +0.10 ms; 6-tap ≤ +0.20 ms.
-- [ ] Bench captures: dome marble, capsule, ring, fold on/off, dispersion bar, pill with an inlaid dome.
+- [ ] Bench captures: dome marble, capsule, ring, fold on/off, dispersion bar, pill with an inlaid dome. (Partial: all but a dedicated dispersion bar; fast pass: not tested.)
 - [ ] Temporal stability on the Mac: over a source translated in 1/8 px steps, frame-to-frame RMS change at fold pixels is recorded and ≤ 2× the unfolded rim's.
 - [ ] **Device only:** cost; visual shimmer sign-off.
 
-**Evidence:** not started.
+**Evidence:**
+- Exists: `GlassLens` (profiles, thickness, IOR, maximum offset, fold, dispersion with three or six taps, up to two inlays) in `GlassLens.swift`; the CPU model and shape-field interface in `GlassLensModel.swift` and `GlassShapeField.swift`; the shader's thick-lens code in `Glass.metal` behind function constant 0 (`base` and `optics` variants, both built at initialization, `GlassRenderer.drawnVariants`); the record grown append-only from 1008 to 1152 bytes (C, MSL, Swift asserts and the distinctive-value round trip); policy rows in `GlassAccessibilityPolicy.swift` (Reduce Transparency removes the lens, Increase Contrast removes dispersion); the lab's lens page (`-lab.lens`) and the new `orbs` bench page. Design notes: `docs/glass-optics.md`. Three commits: lens, dispersion, inlays.
+- Safety test (the only new test): `GlassBaselineGW21Tests`, byte-identical to the frozen `GlassBaselineGW21.metal` (a copy of the GW-21 shader) with no lens, in the `base` variant, plus a control that a lens differs: 3 cases, passed. The existing layout test and probe were extended for the new fields. Batch runs at the end: package scheme on My Mac 200 passed, 0 failed (199 tests plus the characterization test); on the iPhone 18 Pro simulator 282 passed, 0 failed. The first Mac run failed only in my new test (a reused renderer and a too-weak control); fixed and rerun alone, then the whole scheme again. No lab UI test was added or changed, so none was run.
+- Captures (inspected, `docs/evidence/captures/gw-22-*`): the lens page over the orbs and over the dot grid, the pill with its inlaid dome button in detail over each, and the lens page under Increase Contrast (no fringes, lens kept) and Reduce Transparency (opaque, no lens). Tuned in three rounds.
+- Limits: all other criteria are unchecked with the reason "fast pass: not tested" (CPU mirror comparison, IOR 1.0, per-profile mirror, centroid and monotonicity properties, corner crease, dome magnification, finite sweep, dispersion identity and neutrality tests, B/W edge, inlay C0 and quad tests, pipeline census and creation time, base cost, M5 cost, temporal stability). "Bench captures" is partial: dome, capsule, ring, fold on and off, and the pill with an inlaid dome exist; a dedicated dispersion bar does not (dispersion is shown on the pill, dome and ring). Device items stay open.
 
 **Verification:** As in GW-21, plus property tests.
 

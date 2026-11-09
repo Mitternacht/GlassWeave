@@ -57,9 +57,9 @@ struct ShaderLayoutTests {
     }
 
     @Test func `Host layout of the glass uniforms matches the documented record`() {
-        #expect(MemoryLayout<GWGlassUniforms>.size == 1056)
+        #expect(MemoryLayout<GWGlassUniforms>.size == 1152)
         #expect(MemoryLayout<GWGlassUniforms>.alignment == 16)
-        #expect(MemoryLayout<GWGlassUniforms>.stride == 1056)
+        #expect(MemoryLayout<GWGlassUniforms>.stride == 1152)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.background) == 0)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.targetSize) == 40)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.panelCenter) == 48)
@@ -126,7 +126,13 @@ struct ShaderLayoutTests {
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensProfileB) == 1040)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensDispersion) == 1044)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensTapCount) == 1048)
-        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding11) == 1052)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensInlayCount) == 1052)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensInlays) == 1056)
+        #expect(MemoryLayout<GWLensInlay>.size == 48)
+        #expect(MemoryLayout<GWLensInlay>.alignment == 16)
+        #expect(MemoryLayout<GWLensInlay>.offset(of: \.geometry) == 0)
+        #expect(MemoryLayout<GWLensInlay>.offset(of: \.shape) == 16)
+        #expect(MemoryLayout<GWLensInlay>.offset(of: \.profile) == 32)
         #expect(MemoryLayout<GWLightEmitter>.size == 112)
         #expect(MemoryLayout<GWLightEmitter>.alignment == 16)
         #expect(MemoryLayout<GWLightEmitter>.stride == 112)
@@ -240,9 +246,13 @@ struct ShaderLayoutTests {
             lensOffsetScale: 0.8125,
             lensProfileA: 0.4375,
             lensProfileB: 0.0625,
-            lensDispersion: 0.1875, lensTapCount: 6, padding11: -988
+            lensDispersion: 0.1875, lensTapCount: 6, lensInlayCount: 2,
+            lensInlays: (
+                GWLensInlay(geometry: [-12.5, 8.25, 20.5, 6.125], shape: [14.5, 0.3125, 0.0625, 0.875], profile: 5, padding0: 0, padding1: 0, padding2: 0),
+                GWLensInlay(geometry: [3.5, -7.75, 11.25, 2.5], shape: [11.25, 0, 0, 0.25], profile: 1, padding0: 0, padding1: 0, padding2: 0)
+            )
         )
-        let expected: [Float] = [
+        let lightExpected: [Float] = [
             1.5, -2.25, 3.125, -4.0625, 5.5, -6.75, 0.03125, 0.0625, 7.875, -8.5,
             1179, 2556, 589.5, 1278.25, 480, 270.5, 84, 48.5, 84.25, 14.5, 0.125,
             0.0078125, 0.25, 0.75, 0.375,
@@ -261,6 +271,10 @@ struct ShaderLayoutTests {
             return [e.color0, e.color1, e.color2, e.color3, e.shape, e.motion].flatMap { [$0.x, $0.y, $0.z, $0.w] }
                 + [Float(e.kind), Float(e.colorCount), e.intensity]
         }
+        // The thick lens (GW-22): its header, then the two inlays.
+        let lensValues: [Float] = [5, 24.5, 18.25, 21.5, 1.625, 33.75, 0.8125, 0.4375, 0.0625, 0.1875, 6, 2]
+        let inlayValues: [Float] = [-12.5, 8.25, 20.5, 6.125, 14.5, 0.3125, 0.0625, 0.875, 5, 3.5, -7.75, 11.25, 2.5, 11.25, 0, 0, 0.25, 1]
+        let expected = lightExpected + lensValues + inlayValues
         let recordBuffer = try #require(gpu.device.makeBuffer(bytes: &record, length: MemoryLayout<GWGlassUniforms>.stride, options: .storageModeShared))
         let values = try #require(gpu.device.makeBuffer(length: expected.count * MemoryLayout<Float>.stride, options: .storageModeShared))
         let layout = try #require(gpu.device.makeBuffer(length: 63 * MemoryLayout<UInt32>.stride, options: .storageModeShared))
@@ -285,7 +299,7 @@ struct ShaderLayoutTests {
         #expect(readSeeds == [0xdeadbeef] + (0..<4).map { Self.emitter($0).seed })
         let readLayout = Array(UnsafeBufferPointer(start: layout.contents().assumingMemoryBound(to: UInt32.self), count: 63))
         #expect(readLayout == [
-            1056, 16, 0, 40, 48, 56, 64, 68, 72, 76, 80, 96,
+            1152, 16, 0, 40, 48, 56, 64, 68, 72, 76, 80, 96,
             112, 128, 144, 160, 176, 192, 200, 204, 208, 212, 216, 220, 224, 228, 232,
             240, 244,
             256, 272, 288, 304, 308, 312, 316, 320, 324, 328, 332,
