@@ -285,11 +285,19 @@ final class LabViewController: UIViewController {
         // Nominal 320 x 180 points, narrower when the stage is.
         let preferredWidth = customPanel.widthAnchor.constraint(equalToConstant: 320)
         preferredWidth.priority = .defaultHigh
+        // In a benchmark the stage fills the screen behind the controls, and
+        // the native content stays in the part the controls leave free; the
+        // orientation layouts in setUpLayout() place its trailing and bottom
+        // edges.
+        if benchmark == nil {
+            NSLayoutConstraint.activate([
+                scroll.trailingAnchor.constraint(equalTo: safe.trailingAnchor),
+                scroll.bottomAnchor.constraint(equalTo: safe.bottomAnchor),
+            ])
+        }
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: safe.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: safe.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: safe.topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: safe.bottomAnchor),
             contentHost.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
             contentHost.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
             contentHost.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
@@ -425,6 +433,11 @@ final class LabViewController: UIViewController {
 
     /// The stage keeps a fixed share of the screen, so text changes in the
     /// controls never resize the rendered surface.
+    ///
+    /// In a benchmark the stage, and so the rendered surface, fills the
+    /// whole screen, as the validation protocol's workload requires; the
+    /// controls sit above it on an opaque background, and the native content
+    /// stays in the part of the stage the controls leave free.
     private func setUpLayout() {
         let safe = view.safeAreaLayoutGuide
         let shared = [
@@ -432,21 +445,56 @@ final class LabViewController: UIViewController {
             stage.leadingAnchor.constraint(equalTo: view.leadingAnchor),
         ]
         NSLayoutConstraint.activate(shared)
-        portraitConstraints = [
-            stage.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            stage.bottomAnchor.constraint(equalTo: controls.topAnchor),
+        let portraitControls = [
             controls.leadingAnchor.constraint(equalTo: safe.leadingAnchor, constant: 16),
             controls.trailingAnchor.constraint(equalTo: safe.trailingAnchor, constant: -16),
             controls.bottomAnchor.constraint(equalTo: safe.bottomAnchor),
             controls.heightAnchor.constraint(equalTo: view.heightAnchor, multiplier: 0.38),
         ]
-        landscapeConstraints = [
-            stage.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            stage.trailingAnchor.constraint(equalTo: controls.leadingAnchor, constant: -16),
+        let landscapeControls = [
             controls.topAnchor.constraint(equalTo: safe.topAnchor),
             controls.bottomAnchor.constraint(equalTo: safe.bottomAnchor),
             controls.trailingAnchor.constraint(equalTo: safe.trailingAnchor, constant: -16),
             controls.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.34),
+        ]
+        guard benchmark != nil else {
+            portraitConstraints = portraitControls + [
+                stage.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                stage.bottomAnchor.constraint(equalTo: controls.topAnchor),
+            ]
+            landscapeConstraints = landscapeControls + [
+                stage.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                stage.trailingAnchor.constraint(equalTo: controls.leadingAnchor, constant: -16),
+            ]
+            return
+        }
+        // An opaque backdrop a little larger than the controls keeps them
+        // legible over the moving surface.
+        let backdrop = UIView()
+        backdrop.backgroundColor = .systemBackground
+        backdrop.layer.cornerRadius = 20
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(backdrop, belowSubview: controls)
+        NSLayoutConstraint.activate([
+            backdrop.leadingAnchor.constraint(equalTo: controls.leadingAnchor, constant: -12),
+            backdrop.trailingAnchor.constraint(equalTo: controls.trailingAnchor, constant: 12),
+            backdrop.topAnchor.constraint(equalTo: controls.topAnchor, constant: -12),
+            backdrop.bottomAnchor.constraint(equalTo: controls.bottomAnchor, constant: 12),
+        ])
+        let fullScreen = [
+            stage.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stage.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ]
+        let stageSafe = stage.safeAreaLayoutGuide
+        portraitConstraints = portraitControls + fullScreen + [
+            stageScroll.trailingAnchor.constraint(equalTo: stageSafe.trailingAnchor),
+            stageScroll.bottomAnchor.constraint(equalTo: backdrop.topAnchor),
+        ]
+        landscapeConstraints = landscapeControls + [
+            stage.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stage.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            stageScroll.trailingAnchor.constraint(equalTo: backdrop.leadingAnchor, constant: -8),
+            stageScroll.bottomAnchor.constraint(equalTo: stageSafe.bottomAnchor),
         ]
     }
 

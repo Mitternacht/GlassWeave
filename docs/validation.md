@@ -33,14 +33,18 @@ For initial optical correctness, add fixed four-corner orientation patterns, che
 
 The laboratory runs this workload with `-lab.benchmark <mode>`
 (`Examples/GlassWeaveLab/GlassWeaveLab/BenchmarkScenario.swift`, scenario
-version 1). The modes are `baseline` (1), `native` (2), `custom` (3), `idle`
+version 2). The modes are `baseline` (1), `native` (2), `custom` (3), `idle`
 (4: mode 3 with the source frozen at content time zero), and `lifecycle` (5:
 mode 3 with 100 hide/show and resize cycles drawn from
 `-lab.benchmark.seed <number>`, default `0x67570009`, between two settled
 allocation measurements). Every mode uses the same moving source, a pure
 function of the deterministic clock, so frame *n* is identical in every mode
-and run; the seed only orders the stress. In a benchmark the frame-ID strip
-starts off (the Frame ID switch turns it on), Reset also restarts the
+and run; the seed only orders the stress. In a benchmark the stage, and so
+the rendered surface, fills the whole screen (1206 × 2622 px on the iPhone 18
+Pro simulator in portrait), with the controls above it on an opaque backdrop
+and the native content in the part of the stage the controls leave free;
+version 1 rendered only the stage above the controls (1206 × 1524 px there).
+The frame-ID strip starts off (the Frame ID switch turns it on), Reset also restarts the
 metrics window, the diagnostics refresh once a second from a timer rather
 than from frames, and Settle and measure stops the clock, waits for frames
 in flight, and reports allocated bytes.
@@ -61,11 +65,15 @@ Instruments on a device. The iOS Simulator reports zero for every Metal
 allocation size, so `RenderMetrics` gives `nil` there and no simulator
 allocation figure exists.
 
-`Tests/GlassWeaveCharacterizationTests` renders the same workload offscreen
-(the laboratory's shader, pool, in-flight bound, 60 Hz requests; 1206 ×
-2622 px, the panel at 320 × 180 pt) and compares mode 1 with GlassWeave's
-share of mode 3, then checks idle submissions and allocations after
-lifecycle cycles. The `GlassWeave` scheme runs it briefly under Metal API
+`Tests/GlassWeaveCharacterizationTests` renders an offscreen approximation
+of the workload (the laboratory's shader, pool, in-flight bound, 60 Hz
+requests; 1206 × 2622 px, the laboratory's full-screen size on the iPhone 18
+Pro simulator; a 320 × 180 pt panel centered on the surface rather than
+placed above the controls; no native views or controls) and compares mode 1
+with GlassWeave's share of mode 3. It then runs an idle check (display
+passes at 60 Hz for 5 s with nothing requested, which must produce and
+submit nothing; it fails if the scheduler draws unrequested frames) and
+compares allocations after lifecycle cycles. The `GlassWeave` scheme runs it briefly under Metal API
 Validation; the `GlassWeaveCharacterization` scheme runs it in Release
 without validation, three interleaved 60 s runs per mode after 10 s
 warm-ups and 100 lifecycle cycles (environment variables

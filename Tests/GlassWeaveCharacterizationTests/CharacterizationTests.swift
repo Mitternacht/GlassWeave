@@ -15,14 +15,18 @@ import Testing
 /// owned moving background alone) and the GlassWeave share of mode 3 (the
 /// same background plus one custom panel).
 ///
-/// The workload mirrors the laboratory's benchmark scenario: a 402 × 874
-/// point surface at display scale 3 (1206 × 2622 pixels, the iPhone 18 Pro
-/// simulator's screen), the laboratory's procedural background shader (a
-/// copy of `ProceduralBackground.metal`) produced inside each draw's
-/// command buffer into a three-texture `FrameTexturePool`, the frame-ID strip
-/// off, one 320 × 180 point panel with the laboratory's light parameters,
-/// one request per 60 Hz tick, the surface's in-flight bound of two, and
-/// three render targets cycling like a layer's drawables.
+/// The workload follows the laboratory's benchmark scenario (version 2): a
+/// full-screen 402 × 874 point surface at display scale 3 (1206 × 2622
+/// pixels, the size the laboratory's benchmark surface has on the iPhone 18
+/// Pro simulator in portrait), the laboratory's procedural background
+/// shader (a copy of `ProceduralBackground.metal`) produced inside each
+/// draw's command buffer into a three-texture `FrameTexturePool`, the
+/// frame-ID strip off, one 320 × 180 point panel with the laboratory's light
+/// parameters, one request per 60 Hz tick, the surface's in-flight bound of
+/// two, and three render targets cycling like a layer's drawables. It is
+/// not the same workload: the panel is centered on the surface here, while
+/// the laboratory places it above its controls, and the laboratory also
+/// composites native views and the controls.
 ///
 /// Settings come from the environment, so one test serves two purposes:
 /// - Unset (the GlassWeave scheme and CI): one short run per mode under the
@@ -53,10 +57,10 @@ struct CharacterizationTests {
         }
     }
 
-    /// The fixed workload. Version 1 matches the laboratory's
+    /// The fixed workload. Its version matches the laboratory's
     /// `BenchmarkScenario.version`.
     enum Workload {
-        static let version = 1
+        static let version = 2
         static let displayScale = 3.0
         static let portrait = (width: 1206, height: 2622)
         static let landscape = (width: 2622, height: 1206)

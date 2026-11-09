@@ -6,10 +6,12 @@ import Foundation
 /// protocol (docs/validation.md, "Fixed first-milestone workload"). Every
 /// mode uses the same moving source: the procedural background, a pure
 /// function of the deterministic clock, so frame *n* is identical in every
-/// mode and run. In a benchmark the frame-ID strip starts off (it can be
-/// switched on), the surface's renderer records `RenderMetrics`, Reset also
-/// restarts the measurement window, and the diagnostics refresh once a
-/// second from a timer instead of from frames.
+/// mode and run. In a benchmark the stage, and so the rendered surface,
+/// fills the whole screen with the controls above it on an opaque
+/// background; the frame-ID strip starts off (it can be switched on), the
+/// surface's renderer records `RenderMetrics`, Reset also restarts the
+/// measurement window, and the diagnostics refresh once a second from a
+/// timer instead of from frames.
 ///
 /// The only random element is the lifecycle stress schedule (mode 5), drawn
 /// from `-lab.benchmark.seed <number>` (default ``defaultSeed``), so a stress
@@ -17,8 +19,10 @@ import Foundation
 struct BenchmarkScenario: Equatable {
     /// The workload's version. Change it whenever the workload changes, and
     /// report it with every measurement. The package's offscreen
-    /// characterization (`CharacterizationTests.Workload.version`) mirrors it.
-    static let version = 1
+    /// characterization (`CharacterizationTests.Workload.version`) carries
+    /// the same number. Version 2 renders the surface full-screen; version 1
+    /// rendered only the stage above the controls.
+    static let version = 2
     static let defaultSeed: UInt64 = 0x6757_0009
 
     enum Mode: String, CaseIterable {
