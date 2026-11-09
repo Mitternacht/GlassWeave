@@ -29,6 +29,10 @@ public final class GlassRenderer {
     /// the ``GlassParameters`` normalization rule, or `nil` for none.
     public private(set) var panel: GlassPanel?
 
+    /// Records the CPU and GPU cost of every draw while set; `nil` (the
+    /// default) measures nothing. See ``RenderMetrics``.
+    public var metrics: RenderMetrics?
+
     /// Creates a renderer that submits to `commandQueue` on its device.
     /// Loads the package shader library and builds both pipelines now.
     public init(commandQueue: any MTLCommandQueue) throws {
@@ -83,7 +87,7 @@ public final class GlassRenderer {
         displayScale: Double,
         acquireTarget: () -> BackgroundDrawTarget?
     ) -> BackgroundRenderOutcome {
-        draw(targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: nil, acquireTarget: acquireTarget, onCommit: { _ in })
+        draw(targetPixelSize: targetPixelSize, displayScale: displayScale, acquireTarget: acquireTarget, onCommit: { _ in })
     }
 
     /// ``draw(targetPixelSize:displayScale:acquireTarget:)`` that also hands
@@ -95,7 +99,17 @@ public final class GlassRenderer {
         acquireTarget: () -> BackgroundDrawTarget?,
         onCommit: (any MTLCommandBuffer) -> Void
     ) -> BackgroundRenderOutcome {
-        draw(targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: nil, acquireTarget: acquireTarget, onCommit: onCommit)
+        let timer = DrawTimer(metrics: metrics)
+        let outcome = draw(
+            targetPixelSize: targetPixelSize, displayScale: displayScale, commandBuffer: nil,
+            acquireTarget: { timer.acquire(acquireTarget) },
+            onCommit: { [device] commandBuffer, frameID, drewFrame in
+                timer.willCommit(commandBuffer, frameID: frameID, drewFrame: drewFrame, device: device)
+                onCommit(commandBuffer)
+            }
+        )
+        timer.finish(outcome)
+        return outcome
     }
 
     /// Produces a new source frame and draws it, in one command buffer.
@@ -145,6 +159,33 @@ public final class GlassRenderer {
         acquireTarget: () -> BackgroundDrawTarget?,
         onCommit: (any MTLCommandBuffer) -> Void
     ) throws(BackgroundSourceError) -> BackgroundRenderOutcome {
+        let timer = DrawTimer(metrics: metrics)
+        do throws(BackgroundSourceError) {
+            let outcome = try produceAndDraw(
+                targetPixelSize: targetPixelSize, displayScale: displayScale,
+                produce: { commandBuffer, pixelSize in timer.produce { produce(commandBuffer, pixelSize) } },
+                acquireTarget: { timer.acquire(acquireTarget) },
+                onCommit: { [device] commandBuffer, frameID, drewFrame in
+                    timer.willCommit(commandBuffer, frameID: frameID, drewFrame: drewFrame, device: device)
+                    onCommit(commandBuffer)
+                }
+            )
+            timer.finish(outcome)
+            return outcome
+        } catch {
+            timer.finish(nil)
+            throw error
+        }
+    }
+
+    /// The production path behind both `drawProducing` methods.
+    private func produceAndDraw(
+        targetPixelSize: (width: Int, height: Int),
+        displayScale: Double,
+        produce: (_ commandBuffer: any MTLCommandBuffer, _ pixelSize: (width: Int, height: Int)) -> BackgroundFrameLease?,
+        acquireTarget: () -> BackgroundDrawTarget?,
+        onCommit: (_ commandBuffer: any MTLCommandBuffer, _ frameID: UInt64, _ drewFrame: Bool) -> Void
+    ) throws(BackgroundSourceError) -> BackgroundRenderOutcome {
         guard targetPixelSize.width > 0, targetPixelSize.height > 0 else {
             return .skipped(.zeroSizeTarget)
         }
@@ -159,7 +200,7 @@ public final class GlassRenderer {
                 // Let the producer's writes finish before it may reuse them.
                 let core = lease.core
                 commandBuffer.addCompletedHandler { _ in core.retireProducer() }
-                onCommit(commandBuffer)
+                onCommit(commandBuffer, lease.frame.frameID, false)
                 commandBuffer.commit()
                 throw error
             }
@@ -173,7 +214,7 @@ public final class GlassRenderer {
         displayScale: Double,
         commandBuffer: (any MTLCommandBuffer)?,
         acquireTarget: () -> BackgroundDrawTarget?,
-        onCommit: (any MTLCommandBuffer) -> Void
+        onCommit: (_ commandBuffer: any MTLCommandBuffer, _ frameID: UInt64, _ drewFrame: Bool) -> Void
     ) -> BackgroundRenderOutcome {
         let panel = panel
         return background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline] encoder, frame, backgroundUniforms, targetSize in

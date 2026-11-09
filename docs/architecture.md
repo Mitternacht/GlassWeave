@@ -201,6 +201,21 @@ The renderers hand each command buffer to the host just before committing it
 produced frame and a produced frame without a drawable, so the host counts
 exactly the GPU work in flight.
 
+### Implemented measurement (GW-09)
+
+`RenderMetrics` (core, public) is opt-in: with `GlassRenderer.metrics` unset
+the draw path reads no clock. When set, the renderer times each draw call on
+the calling thread, splitting the app's producer and the host's target
+acquisition from GlassWeave's own preparation and encoding, and adds one
+completed handler per committed command buffer that records
+`gpuStartTime`/`gpuEndTime` and the status. Samples go into a fixed-capacity
+ring (default 18,000, five minutes at 60 Hz) behind a `Mutex`, so a long run
+uses bounded memory and completion threads never block the drawing thread
+for more than one append. `reset()` starts a new window and ignores command
+buffers committed before it. The renderer, not the UIKit host, measures, so
+the same numbers come from `GlassSurfaceView`, an offscreen host, or a
+consumer's own host. `docs/validation.md` lists what it does not measure.
+
 ## Backend decision
 
 Use conventional Metal command submission to establish the first proof. Evaluate Metal 4 with the same scene, shader behavior, and measurement recipe after that proof. Runtime capability checks must accompany OS availability checks. A Metal 4-only implementation, a conventional implementation, or two supported paths are all possible outcomes of the experiment; no result is presumed. [Understanding the Metal 4 core API](https://developer.apple.com/documentation/metal/understanding-the-metal-4-core-api), [Metal feature tables](https://developer.apple.com/metal/availability/).

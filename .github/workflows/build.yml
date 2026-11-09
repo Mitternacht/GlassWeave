@@ -48,9 +48,17 @@ jobs:
             exit 1
           fi
 
+      # GW-09: the offscreen characterization renders the laboratory's
+      # background shader from its own copy; the two must not drift apart.
+      - name: Check the characterization shader matches the laboratory's
+        run: cmp Examples/GlassWeaveLab/GlassWeaveLab/ProceduralBackground.metal Tests/GlassWeaveCharacterizationTests/Shaders/ProceduralBackground.metal
+
       # The combined workspace's shared GlassWeave scheme builds every package
-      # product and runs both test bundles with MTL_DEBUG_LAYER=1 (Metal API
-      # Validation) set in its test action.
+      # product and runs the three test bundles with MTL_DEBUG_LAYER=1 (Metal
+      # API Validation) set in its test action. The characterization bundle
+      # runs its short functional pass there; its long Release run (the
+      # GlassWeaveCharacterization scheme) is a local measurement, not a CI
+      # step, because a hosted runner's GPU is not a characterized machine.
       - name: Build package (macOS Debug)
         run: xcodebuild build -workspace Examples/GlassWeave.xcworkspace -scheme GlassWeave -destination 'generic/platform=macOS' -configuration Debug CODE_SIGNING_ALLOWED=NO
 

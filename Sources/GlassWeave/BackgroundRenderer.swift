@@ -227,12 +227,14 @@ public final class BackgroundRenderer {
     ///   never hears "reusable" while its writes are in flight.
     /// - Parameter onCommit: Called with each command buffer just before
     ///   this draw commits it, so a host can track the frame until it
-    ///   completes. Not called when the draw commits nothing.
+    ///   completes, with the frame's ID and whether the command buffer drew
+    ///   it (`false` when it only carries a produced frame's writes). Not
+    ///   called when the draw commits nothing.
     func draw(
         targetPixelSize: (width: Int, height: Int),
         commandBuffer provided: (any MTLCommandBuffer)? = nil,
         acquireTarget: () -> BackgroundDrawTarget?,
-        onCommit: (any MTLCommandBuffer) -> Void = { _ in },
+        onCommit: (_ commandBuffer: any MTLCommandBuffer, _ frameID: UInt64, _ drewFrame: Bool) -> Void = { _, _, _ in },
         overlay: Overlay?
     ) -> BackgroundRenderOutcome {
         guard let source else { return .skipped(.missingSource) }
@@ -249,7 +251,7 @@ public final class BackgroundRenderer {
                 return
             }
             provided.addCompletedHandler { _ in submission.end(outcome) }
-            onCommit(provided)
+            onCommit(provided, source.lease.frame.frameID, false)
             provided.commit()
         }
         guard let target = acquireTarget(),
@@ -298,7 +300,7 @@ public final class BackgroundRenderer {
         commandBuffer.addCompletedHandler { commandBuffer in
             submission.end(commandBuffer.status == .completed ? .completed : .failed)
         }
-        onCommit(commandBuffer)
+        onCommit(commandBuffer, frame.frameID, true)
         commandBuffer.commit()
         return .submitted(frameID: frame.frameID)
     }

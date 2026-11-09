@@ -53,5 +53,19 @@ comparison runs, launch arguments fix the settings: `-lab.reduceMotion YES`,
 `-lab.reduceTransparency YES`, and `-lab.appearance dark` or `light` (the
 window's `overrideUserInterfaceStyle`).
 
+Benchmark (GW-09): launch with `-lab.benchmark baseline`, `native`, `custom`,
+`idle`, or `lifecycle` to run one mode of the fixed workload in
+[the validation protocol](../docs/validation.md#implemented-scenario-and-measurement-gw-09)
+(`BenchmarkScenario.swift`). Each mode shows only its composition: mode 1
+the moving background alone, mode 2 with the native reference, mode 3 with
+the custom panel too; mode 4 freezes the source; mode 5 runs 100 seeded
+hide/show and resize cycles (`-lab.benchmark.seed <number>`) between two
+settled allocation measurements. The frame-ID strip starts off, the surface's
+renderer records `RenderMetrics`, Reset restarts the measurement window,
+Settle and measure stops the clock and reports allocated bytes, and the
+diagnostics (refreshed once a second) add the workload, the metrics
+percentiles and counts, and Metal allocations. The iOS Simulator reports no
+allocation sizes.
+
 Nothing here is evidence of physical device performance. The remaining work
 and its acceptance gates are listed in [the task checklist](../tasks/todo.md).

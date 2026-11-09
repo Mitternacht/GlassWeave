@@ -1,6 +1,6 @@
 # GlassWeave validation protocol
 
-This document defines future acceptance work. No implementation, build, runtime test, trace, or performance measurement has been completed by this planning repository. Every number below is a provisional engineering target, not an observed result or a general device guarantee.
+This document defines the acceptance work. Sections headed "Recorded" or "Implemented" describe what exists and what was measured; everything else is the protocol. Every budget below is a provisional engineering target, not an observed result or a general device guarantee. No physical device has been measured yet; see [the Milestone 1 report](evidence/milestone-1.md).
 
 ## What each kind of evidence proves
 
@@ -28,6 +28,50 @@ Use a fixed random seed, repeatable animation clock, reset action, and frame-ID 
 5. Repeated hide/show, resize/rotation, and app background/foreground: lifetime stress.
 
 For initial optical correctness, add fixed four-corner orientation patterns, checkerboards, gradients, bright/dark edges, and a zero-refraction case. Keep deterministic stills separate from the timed workload.
+
+### Implemented scenario and measurement (GW-09)
+
+The laboratory runs this workload with `-lab.benchmark <mode>`
+(`Examples/GlassWeaveLab/GlassWeaveLab/BenchmarkScenario.swift`, scenario
+version 1). The modes are `baseline` (1), `native` (2), `custom` (3), `idle`
+(4: mode 3 with the source frozen at content time zero), and `lifecycle` (5:
+mode 3 with 100 hide/show and resize cycles drawn from
+`-lab.benchmark.seed <number>`, default `0x67570009`, between two settled
+allocation measurements). Every mode uses the same moving source, a pure
+function of the deterministic clock, so frame *n* is identical in every mode
+and run; the seed only orders the stress. In a benchmark the frame-ID strip
+starts off (the Frame ID switch turns it on), Reset also restarts the
+metrics window, the diagnostics refresh once a second from a timer rather
+than from frames, and Settle and measure stops the clock, waits for frames
+in flight, and reports allocated bytes.
+
+`RenderMetrics` (core, public) is the measurement: assign one to
+`GlassRenderer.metrics`. Per committed command buffer it records the CPU time
+of GlassWeave's preparation and encoding, of the app's producer, and of
+target (drawable) acquisition, separately; `gpuStartTime`/`gpuEndTime`; and
+`MTLDevice.currentAllocatedSize`. It counts draws, drawn frames, skips,
+rejected and declined productions (a declined production is a dropped
+frame), and committed, completed, and failed command buffers, and reduces a
+bounded window of samples to nearest-rank p50/p95/p99/max. Coalesced
+requests and deferrals at the in-flight bound come from `FrameStatistics`;
+pooled textures and their bytes from `FrameTexturePool.Statistics`. It does
+not measure presentation intervals or missed display opportunities,
+main-thread stalls, pipeline compilation, or energy; those still need
+Instruments on a device. The iOS Simulator reports zero for every Metal
+allocation size, so `RenderMetrics` gives `nil` there and no simulator
+allocation figure exists.
+
+`Tests/GlassWeaveCharacterizationTests` renders the same workload offscreen
+(the laboratory's shader, pool, in-flight bound, 60 Hz requests; 1206 ×
+2622 px, the panel at 320 × 180 pt) and compares mode 1 with GlassWeave's
+share of mode 3, then checks idle submissions and allocations after
+lifecycle cycles. The `GlassWeave` scheme runs it briefly under Metal API
+Validation; the `GlassWeaveCharacterization` scheme runs it in Release
+without validation, three interleaved 60 s runs per mode after 10 s
+warm-ups and 100 lifecycle cycles (environment variables
+`GLASSWEAVE_CHARACTERIZATION_RUNS`, `_SECONDS`, `_WARMUP_SECONDS`,
+`_LIFECYCLE_CYCLES`). On a Mac it characterizes the Mac only; the native
+reference glass is not part of an offscreen render.
 
 ## Device matrix
 
@@ -70,7 +114,7 @@ The 120 Hz scenario is initially characterization only. If later claimed as supp
 6. Freeze the source and let all effects settle for 30 seconds. Verify no repeating custom submissions. Then perform 100 lifecycle cycles and compare retained allocations after pending GPU work retires.
 7. Repeat the defined scenarios on the modern device. Store a concise report and representative captures under `docs/evidence/`; link large traces through an agreed artifact location instead of committing large binary traces by default.
 
-The first report is planned at `docs/evidence/milestone-1.md`. It must identify unavailable tools/counters or untested devices plainly. Missing measurements are not passes.
+The first report is [`docs/evidence/milestone-1.md`](evidence/milestone-1.md). It must identify unavailable tools/counters or untested devices plainly. Missing measurements are not passes. As of GW-09 it records no device measurement: every device target is not measured.
 
 ## Correctness cases
 

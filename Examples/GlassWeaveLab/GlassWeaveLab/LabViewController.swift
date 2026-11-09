@@ -14,7 +14,9 @@ import UIKit
 /// The background is the moving procedural source (``ProceduralBackground``)
 /// driven by one ``DeterministicClock``. Launching with
 /// `-lab.source pattern` presents the still four-corner orientation pattern
-/// instead, for orientation checks.
+/// instead, for orientation checks. Launching with `-lab.benchmark <mode>`
+/// runs one mode of GW-09's fixed workload (``BenchmarkScenario``) with
+/// `RenderMetrics` recording.
 final class LabViewController: UIViewController {
     enum SourceMode {
         case moving
@@ -29,6 +31,8 @@ final class LabViewController: UIViewController {
     /// Counts reset presses so UI tests can confirm the action ran.
     private(set) var resetCount = 0
     private let mode = SourceMode.fromLaunchArguments
+    /// GW-09's workload, when launched with `-lab.benchmark <mode>`.
+    private let benchmark = BenchmarkScenario.fromLaunchArguments()
 
     // MARK: Stage
 
@@ -64,6 +68,8 @@ final class LabViewController: UIViewController {
     private let closeWindowButton = UIButton(configuration: .bordered())
     private let diagnosticsLabel = UILabel()
     private let resetButton = UIButton(configuration: .bordered())
+    /// Benchmark only: settles the stage and reports allocated bytes.
+    private let measureButton = UIButton(configuration: .bordered())
     /// The control rows; vertical at accessibility text sizes.
     private var controlRows: [UIStackView] = []
     /// At accessibility text sizes the custom panel takes the stage's full
@@ -95,6 +101,16 @@ final class LabViewController: UIViewController {
     private var submittedWhenHidden: Int?
     private var hiddenPeriodSubmissions: Int?
 
+    // MARK: Benchmark state
+
+    /// The surface's trailing and bottom constraints; the lifecycle stress
+    /// insets them to resize the surface.
+    private var surfaceInsetConstraints: [NSLayoutConstraint] = []
+    private var diagnosticsTimer: Task<Void, Never>?
+    private var lifecycleStress: Task<Void, Never>?
+    private var lifecycleLine: String?
+    private var settledLine: String?
+
     // MARK: Lifecycle
 
     override func viewDidLoad() {
@@ -115,6 +131,9 @@ final class LabViewController: UIViewController {
         applyContentSizeLayout()
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
             self.applyContentSizeLayout()
+        }
+        if let benchmark {
+            startBenchmark(benchmark)
         }
     }
 
@@ -150,9 +169,15 @@ final class LabViewController: UIViewController {
         resetNativeReference()
         customTapCount = 0
         clock.reset()
-        wantsMotion = true
-        showsFrameID = true
-        overlaySwitch.isOn = true
+        // A benchmark freezes the source in its idle mode and starts with
+        // the frame-ID strip off, as timing requires.
+        wantsMotion = benchmark?.mode.freezesSource != true
+        showsFrameID = benchmark == nil
+        overlaySwitch.isOn = showsFrameID
+        settledLine = nil
+        if case let .success(stage) = custom {
+            stage.surface.renderer.metrics?.reset()
+        }
         stageSwitch.isOn = true
         applyStageVisibility()
         applyMotionState()
@@ -223,6 +248,11 @@ final class LabViewController: UIViewController {
         reference.axis = .vertical
         reference.alignment = .center
         reference.spacing = 6
+        // A benchmark mode shows only its own composition.
+        if let benchmark {
+            reference.isHidden = !benchmark.mode.showsNativeReference
+            customPanel.isHidden = !benchmark.mode.showsCustomPanel
+        }
 
         content.addArrangedSubview(customPanel)
         content.addArrangedSubview(reference)
@@ -335,6 +365,17 @@ final class LabViewController: UIViewController {
         resetButton.accessibilityIdentifier = "lab.reset"
         resetButton.addAction(UIAction { [weak self] _ in self?.reset() }, for: .primaryActionTriggered)
 
+        measureButton.configuration?.title = String(localized: "Settle and measure")
+        measureButton.accessibilityIdentifier = "lab.measure"
+        measureButton.addAction(UIAction { [weak self] _ in
+            Task { [weak self] in
+                guard let self, let settled = await measureSettled() else { return }
+                settledLine = "Settled: \(settled.line)"
+                updateDiagnostics()
+            }
+        }, for: .primaryActionTriggered)
+        measureButton.isHidden = benchmark == nil
+
         let tintRow = Self.row([tintControl, UIView(), Self.caption(String(localized: "Enabled")), enabledSwitch])
         let motionRow = Self.row([pauseButton, UIView(), Self.caption(String(localized: "Frame ID")), overlaySwitch])
         // The still pattern has no clock and no frame-ID strip.
@@ -345,7 +386,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, diagnosticsLabel, resetButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, diagnosticsLabel, resetButton, measureButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -429,12 +470,17 @@ final class LabViewController: UIViewController {
                 self?.updateDiagnostics()
             }
             stage.insertSubview(surface, at: 0)
-            NSLayoutConstraint.activate([
-                surface.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+            surfaceInsetConstraints = [
                 surface.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
-                surface.topAnchor.constraint(equalTo: stage.topAnchor),
                 surface.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+            ]
+            NSLayoutConstraint.activate(surfaceInsetConstraints + [
+                surface.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+                surface.topAnchor.constraint(equalTo: stage.topAnchor),
             ])
+            if benchmark != nil {
+                surface.renderer.metrics = RenderMetrics()
+            }
             let stageRendering = CustomStage(
                 surface: surface,
                 background: try ProceduralBackground(device: device),
@@ -512,6 +558,11 @@ final class LabViewController: UIViewController {
     private func updateCustomPanel() {
         guard case let .success(stageRendering) = custom else { return }
         let surface = stageRendering.surface
+        guard benchmark?.mode.showsCustomPanel != false else {
+            // Benchmark modes 1 and 2 draw the background alone.
+            try? surface.setPanel(nil)
+            return
+        }
         let frame = customPanel.convert(customPanel.bounds, to: surface)
         stripCenterY = frame.maxY - 34
         do {
@@ -670,6 +721,8 @@ final class LabViewController: UIViewController {
     /// clock runs, so laying out the label (large at accessibility text
     /// sizes) does not compete with the display rate.
     private func renderDidFinish() {
+        // A benchmark refreshes from its own timer, not from frames.
+        guard benchmark == nil else { return }
         if mode == .pattern || clock.ticks % 15 == 0 || updateLink?.isEnabled != true {
             updateDiagnostics()
         }
@@ -748,6 +801,141 @@ final class LabViewController: UIViewController {
         applyNativeState()
     }
 
+    // MARK: Benchmark
+
+    /// Starts what a benchmark mode adds: a once-a-second diagnostics
+    /// refresh (which requests no frame) and, in mode 5, the lifecycle
+    /// stress.
+    private func startBenchmark(_ benchmark: BenchmarkScenario) {
+        diagnosticsTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                self?.updateDiagnostics()
+            }
+        }
+        if benchmark.mode == .lifecycle {
+            runLifecycleStress(seed: benchmark.seed)
+        }
+    }
+
+    /// Allocated bytes with the stage settled.
+    private struct Settled {
+        /// The Metal device's `currentAllocatedSize`: everything this process
+        /// has allocated on it, including drawables.
+        let deviceBytes: Int
+        /// Textures the procedural background's pool holds, and their bytes.
+        /// The pool is bounded, so growth outside it is what matters.
+        let textures: Int
+        let poolBytes: Int
+
+        var line: String { "\(deviceBytes) B, \(textures) textures, \(poolBytes) B pooled" }
+    }
+
+    /// Stops the clock, waits for every frame in flight to complete and for
+    /// the driver to return freed memory, reads the allocations, and restores
+    /// motion.
+    private func measureSettled() async -> Settled? {
+        guard case let .success(stageRendering) = custom else { return nil }
+        let surface = stageRendering.surface
+        let wanted = wantsMotion
+        wantsMotion = false
+        applyMotionState()
+        let deadline = ContinuousClock.now + .seconds(5)
+        while surface.frameStatistics.framesInFlight > 0, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        try? await Task.sleep(for: .milliseconds(500))
+        let pool = stageRendering.background.poolStatistics
+        let settled = Settled(
+            deviceBytes: surface.renderer.device.currentAllocatedSize,
+            textures: pool.liveTextures,
+            poolBytes: pool.liveBytes
+        )
+        wantsMotion = wanted
+        applyMotionState()
+        return settled
+    }
+
+    /// Cuts `inset` points from the surface's trailing and bottom edges,
+    /// which resizes its drawable.
+    private func setSurfaceInset(_ inset: CGFloat) {
+        for constraint in surfaceInsetConstraints {
+            constraint.constant = -inset
+        }
+    }
+
+    /// Mode 5: after a two-second warm-up, measure settled allocations, run
+    /// the seeded hide/show and resize cycles, return to the full size, and
+    /// measure again.
+    private func runLifecycleStress(seed: UInt64) {
+        lifecycleLine = "Lifecycle: warming up"
+        lifecycleStress = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let before = await self?.measureSettled() else { return }
+            var schedule = LifecycleStressSchedule(seed: seed)
+            let cycles = LifecycleStressSchedule.cycles
+            for cycle in 1...cycles {
+                guard let self else { return }
+                lifecycleLine = "Lifecycle: cycle \(cycle) of \(cycles)"
+                stageSwitch.isOn = false
+                applyStageVisibility()
+                try? await Task.sleep(for: .milliseconds(100))
+                stageSwitch.isOn = true
+                applyStageVisibility()
+                try? await Task.sleep(for: .milliseconds(100))
+                setSurfaceInset(schedule.nextInset())
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            self?.setSurfaceInset(0)
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, let after = await measureSettled() else { return }
+            lifecycleLine = "Lifecycle: done · \(cycles) cycles · settled before \(before.line) · after \(after.line)"
+            updateDiagnostics()
+        }
+    }
+
+    /// The benchmark's lines: the workload, the renderer's metrics, current
+    /// allocations, and lifecycle and settled measurements.
+    private func benchmarkDiagnostics(_ benchmark: BenchmarkScenario) -> [String] {
+        var lines = [benchmark.summary]
+        guard case let .success(stageRendering) = custom else { return lines }
+        let renderer = stageRendering.surface.renderer
+        if let metrics = renderer.metrics {
+            let summary = metrics.summary()
+            let counts = summary.counts
+            let gpu = summary.gpu.map { "GPU p50/p95/p99 \(Self.milliseconds($0)) ms" } ?? "GPU time not reported"
+            let encode = summary.encode.map { "encode p50/p95/p99 \(Self.milliseconds($0)) ms" } ?? "no encode samples"
+            let produce = summary.produce.map { "produce p95 \(Self.milliseconds($0.p95)) ms" } ?? "no produce samples"
+            let acquire = summary.targetAcquisition.map { "acquire p95 \(Self.milliseconds($0.p95)) ms" } ?? "no acquire samples"
+            lines.append("Metrics: \(counts.drawn) frames · \(gpu) · \(encode) · \(produce) · \(acquire) · \(counts.commandBuffersCommitted) committed, \(counts.commandBuffersFailed) failed, \(counts.declinedProductions) declined, \(counts.skipped) skipped")
+        }
+        let pool = stageRendering.background.poolStatistics
+        let bytes = renderer.device.currentAllocatedSize
+        // The iOS Simulator reports zero for every allocation size.
+        let allocated = bytes > 0
+            ? "\(bytes) B allocated (\(String(format: "%.1f", Double(bytes) / 1_048_576)) MiB)"
+            : "allocation sizes not reported by this device"
+        lines.append("Metal: \(allocated) · pool \(pool.liveTextures) textures (\(pool.allocations) allocated, \(pool.liveBytes) B)")
+        if let lifecycleLine {
+            lines.append(lifecycleLine)
+        }
+        if let settledLine {
+            lines.append(settledLine)
+        }
+        return lines
+    }
+
+    private static func milliseconds(_ distribution: RenderMetrics.Distribution) -> String {
+        [distribution.p50, distribution.p95, distribution.p99]
+            .map { String(format: "%.3f", milliseconds($0)) }
+            .joined(separator: "/")
+    }
+
+    private static func milliseconds(_ duration: Duration) -> Double {
+        let components = duration.components
+        return Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1e15
+    }
+
     // MARK: Diagnostics
 
     private func updateDiagnostics() {
@@ -801,6 +989,9 @@ final class LabViewController: UIViewController {
         }
         if let lastRelease {
             lines.append("Released frame \(lastRelease.frameID): \(lastRelease.completedSubmissions) drawn, \(lastRelease.skippedSubmissions) skipped")
+        }
+        if let benchmark {
+            lines.append(contentsOf: benchmarkDiagnostics(benchmark))
         }
         diagnosticsLabel.text = lines.joined(separator: "\n")
     }

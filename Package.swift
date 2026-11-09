@@ -32,6 +32,15 @@ let package = Package(
             name: "GlassWeaveUIKitTests",
             dependencies: ["GlassWeaveUIKit", "GlassWeave"]
         ),
+        // GW-09's fixed workload rendered offscreen and measured with
+        // RenderMetrics. Uses no `@testable` import, so the
+        // GlassWeaveCharacterization scheme can run it in Release without
+        // Metal API Validation; its shader is a copy of the laboratory's
+        // ProceduralBackground.metal (CI checks they stay identical).
+        .testTarget(
+            name: "GlassWeaveCharacterizationTests",
+            dependencies: ["GlassWeave"]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )
