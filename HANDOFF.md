@@ -1,8 +1,13 @@
 # GlassWeave: implementation handoff for Claude
 
-Prepared 2026-11-08. This repository contains a plan, not an implementation.
-There is no Swift package, glass renderer, demo app, test suite, or active CI yet.
-The user deliberately reserved implementation for Claude.
+Prepared 2026-11-08 as a plan. Since then the `implement/milestone-1` branch
+has gained the v0.1 pre-alpha candidate: the Swift package, the UIKit
+laboratory, the test suites, a committed clean-consumer check, and a CI
+workflow that has not run on GitHub. Nothing is released. GW-09's
+physical-device qualification and the other device-dependent items are still
+open; [the task checklist](tasks/todo.md) records what is verified. The rest
+of this page is the original handoff. The user deliberately reserved
+implementation for Claude.
 
 ## Read in order
 

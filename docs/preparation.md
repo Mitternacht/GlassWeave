@@ -1,7 +1,13 @@
 # Repository preparation
 
-This repository is a documentation-only implementation plan and Claude handoff.
-No package, native-glass wrapper, optical shader, component, or demo is implemented.
+**Historical record (2026-11-08).** This page describes the repository as it
+was prepared, before implementation began. The package, laboratory, tests, and
+CI now exist on the `implement/milestone-1` branch; see
+[the task checklist](../tasks/todo.md) for the current state.
+
+At the time, this repository was a documentation-only implementation plan and
+Claude handoff. No package, native-glass wrapper, optical shader, component,
+or demo was implemented.
 
 ## Preparation sequence
 

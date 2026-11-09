@@ -1,6 +1,8 @@
 # Contributing to GlassWeave
 
-This is a planning repository. Start with [HANDOFF.md](HANDOFF.md), read the
+GlassWeave is in early development: the `implement/milestone-1` branch holds the v0.1
+pre-alpha candidate (package, UIKit laboratory, tests, CI), unreleased and not measured on
+a physical device. Start with [HANDOFF.md](HANDOFF.md), read the
 [plan](tasks/plan.md), and use the [ordered backlog](tasks/todo.md) as the source of
 implementation tasks. Review the relevant [architecture](docs/architecture.md) contracts
 before adding behavior.
@@ -20,21 +22,23 @@ useful for integration and are not evidence of physical-device performance.
 
 ## Implementation setup
 
-There is no `Package.swift` or source implementation yet. The first code task will create
-the package with Swift 6 mode and proposed iOS 26 and macOS 26 deployment baselines.
-Native UI work starts on iOS/iPadOS; a macOS core build will not imply a macOS UI adapter.
+The package uses Swift tools 6.2 and Swift 6 language mode with iOS/iPadOS 26 and
+macOS 26 deployment floors (declared; only the 27.2 runtimes have been run). Open
+`Examples/GlassWeave.xcworkspace`, which contains the package and the laboratory. Native
+UI work targets iOS/iPadOS; the macOS core build does not imply a macOS UI adapter.
 
 Coding agents must follow [AGENTS.md](AGENTS.md): load the matching installed Apple
 Xcode 27 skill and use the native Xcode MCP server for Apple project edits, documentation,
 builds, diagnostics, previews, runs, and tests. Human contributors may use Xcode directly.
 
-## Planned continuous integration
+## Continuous integration
 
-No CI workflow is installed at the planning stage. Add one with the first package
-implementation. The proposed starting checks are macOS Debug and Release builds and a
-generic iOS Simulator Release build on `macos-26`, with the selected Xcode version
-recorded in logs. Use focused test jobs as soon as testable behavior exists; do not add
-tests that merely prove an empty module compiles.
+`.github/workflows/build.yml` selects Xcode 27.2 on `macos-26` and builds the package
+(macOS Debug and Release, iOS Simulator Release), runs the package tests on macOS with
+Metal API Validation, builds the package and laboratory tests for the iOS Simulator, runs
+the clean-consumer check, and checks the documentation examples, the characterization
+shader copy, and that no source blocks on GPU work. It has not run on GitHub yet. Do not
+add tests that merely prove an empty module compiles.
 
 Use read-only workflow permissions, pinned action revisions, and `pull_request` for
 contributor builds. Avoid signing credentials for package-only checks. Keep physical
@@ -53,7 +57,8 @@ backlog and relevant docs in the same change. Public API changes need a compatib
 note; rendering or performance claims need evidence. Do not weaken existing checks to
 make a change pass.
 
-`main` currently contains planning documents. There is no release tag. The first release
+`main` contains the planning documents until the `implement/milestone-1` branch is
+merged. There is no release tag. The first release
 follows its roadmap acceptance gates, includes a changelog and usable example, and is
 tagged with a semantic version. Contributions are made under the repository's
 [MIT license](LICENSE).

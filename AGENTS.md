@@ -2,11 +2,17 @@
 
 ## Project state and scope
 
-GlassWeave is a planned Apple-native framework. This repository currently contains
-documentation only. Read `HANDOFF.md`, `README.md`, `tasks/plan.md`, `tasks/todo.md`, and
-the relevant architecture section before implementation. Do not treat described APIs,
-examples, package targets, or performance budgets as existing functionality. Distinguish
-implemented behavior from planned capabilities in documentation and reports.
+GlassWeave is an Apple-native framework in early development. The
+`implement/milestone-1` branch holds the v0.1 pre-alpha candidate: the Swift package
+(`GlassWeave`, `GlassWeaveUIKit`), the UIKit laboratory app, Swift Testing and XCTest
+suites, the clean-consumer check, and a CI workflow that has not run on GitHub yet.
+Nothing is released, and no physical device has been measured. `tasks/todo.md` is the
+only completion checklist; it records which acceptance items are verified and why the
+others are open. Read `HANDOFF.md`, `README.md`, `tasks/plan.md`, `tasks/todo.md`, and
+the relevant architecture section before implementation. Do not treat planned tasks
+(GW-11 and later), their APIs and examples, or provisional performance budgets as existing
+functionality. Distinguish implemented behavior from planned capabilities in
+documentation and reports.
 
 Work on small, unblocked slices. Preserve existing work and unchecked tasks. Update
 acceptance evidence as work completes. Do not expose speculative APIs, return fake
@@ -20,10 +26,9 @@ documentation search, builds, runs, tests, previews, and diagnostics. Use both e
 Apple's skill guidance supersedes prior model knowledge. After updating Xcode, refresh
 the installed skill copies from `xcrun agent plugin path --plugin-format codex`.
 
-When the first implementation task creates the package, inspect the native bridge
-capabilities. If package creation is still unavailable, a one-time on-disk manifest
-bootstrap may be needed before opening the package in Xcode; subsequent Apple source
-and project edits use the native tools.
+The package exists (GW-01). In Xcode, open only `Examples/GlassWeave.xcworkspace`,
+which contains the package and the laboratory; opening the package folder or the
+laboratory project on its own leaves a stale package root behind in the native bridge.
 If a required tool is unavailable, report the concrete limitation rather than claiming
 that a build or runtime check passed.
 
