@@ -1166,6 +1166,131 @@ static float3 gw_light_lines(float3 N, float depth, constant GWGlassUniforms &un
     return energy * mask;
 }
 
+// MARK: Refined look (Apple-grade defaults)
+//
+// `GlassLighting.Look.refined` (`lighting.tint.w` is 1): one light direction, a
+// thin crisp rim line, one soft long highlight, a calm edge reflection, and a
+// polished band for the chrome finishes. No softboxes, no horizon ring, no
+// round glare spot. The classic model above and below does not change; this
+// code runs only for a panel that asks for it (docs/glass-optics.md, "Apple-grade
+// defaults").
+
+/// 1 at `center`, falling smoothly to 0 `width` away from it.
+static float gw_refined_bump(float x, float center, float width) {
+    const float t = saturate(abs(x - center) / max(width, 1e-4));
+    return 1.0 - t * t * (3.0 - 2.0 * t);
+}
+
+/// How the surface at `N` faces a light whose direction in the panel plane is
+/// `toward`: `lit` is 1 on the side toward the light, a quarter at right
+/// angles, 0 on the far side; `back` is 1 on the far side and falls fast, the
+/// faint echo of the light inside the glass.
+static void gw_refined_facing(float3 N, float2 toward, thread float &lit, thread float &back) {
+    const float len = length(N.xy);
+    const float side = len > 1e-4 ? dot(N.xy / len, toward) : 0.0;
+    const float a = saturate(0.5 + 0.5 * side);
+    const float b = saturate(0.5 - 0.5 * side);
+    lit = a * a;
+    back = b * b * b * b;
+}
+
+/// One light's soft, long highlight: a narrow window of the surface tilt,
+/// placed by the light's elevation (a low light lands near the wall, a high
+/// one deeper) and never narrower than about a pixel and a half, that runs
+/// along the rim and fades over the quarter turn to either side of the light.
+static float3 gw_refined_highlight(float3 N, float4 direction, float4 color, float footprint) {
+    if (direction.w <= 0.0) {
+        return float3(0.0);
+    }
+    const float planar = length(direction.xy);
+    const float2 toward = planar > 1e-4 ? direction.xy / planar : float2(0.0, -1.0);
+    float lit, back;
+    gw_refined_facing(N, toward, lit, back);
+    const float tilt = 1.0 - N.z;
+    const float center = mix(0.55, 0.20, saturate(direction.z));
+    const float width = max(clamp(1.6 * rsqrt(max(color.w, 1.0)), 0.14, 0.45), 1.5 * footprint);
+    return color.xyz * (direction.w * gw_refined_bump(tilt, center, width) * (lit * lit * lit + 0.1 * back));
+}
+
+/// The refined model's bright lines at a point inside the band, in linear
+/// light before the knee: the rim line and the highlights of the key and rim
+/// lights.
+static float3 gw_refined_lines(float3 N, float depth, constant GWGlassUniforms &uniforms) {
+    constant GWLightingUniforms &lighting = uniforms.lighting;
+    const float band = lighting.bandWidth;
+    if (band <= 0.0 || depth >= band) {
+        return float3(0.0);
+    }
+    const float mask = 1.0 - smoothstep(0.75 * band, band, depth);
+    float lit, back;
+    gw_refined_facing(N, lighting.edgeDirection, lit, back);
+    const float tilt = 1.0 - N.z;
+    const float t3 = tilt * tilt * tilt;
+    const float3 tint = mix(float3(1.0), lighting.keyColor.xyz, 0.35);
+    // A hairline: the surface at the outline is nearly upright. Lit side
+    // bright, the sides faint, the far side a weak echo.
+    float3 energy = tint * (lighting.fresnel * 0.25 * t3 * t3 * lit * (lighting.contrast > 0.0 ? 0.0 : 1.0));
+    energy += (gw_refined_highlight(N, lighting.key, lighting.keyColor, lighting.footprint)
+               + 0.6 * gw_refined_highlight(N, lighting.rim, lighting.rimColor, lighting.footprint))
+              * (0.16 * lighting.specular);
+    return energy * mask;
+}
+
+/// The refined edge reflection: a smooth gradient, sky toward the light and
+/// floor away from it, mixed in by a soft Fresnel term, so the rim reads as
+/// the edge of a thick clear body. The chrome finishes add one soft reflective
+/// band across the bevel (the polished edge), partly clear, with the thin-film
+/// hue on the band and the rim line only. `touched` receives the mix.
+static float3 gw_refined_edge(
+    float3 glass, float3 N, float depth, float bandMask, constant GWGlassUniforms &uniforms, thread float &touched)
+{
+    constant GWLightingUniforms &lighting = uniforms.lighting;
+    if (lighting.reflection <= 0.0 || bandMask <= 0.0) {
+        return glass;
+    }
+    float lit, back;
+    gw_refined_facing(N, lighting.edgeDirection, lit, back);
+    const float tilt = 1.0 - N.z;
+    const bool dark = lighting.environment == GWLightingEnvironmentStudioDark;
+    const float3 sky = dark ? float3(0.30, 0.31, 0.35) : float3(0.97, 0.975, 1.0);
+    const float3 floorColor = dark ? float3(0.07, 0.07, 0.08) : float3(0.40, 0.41, 0.46);
+    const float toward = saturate(0.12 + 0.88 * lit + 0.25 * back);
+    const float3 reflected = mix(floorColor, sky, toward);
+    // A soft Fresnel body near the wall and a crisp hairline at the outline: the
+    // hairline is the sky on the lit side and the floor on the far side, so it
+    // shows on light pages (a thin gray line) as well as on dark ones.
+    const float t2 = tilt * tilt;
+    const float soft = lighting.f0 + (1.0 - lighting.f0) * t2 * tilt * sqrt(tilt);
+    // The hairline is a fixed one to two pixels at the outline, whatever the
+    // profile, a little stronger on the lit side and on its echo opposite.
+    const float hair = 1.0 - smoothstep(0.4, 1.8, depth);
+    const float weight = 0.55 + 0.30 * lit + 0.45 * back;
+    if (lighting.finish == GWLightingFinishDielectric) {
+        const float body = saturate(soft * lighting.reflection * 0.5);
+        const float line = saturate(hair * lighting.fresnel * 1.15 * weight);
+        const float alpha = (1.0 - (1.0 - body) * (1.0 - line)) * bandMask;
+        glass = mix(glass, reflected, alpha);
+        touched = max(touched, alpha);
+        return glass;
+    }
+    // The polished edge: across the bevel the reflected gradient runs from a
+    // darker wall at the outline, through one soft bright band, to the clear
+    // face. The wall is what makes the edge crisp on a light page.
+    const float band = gw_refined_bump(tilt, 0.26, 0.20);
+    const float wall = smoothstep(0.45, 0.85, tilt);
+    const float3 wallColor = floorColor * (dark ? 1.0 : 0.62) * (0.7 + 0.6 * lit);
+    float3 metal = mix(reflected * (0.75 + 0.25 * band), wallColor, wall) * lighting.tint.xyz;
+    if (lighting.finish == GWLightingFinishPrismatic) {
+        const float turn = precise::atan2(N.x, -N.y) * (0.5 / M_PI_F) - lighting.azimuth * (0.5 / M_PI_F);
+        const float hue = lighting.prism.z + lighting.prism.x * (turn - floor(turn)) + 0.5 * (1.0 - N.z);
+        metal *= mix(float3(1.0), gw_light_film(hue, lighting.prism.y), saturate(band + 0.5 * wall));
+    }
+    const float alpha = lighting.reflection * smoothstep(0.01, 0.10, tilt) * (0.30 + 0.42 * band + 0.38 * wall) * bandMask;
+    glass = mix(glass, metal, alpha);
+    touched = max(touched, alpha);
+    return glass;
+}
+
 /// The glass with the light model composited: reflections of the studio on
 /// the rim (glass mixed with the Fresnel reflection, or chrome or the
 /// prismatic finish replacing it), then the bright lines and their bloom added
@@ -1186,8 +1311,13 @@ static float3 gw_light_model(
     const float3 N = gw_light_normal(q, uniforms, outward);
     const float bandMask = band > 0.0 ? 1.0 - smoothstep(0.75 * band, band, depth) : 0.0;
 
+    // The refined look (lighting.tint.w) has its own edge reflection and lines.
+    const bool refined = lighting.tint.w > 0.5;
+
     // Reflections.
-    if (lighting.reflection > 0.0 && bandMask > 0.0) {
+    if (refined) {
+        glass = gw_refined_edge(glass, N, depth, bandMask, uniforms, touched);
+    } else if (lighting.reflection > 0.0 && bandMask > 0.0) {
         const float3 R = float3(2.0 * N.z * N.xy, 2.0 * N.z * N.z - 1.0);
         float3 base;
         float2 boxes;
@@ -1230,7 +1360,12 @@ static float3 gw_light_model(
     }
 
     // The bright lines, and the bloom spread along the surface from them.
-    float3 energy = gw_light_lines(N, depth, uniforms);
+    float3 energy = float3(0.0);
+    if (refined) {
+        energy = gw_refined_lines(N, depth, uniforms);
+    } else {
+        energy = gw_light_lines(N, depth, uniforms);
+    }
     if (lighting.bloom > 0.0 && lighting.bloomWidth > 0.0) {
         float3 spill = float3(0.0);
         for (uint i = 1u; i <= 3u; ++i) {
@@ -1243,10 +1378,15 @@ static float3 gw_light_model(
                     continue;
                 }
                 float2 ignored;
-                spill += weight * gw_light_lines(gw_light_normal(tap, uniforms, ignored), -tapDistance, uniforms);
+                if (refined) {
+                    spill += weight * gw_refined_lines(gw_light_normal(tap, uniforms, ignored), -tapDistance, uniforms);
+                } else {
+                    spill += weight * gw_light_lines(gw_light_normal(tap, uniforms, ignored), -tapDistance, uniforms);
+                }
             }
         }
-        energy += spill * (0.6 * lighting.bloom);
+        // The refined bloom is shorter in reach and strength: neutral, not neon.
+        energy += spill * ((refined ? 0.4 : 0.6) * lighting.bloom);
     }
     if (energy.x > 0.0 || energy.y > 0.0 || energy.z > 0.0) {
         glass = glass + (1.0 - glass) * gw_light_knee(energy);

@@ -209,7 +209,9 @@ typedef enum GWLightingEnvironment {
 /// - `keyColor`: its color (`xyz`) and Blinn-Phong exponent (`w`).
 /// - `rim`, `rimColor`: the optional second light as `key`, `keyColor`;
 ///   intensity 0 draws no rim light.
-/// - `tint`: the chrome tint in linear light (`xyz`, `w` zero).
+/// - `tint`: the chrome tint in linear light (`xyz`) and the look in `w`: 0
+///   the GW-23 model, 1 the refined (Apple-grade) look. The layout is
+///   unchanged: `w` was zero padding that the GW-23 shader never reads.
 /// - `prism`: the prismatic finish's spread in turns of hue around the rim
 ///   (`x`), saturation 0...1 (`y`), phase in turns (`z`), `w` zero.
 /// - `finish`: a `GWLightingFinish` value. `environment`: a

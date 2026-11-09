@@ -27,6 +27,7 @@ internal import GlassWeaveShaderTypes
 /// | Property | Unit | Valid range | Default | Meaning |
 /// | --- | --- | --- | --- | --- |
 /// | ``isEnabled`` | `Bool` | — | `true` (``legacy`` is `false`) | Whether the light model draws. |
+/// | ``look`` | ``Look`` | — | ``Look/classic`` | `.classic` is the GW-23 model, byte for byte. `.refined` is the Apple-grade look: a thin crisp rim line and one soft, long highlight, both brighter on the lit side, with a calm edge reflection and no studio strips. |
 /// | ``key`` | ``Light`` | see ``Light`` | top, 50°, white | The key light. Its azimuth also turns the studio. |
 /// | ``rim`` | ``Light``? | see ``Light`` | `nil` | A second light that adds a specular streak of its own (it does not turn the studio). |
 /// | ``environment`` | ``Environment`` | — | ``Environment/studioLight`` | The studio the rim reflects. |
@@ -132,6 +133,36 @@ public struct GlassLighting: Hashable, Sendable {
         public static let chrome = Finish.chrome(tint: .white)
     }
 
+    /// How the model turns its parameters into light on the glass.
+    ///
+    /// > Important: Experimental. This API may change before a stable release.
+    public enum Look: Hashable, Sendable, CaseIterable {
+        /// The GW-23 model: a Fresnel outline, a Blinn-Phong lobe, and an
+        /// analytic photo studio of softboxes reflected on the rim. Output is
+        /// byte-identical to what GW-23 drew for the same values.
+        case classic
+        /// The Apple-grade look, restrained and from one light direction:
+        /// - a thin, crisp **rim line** where the surface turns edge-on, bright
+        ///   on the lit side, faint elsewhere, with a weak echo on the far side;
+        /// - one soft, long **highlight** just inside the rim on the lit side
+        ///   (never a round glare spot), placed by the key light's elevation and
+        ///   widened by its ``Light/size``;
+        /// - a calm **edge reflection**: a smooth sky-to-floor gradient mixed in
+        ///   by a soft Fresnel term, lighter toward the light and darker away
+        ///   from it, with no softboxes, no horizon ring and no gray wedges;
+        /// - `.chrome` and `.prismatic` become a **polished glass edge**: one
+        ///   soft reflective band across the bevel that stays partly clear, so
+        ///   the backdrop still shows through, with the thin-film hue only on
+        ///   that band and the rim line;
+        /// - a **bloom** that is neutral and short.
+        ///
+        /// ``fresnel`` sets the rim line, ``specular`` the highlight,
+        /// ``reflection`` the edge reflection, and ``bloom`` the glow around
+        /// the lines. The optional ``rim`` light adds a second, weaker
+        /// highlight. The studio ``environment`` chooses the gradient's colors.
+        case refined
+    }
+
     /// The parameter that held a rejected value.
     public enum Field: String, Hashable, Sendable, CaseIterable {
         case keyAzimuth, keyElevation, keyRed, keyGreen, keyBlue, keyIntensity, keySize
@@ -147,6 +178,9 @@ public struct GlassLighting: Hashable, Sendable {
 
     /// Whether the light model draws. `false` is ``legacy``.
     public var isEnabled: Bool
+    /// How the parameters become light: the GW-23 model or the Apple-grade
+    /// look. Defaults to ``Look/classic`` so existing panels do not change.
+    public var look: Look
     /// The key light.
     public var key: Light
     /// An optional second light; it adds a specular streak of its own.
@@ -194,8 +228,10 @@ public struct GlassLighting: Hashable, Sendable {
         bloomWidth: Double = 6,
         bandWidth: Double? = nil,
         drivesGlow: Bool = true,
-        crispOutline: Bool = false
+        crispOutline: Bool = false,
+        look: Look = .classic
     ) {
+        self.look = look
         self.isEnabled = isEnabled
         self.key = key
         self.rim = rim
@@ -216,6 +252,29 @@ public struct GlassLighting: Hashable, Sendable {
     /// ``GlassParameters/edgeHighlight`` lights its outline from the upper
     /// left, exactly as before GW-23.
     public static let legacy = GlassLighting(isEnabled: false)
+
+    /// The Apple-grade look (``Look/refined``) with its tuned starting values:
+    /// a key light at 50 degrees, a thin rim line, a soft highlight, a calm
+    /// edge reflection, and a short neutral bloom. Everything stays an
+    /// ordinary stored property, so a host changes any of it afterwards.
+    ///
+    /// - Parameters:
+    ///   - azimuth: The key light's azimuth in degrees (0 is the top,
+    ///     clockwise); 315 is the upper left, where Apple's glass is lit from.
+    ///   - environment: `.studioLight` on light pages, `.studioDark` on dark
+    ///     ones.
+    ///   - finish: `.dielectric` for glass, `.chrome` or `.prismatic` for a
+    ///     polished edge.
+    public static func refined(
+        azimuth: Double = 315, environment: Environment = .studioLight, finish: Finish = .dielectric
+    ) -> GlassLighting {
+        GlassLighting(
+            key: Light(azimuth: azimuth, elevation: 50, intensity: 1, size: 0.3),
+            environment: environment, finish: finish,
+            fresnel: 0.55, specular: 0.5, reflection: 0.4, bloom: 0.12, bloomWidth: 3,
+            look: .refined
+        )
+    }
 
     /// Whether the light model changes the picture. A panel without it is
     /// drawn by a pipeline variant that does not contain the light model.
@@ -359,7 +418,7 @@ extension GlassPanelGeometry {
             record.keyColor = SIMD4(keyColor, exponent(lighting.key.size))
             record.rim = SIMD4(rimDirection, rimIntensity)
             record.rimColor = SIMD4(rimColor, rimExponent)
-            record.tint = SIMD4(tint, 0)
+            record.tint = SIMD4(tint, lighting.look == .refined ? 1 : 0)
             record.prism = prism
             record.finish = finish
             record.environment = lighting.environment == .studioDark
