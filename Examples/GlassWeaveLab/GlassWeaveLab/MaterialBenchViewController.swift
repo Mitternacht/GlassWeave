@@ -347,7 +347,7 @@ final class MaterialBenchViewController: UIViewController {
             pill.light = pooledLight()
             pill.lens.dispersionTaps = .sixTap
             pill.lens.dispersion = 0.45
-            pill.lens.inlays = [GlassLens.Inlay(radius: 40, height: 14, profile: .dome, rimLine: 0.25)]
+            pill.lens.inlays = [GlassLens.Inlay(radius: 40, height: 14, profile: .dome, rimLine: 0.3)]
             return pill
         }()),
         Demo(caption: String(localized: "Dome, three-tap"), parameters: {
@@ -399,7 +399,7 @@ final class MaterialBenchViewController: UIViewController {
             pill.light = pooledLight()
             pill.lens.dispersionTaps = .sixTap
             pill.lens.dispersion = 0.45
-            pill.lens.inlays = [GlassLens.Inlay(radius: 40, height: 14, profile: .dome, rimLine: 0.25)]
+            pill.lens.inlays = [GlassLens.Inlay(radius: 40, height: 14, profile: .dome, rimLine: 0.3)]
             pill.tint = GlassTint(red: 0.8, green: 0.85, blue: 1, strength: 0.03)
             pill.frost = GlassFrost(profile: .uniform, sigma: 4.5, grain: 0.2, thickness: 1, saturation: 1.2, brightness: 1.05)
             return pill
@@ -427,7 +427,7 @@ final class MaterialBenchViewController: UIViewController {
             Demo(caption: String(localized: "Rounded rectangle"), parameters: RefinedLook.panel(corner: 28, bezel: 18, dark: dark)),
             Demo(caption: String(localized: "Apple clear, GlassWeave thick lens"), parameters: {
                 var lens = RefinedLook.lens(dark: dark)
-                lens.lens.inlays = [GlassLens.Inlay(radius: 22, height: 8, profile: .dome, rimLine: 0.25)]
+                lens.lens.inlays = [GlassLens.Inlay(radius: 22, height: 8, profile: .dome, rimLine: 0.3)]
                 return lens
             }()),
         ]
@@ -449,7 +449,7 @@ final class MaterialBenchViewController: UIViewController {
             pill.light = pooledLight()
             pill.lens.dispersionTaps = .sixTap
             pill.lens.dispersion = 0.45
-            pill.lens.inlays = [GlassLens.Inlay(radius: 40, height: 14, profile: .dome, rimLine: 0.25)]
+            pill.lens.inlays = [GlassLens.Inlay(radius: 40, height: 14, profile: .dome, rimLine: 0.3)]
             return pill
         }()),
         Demo(caption: String(localized: "Smoky dome: a calm gel behind clear glass"), parameters: {
@@ -483,7 +483,7 @@ final class MaterialBenchViewController: UIViewController {
         }()),
         Demo(caption: String(localized: "Lens pill, 8 points from the button"), parameters: {
             var pill = RefinedLook.lens(bezel: 34, thickness: 26, dark: false)
-            pill.lens.inlays = [GlassLens.Inlay(radius: 24, height: 10, profile: .dome, rimLine: 0.25)]
+            pill.lens.inlays = [GlassLens.Inlay(radius: 24, height: 10, profile: .dome, rimLine: 0.3)]
             pill.grounding = paperGrounding(offset: 8, blur: 18, opacity: 0.2, caustic: 0.12)
             return pill
         }()),
@@ -925,6 +925,16 @@ final class MaterialBenchViewController: UIViewController {
             // A caption is at least as wide as a small button's neighbours.
             if mode == .compare {
                 captionLabels[index].frame = CGRect(x: left, y: frames[index].maxY + 4, width: width, height: captionHeight + 14)
+                continue
+            }
+            if mode == .paper, index < 2 {
+                // PRESENCE: the button's caption and the pill's caption share one
+                // line under the row; they used to overlap (each was at least 300
+                // points wide, centered on its own panel). The button's stays
+                // under the button, the pill's starts after it.
+                let x = index == 0 ? frames[0].minX : frames[0].minX + 124
+                let w = index == 0 ? 116 : frames[1].maxX - x
+                captionLabels[index].frame = CGRect(x: x + 4, y: frames[index].maxY + 4, width: w - 8, height: captionHeight + 14)
                 continue
             }
             let wide = mode == .chrome || mode == .paper

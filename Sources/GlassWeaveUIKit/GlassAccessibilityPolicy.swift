@@ -205,6 +205,9 @@ public enum GlassAccessibilityPolicy {
         presented.edgeDepth = 0
         presented.banding = 0
         presented.glints = 0
+        // The presence (the body's backdrop pickup and lift, the inner edge
+        // glow) is decoration too: removed, so the surface reads as before.
+        presented.presence = 0
         // A hairline that contrasts with the surface, so the boundary shows
         // on an opaque or white surface too.
         presented.crispOutline = true

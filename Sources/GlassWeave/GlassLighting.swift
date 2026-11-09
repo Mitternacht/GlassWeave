@@ -44,6 +44,7 @@ internal import GlassWeaveShaderTypes
 /// | ``edgeDepth`` | normalized | 0...1 | 0 | The refined look's thick-slab shading across the bevel: deeper (darker) toward the side away from the light, a faint inner light on the lit side. 0 draws none. Ignored by ``Look/classic``. |
 /// | ``banding`` | normalized | 0...1 | 0 | The polished finishes' reflection bands across the bevel (``Finish/chrome(tint:)``, ``Finish/prismatic(spread:saturation:phase:)``): alternating bright and dark stripes, as in a polished metal ring. 0 draws none. |
 /// | ``glints`` | normalized | 0...1 | 0 | Small bright glints at fixed angles around a polished rim (one facing the light, a weaker opposite, two faint at the sides), colored by the thin film with the prismatic finish. 0 draws none. |
+/// | ``presence`` | normalized | 0...1 | 0 | The refined look's liveliness without any extra bend: the body picks up the colors behind it softly (a few wide samples of the backdrop), lifts a little in luminance, and the inner edge carries a soft glow that follows the backdrop's color, brighter on the lit side, with a deeper far side. 0 draws none. Ignored by ``Look/classic``. Experimental. |
 ///
 /// **The model** (`docs/glass-optics.md`). With the viewer's direction
 /// `V = (0, 0, 1)` and the light's `L`, the reflected fraction is Schlick's
@@ -173,7 +174,7 @@ public struct GlassLighting: Hashable, Sendable {
         case indexOfRefraction, fresnel, specular, reflection, bloom, bloomWidth, bandWidth
         case chromeTintRed, chromeTintGreen, chromeTintBlue
         case prismaticSpread, prismaticSaturation, prismaticPhase
-        case edgeDepth, banding, glints
+        case edgeDepth, banding, glints, presence
         /// The azimuth passed to ``GlassRenderer/setLightOffset(azimuth:elevation:)``.
         case lightOffsetAzimuth
         /// The elevation passed to ``GlassRenderer/setLightOffset(azimuth:elevation:)``.
@@ -226,6 +227,15 @@ public struct GlassLighting: Hashable, Sendable {
     /// chrome or prismatic finish): at fixed angles from the key light, with
     /// the thin-film hue under the prismatic finish. 0 draws none.
     public var glints: Double
+    /// The refined look's presence, 0...1 (experimental): a livelier body and
+    /// edge that add no bend. The body picks up the backdrop's colors gently
+    /// (a few wide samples of the backdrop around each pixel, never a lens
+    /// offset), gains a slight luminance lift, and the inner edge carries a
+    /// thin glow in the backdrop's own color, brighter on the lit side and
+    /// deeper on the far side. A lens inlay gets a soft shade and its own rim
+    /// light. 0 draws none, byte for byte. Reduce Transparency and Increase
+    /// Contrast remove it.
+    public var presence: Double
 
     /// The longest the bloom can reach: 24 points.
     public static let maximumBloomWidth = 24.0
@@ -250,8 +260,10 @@ public struct GlassLighting: Hashable, Sendable {
         look: Look = .classic,
         edgeDepth: Double = 0,
         banding: Double = 0,
-        glints: Double = 0
+        glints: Double = 0,
+        presence: Double = 0
     ) {
+        self.presence = presence
         self.edgeDepth = edgeDepth
         self.banding = banding
         self.glints = glints
@@ -341,7 +353,7 @@ public struct GlassLighting: Hashable, Sendable {
             (.keySize, key.size),
             (.indexOfRefraction, indexOfRefraction), (.fresnel, fresnel), (.specular, specular),
             (.reflection, reflection), (.bloom, bloom), (.bloomWidth, bloomWidth),
-            (.edgeDepth, edgeDepth), (.banding, banding), (.glints, glints),
+            (.edgeDepth, edgeDepth), (.banding, banding), (.glints, glints), (.presence, presence),
         ]
         if let rim {
             checks += [
@@ -380,6 +392,7 @@ public struct GlassLighting: Hashable, Sendable {
         result.edgeDepth = unit(edgeDepth)
         result.banding = unit(banding)
         result.glints = unit(glints)
+        result.presence = unit(presence)
         result.bloomWidth = min(max(bloomWidth, 0), Self.maximumBloomWidth)
         result.bandWidth = bandWidth.map { min(max($0, 0), maximumLength) }
         switch finish {
@@ -471,7 +484,12 @@ extension GlassPanelGeometry {
             record.keyColor = SIMD4(keyColor, exponent(lighting.key.size))
             record.rim = SIMD4(rimDirection, rimIntensity)
             record.rimColor = SIMD4(rimColor, rimExponent)
-            record.tint = SIMD4(tint, lighting.look == .refined ? 1 : 0)
+            // The look rides in `tint.w`: 0 classic, 1 refined. The presence
+            // adds its 8-bit level to the refined 1 (an exactly representable
+            // integer), so a refined panel without it keeps the value 1.
+            let presenceLevel: Float = lighting.look == .refined
+                ? Float((min(max(lighting.presence, 0), 1) * 255).rounded()) : 0
+            record.tint = SIMD4(tint, lighting.look == .refined ? 1 + presenceLevel : 0)
             // The refined look's enhancements ride in `prism.w`, which was zero
             // padding: three 8-bit fields (depth, banding, glints), exactly
             // representable in a float; zero when none is on.

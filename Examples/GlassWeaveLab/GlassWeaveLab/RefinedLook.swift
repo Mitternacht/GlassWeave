@@ -13,17 +13,29 @@ enum RefinedLook {
     /// The one light direction of the lab: the upper left.
     static let azimuth = 315.0
 
+    /// PRESENCE: the level every refined panel of the lab carries
+    /// (`GlassLighting.presence`): the body picks up the backdrop's colors
+    /// gently and lifts a little, the inner edge glows in the backdrop's hue,
+    /// the far side is deeper. It bends nothing.
+    static let presence = 0.85
+
     /// The refined light model for a dark or a light page.
     static func lighting(dark: Bool, finish: GlassLighting.Finish = .dielectric) -> GlassLighting {
-        .refined(azimuth: azimuth, environment: dark ? .studioDark : .studioLight, finish: finish)
+        var lighting = GlassLighting.refined(azimuth: azimuth, environment: dark ? .studioDark : .studioLight, finish: finish)
+        lighting.presence = presence
+        return lighting
     }
 
     /// A quiet tint: a whisper of the page's own value, so the body is a clear
-    /// material and not a colored gel.
-    static func tint(dark: Bool, strength: Double = 0.10) -> GlassTint {
+    /// material and not a colored gel. PRESENCE: a fifth as strong on dark pages
+    /// (0.02 against 0.10): a gray mixed in linear light desaturated the
+    /// backdrop under the glass, which read as a gray cast; the backdrop's own
+    /// color now comes through, and the presence lifts it. Dark pages carry
+    /// 0.02 (a trace).
+    static func tint(dark: Bool, strength: Double = 0.02) -> GlassTint {
         dark
             ? GlassTint(red: 0.62, green: 0.64, blue: 0.70, strength: strength)
-            : GlassTint(red: 1, green: 1, blue: 1, strength: strength * 2.5)
+            : GlassTint(red: 1, green: 1, blue: 1, strength: strength * 10)
     }
 
     /// A soft, low-contrast shadow for light pages: one drop, the faintest
@@ -87,7 +99,9 @@ enum RefinedLook {
     /// slab (a deeper far side, a faint inner light on the lit side), and with
     /// a polished finish, reflection stripes and small glints.
     static func enhancedLighting(dark: Bool, finish: GlassLighting.Finish = .dielectric) -> GlassLighting {
-        .enhanced(azimuth: azimuth, environment: dark ? .studioDark : .studioLight, finish: finish)
+        var lighting = GlassLighting.enhanced(azimuth: azimuth, environment: dark ? .studioDark : .studioLight, finish: finish)
+        lighting.presence = presence
+        return lighting
     }
 
     /// A soft shadow that also shows on dark pages: a broad, low drop in a
@@ -137,7 +151,8 @@ enum RefinedLook {
         var p = parameters
         guard p.lighting.look == .refined, !p.fill.isActive else { return p }
         let dark = p.lighting.environment == .studioDark
-        p.lighting.edgeDepth = max(p.lighting.edgeDepth, 0.6)
+        p.lighting.edgeDepth = max(p.lighting.edgeDepth, p.lens.profile == .rim ? 0.6 : 0.75)
+        p.lighting.presence = max(p.lighting.presence, presence)
         p.lighting.fresnel = max(p.lighting.fresnel, 0.7)
         p.lighting.specular = max(p.lighting.specular, 0.6)
         if case .dielectric = p.lighting.finish {} else {

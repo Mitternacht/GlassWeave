@@ -1773,6 +1773,143 @@ static float3 gw_light_model(
     return glass;
 }
 
+// MARK: Presence (refined look)
+//
+// `GlassLighting.presence` (the level rides in `lighting.tint.w` as 1 + level,
+// level 0...255): a livelier body and edge that add no bend. Everything here
+// runs only for a refined panel whose level is above zero, so a panel without
+// it is the shader above, byte for byte (the baseline tests prove it). Nothing
+// moves a sample: the body is colored by a soft average of the backdrop around
+// the pixel, never by an offset. The one change to the picture's geometry is
+// the opposite of a bend: a plain rim refraction is feathered to nothing at the
+// outline, so the backdrop joins the glass without a step (docs/glass-optics.md,
+// "Presence").
+
+constant float3 gw_presence_luma = float3(0.2126, 0.7152, 0.0722);
+/// The inner ring of the soft average: six points at unit distance.
+constant float2 gw_presence_inner[6] = {
+    float2(1.0, 0.0), float2(0.5, 0.8660254), float2(-0.5, 0.8660254),
+    float2(-1.0, 0.0), float2(-0.5, -0.8660254), float2(0.5, -0.8660254),
+};
+/// The outer ring, turned by a twelfth of a turn so the rings interleave.
+constant float2 gw_presence_outer[6] = {
+    float2(0.8660254, 0.5), float2(0.0, 1.0), float2(-0.8660254, 0.5),
+    float2(-0.8660254, -0.5), float2(0.0, -1.0), float2(0.8660254, -0.5),
+};
+
+/// The presence level, 0...1.
+static float gw_presence_level(constant GWLightingUniforms &lighting) {
+    return saturate((lighting.tint.w - 1.0) * (1.0 / 255.0));
+}
+
+/// A soft average of the backdrop around `pixel`, in linear light: thirteen
+/// bilinear samples (the center, six on a ring at half the radius, six on a
+/// ring at the radius). No fixed pattern shows at 15 to 28 percent weight and
+/// there is no per-pixel noise.
+static float3 gw_presence_ambient(
+    float2 pixel, float radius, constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
+{
+    float3 sum = 2.0 * gw_glass_sample(pixel, uniforms, source);
+    for (uint i = 0u; i < 6u; ++i) {
+        sum += gw_glass_sample(pixel + (0.5 * radius) * gw_presence_inner[i], uniforms, source);
+        sum += 0.7 * gw_glass_sample(pixel + radius * gw_presence_outer[i], uniforms, source);
+    }
+    return sum * (1.0 / 12.2);
+}
+
+/// A lens inlay's shade: the dome's side away from the light darkens a little
+/// toward its base, its lit side lifts, and a faint contact shade falls on the
+/// glass beside it, away from the light. The inlay's own rim light
+/// (`rimLine`) is added later with the other edge lights.
+static float3 gw_presence_inlays(float3 glass, float2 q, float level, float3 sky, constant GWGlassUniforms &uniforms) {
+    constant GWLightingUniforms &lighting = uniforms.lighting;
+    for (uint i = 0u; i < min(uniforms.lensInlayCount, 2u); ++i) {
+        constant GWLensInlay &inlay = uniforms.lensInlays[i];
+        const float bevel = inlay.shape.x;
+        const float2 offset = q - inlay.geometry.xy;
+        const float radius = inlay.geometry.z;
+        const float r = length(offset);
+        if (bevel <= 0.0 || r >= radius + 0.5 * bevel + 2.0) {
+            continue;
+        }
+        const float2 toward = r > 1e-4 ? offset / r : float2(0.0);
+        const float facing = dot(toward, lighting.edgeDirection);
+        const float far = saturate(0.5 - 0.5 * facing);
+        const float near = saturate(0.5 + 0.5 * facing);
+        if (r < radius) {
+            const float t = saturate((radius - r) / bevel);
+            const float tilt = smoothstep(0.0, 0.7, 1.0 - t);
+            glass *= 1.0 - level * 0.32 * tilt * far * far;
+            glass += (1.0 - glass) * sky * (level * 0.22 * tilt * near * near);
+        } else {
+            const float s = exp(-(r - radius) / (0.18 * bevel + 1.0));
+            glass *= 1.0 - level * 0.22 * s * far * far;
+        }
+    }
+    return glass;
+}
+
+/// The presence of a panel at one pixel: the body, the inner edge, the inlays.
+///
+/// Body: a gentle pickup of the backdrop's own color (14 percent in the middle,
+/// 28 percent at the rim, of a slightly more vivid soft average of the backdrop),
+/// a small saturation lift (14 percent), and a luminance gain that keeps the hue (12 percent on dark pages), a little more
+/// toward the light. Inner edge: a thin glow that falls
+/// off within an eighth of the bevel, in the backdrop's hue brightened (a dark
+/// backdrop has no hue to pick up, so it is the sky's), brighter on the side
+/// toward the light, and a deeper far side: a soft shade just inside the
+/// hairline. All proportional to `level`.
+static float3 gw_presence_apply(
+    float3 glass, float2 pixel, float2 q, float depth, float2 normal, float level,
+    constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
+{
+    constant GWLightingUniforms &lighting = uniforms.lighting;
+    const bool dark = lighting.environment == GWLightingEnvironmentStudioDark;
+    const float bevel = max(lighting.bevel, 1.0);
+    const float inscribed = max(gw_panel_inscribed(uniforms), 1.0);
+    const float radius = clamp(0.7 * bevel, 8.0, max(0.5 * inscribed, 8.0));
+    const float3 ambient = gw_presence_ambient(pixel, radius, uniforms, source);
+    const float ambientLuma = dot(ambient, gw_presence_luma);
+    const float3 vivid = max(mix(float3(ambientLuma), ambient, 1.3), 0.0);
+    const float3 sky = dark ? float3(0.62, 0.66, 0.78) : float3(0.97, 0.975, 1.0);
+
+    // Body.
+    const float rimness = 1.0 - smoothstep(0.0, 1.6 * bevel, depth);
+    glass = mix(glass, vivid, level * mix(0.14, 0.28, rimness));
+    const float luma = dot(glass, gw_presence_luma);
+    glass = max(mix(float3(luma), glass, 1.0 + 0.14 * level), 0.0);
+    const float across = clamp(dot(q, lighting.edgeDirection) / max(length(uniforms.panelHalfSize), 1.0), -1.0, 1.0);
+    // The lift is mostly a gain (it keeps the hue; an added gray would
+    // desaturate a dark color), with a trace of the sky's light.
+    const float gain = level * (dark ? 0.12 : 0.04) * (1.0 + 0.5 * across);
+    glass = min(glass * (1.0 + gain), 1.0);
+    glass += (1.0 - glass) * sky * (level * 0.012);
+
+    // Inner edge.
+    const float side = dot(normal, lighting.edgeDirection);
+    const float a = saturate(0.5 + 0.5 * side);
+    const float b = saturate(0.5 - 0.5 * side);
+    const float lit = a * a;
+    const float back = b * b;
+    const float peak = max(max(vivid.x, vivid.y), vivid.z);
+    const float3 hue = vivid / max(peak, 1e-3);
+    const float chroma = saturate(peak * 6.0);
+    const float3 glowColor = mix(sky, mix(sky, hue, 0.6), chroma);
+    // Thin (a tenth of the bevel and a pixel and a half); half as strong on a
+    // light page, where a white glow would read as milk, and weaker over a
+    // backdrop that is nearly black, where there is no color to pick up.
+    const float edge = exp(-depth / (0.12 * bevel + 1.5));
+    const float backdropLight = mix(0.5, 1.0, saturate(ambientLuma * 6.0));
+    glass += (1.0 - glass) * glowColor * (level * edge * (dark ? 1.0 : 0.55) * backdropLight * (0.06 + 0.38 * lit));
+    const float inner = smoothstep(0.4, 2.5, depth) * exp(-depth / (0.3 * bevel + 2.0));
+    glass *= 1.0 - level * 0.30 * back * inner;
+
+    if (gw_optics && uniforms.lensInlayCount > 0u) {
+        glass = gw_presence_inlays(glass, q, level, sky, uniforms);
+    }
+    return glass;
+}
+
 // MARK: Grounding (GW-25)
 //
 // Depth cues for panels on light pages (docs/glass-optics.md): a drop shadow,
@@ -2132,7 +2269,7 @@ static float3 gw_fill_apply(
                 const float layered = smoothstep(0.03, 0.22, s) * (1.0 - smoothstep(0.5, 0.85, s));
                 grain = ((n1 - 0.5) * 0.7 + (n2 - 0.5) * 0.3) * layered;
                 const float v = gw_noise2(frame * 0.8 + driftB, int2(0), seed + 131u);
-                const float ridge = saturate(1.0 - abs(2.0 * v - 1.0) * 9.0);
+                const float ridge = saturate(1.0 - abs(2.0 * v - 1.0) * 5.0);
                 veins = ridge * ridge * layered;
             }
 
@@ -2196,10 +2333,15 @@ static float3 gw_fill_apply(
                 // Sheets near the middle (the distance field's ridge) fade out, so no
                 // crease shows.
                 const float ridge = 1.0 - smoothstep(0.55, 0.95, spacing / domeRadius);
-                const float width = u < 0.0 ? lineWidth : 2.4 * lineWidth;
+                // Richness softens the sheets (PRESENCE): the thin edge widens
+                // and loses some of its brightness, and the soft glow behind it
+                // widens, so a sheet reads as a fold in one gel and not as a
+                // contour line.
+                const float soften = 1.0 + 0.9 * richness;
+                const float width = (u < 0.0 ? lineWidth : 2.4 * lineWidth) * soften;
                 const float edge = exp(-(u * u) / (width * width));
-                const float bloom = exp(-(u * u) / (34.0 * lineWidth * lineWidth));
-                energy += edgeTint * (edgeBrightness * lit * ridge * edgeGain * edge) + goldColor * (edgeBrightness * lit * ridge * 0.20 * bloom);
+                const float bloom = exp(-(u * u) / (34.0 * soften * lineWidth * lineWidth * soften));
+                energy += edgeTint * (edgeBrightness * lit * ridge * edgeGain * edge * (1.0 - 0.28 * richness)) + goldColor * (edgeBrightness * lit * ridge * (0.20 + 0.06 * richness) * bloom);
                 plate += ridge * 0.6 * smoothstep(-lineWidth, 5.0 * lineWidth, u);
                 const float gapU = (u + 3.0 * lineWidth) / (2.6 * lineWidth);
                 gap += ridge * (0.25 + 0.75 * lit) * exp(-gapU * gapU);
@@ -2223,7 +2365,7 @@ static float3 gw_fill_apply(
                 const float window = exp(-windowU * windowU) * litSide * smoothstep(0.04, 0.30, s) * (0.7 + 0.3 * lobe);
                 energy += mix(goldColor, float3(1.0, 0.96, 0.88), 0.72) * (1.7 * richness * gloss * window * surfaceFade);
                 // Faint veins of light inside the body.
-                energy += mix(goldColor, lineColor, 0.3) * (0.13 * richness * veins * (0.45 + 0.55 * lit) * surfaceFade);
+                energy += mix(goldColor, lineColor, 0.3) * (0.07 * richness * veins * (0.45 + 0.55 * lit) * surfaceFade);
             }
             // Light passing through the thin liquid at the far edge: a narrow
             // hot golden line a little inside the boundary, away from the light.
@@ -2539,7 +2681,15 @@ fragment float4 gw_glass_fragment(
     const float depth = max(-distance, 0.0);
     const float rim = uniforms.bezelWidth > 0.0 ? saturate(1.0 - depth / uniforms.bezelWidth) : 0.0;
     const float2 normal = gw_panel_normal(q, uniforms.normalRadius, uniforms);
-    const float displacement = uniforms.maxDisplacement * rim * rim;
+    // Presence (refined look): the level, 0 for every other panel.
+    const float presenceLevel = (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone && uniforms.lighting.tint.w > 1.5)
+        ? gw_presence_level(uniforms.lighting) : 0.0;
+    float displacement = uniforms.maxDisplacement * rim * rim;
+    if (presenceLevel > 0.0) {
+        // The plain rim refraction is feathered: 0 at the outline, so the
+        // backdrop joins the glass without a step; never above the plain value.
+        displacement *= smoothstep(0.0, 0.22 * uniforms.bezelWidth, depth);
+    }
     // A travelling ring bends the backdrop the glass shows (GW-12).
     float2 samplePixel = pixel;
     if (gw_touched) {
@@ -2586,6 +2736,11 @@ fragment float4 gw_glass_fragment(
     float fillAlpha = 0.0;
     if (gw_filled) {
         glass = gw_fill_apply(glass, pixel, q, normal, displacement, depth, uniforms, fill, fillAlpha);
+    }
+    // Presence (refined look): the body's backdrop pickup, the inner edge glow
+    // and the inlays' shade, under the edge lights that follow.
+    if (presenceLevel > 0.0) {
+        glass = gw_presence_apply(glass, pixel, q, depth, normal, presenceLevel, uniforms, source);
     }
     // The edge light: the upper left, or the key light with the light model.
     const float2 edgeLight = (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone)
@@ -2702,7 +2857,7 @@ fragment float4 gw_glass_fragment(
             frostTouched = frostTouched || changed;
             causticScrimmed = true;
         }
-        if (glowAlpha > 0.0 || interiorAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || any(caustic > 0.0) || frostTouched || fillAlpha > 0.0 || touchAlpha > 0.0) {
+        if (glowAlpha > 0.0 || interiorAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || any(caustic > 0.0) || frostTouched || fillAlpha > 0.0 || touchAlpha > 0.0 || presenceLevel > 0.0) {
             const uint2 cell = uint2(pixel) & 3u;
             encodedGlass += ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0;
         }
@@ -2710,7 +2865,7 @@ fragment float4 gw_glass_fragment(
         return float4(encodedGlass * coverage, coverage);
     }
     float3 encoded = gw_glass_encode_srgb(mix(outside, glass, coverage));
-    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || frostTouched || fillAlpha > 0.0 || touchAlpha > 0.0) {
+    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || frostTouched || fillAlpha > 0.0 || touchAlpha > 0.0 || presenceLevel > 0.0) {
         const uint2 cell = uint2(pixel) & 3u;
         encoded = saturate(encoded + ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0);
     }

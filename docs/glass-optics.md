@@ -1190,3 +1190,88 @@ The user's feedback on the enhanced pictures: "the bends are way too visible, no
 
 **Limits.** Tuned by eye in three rounds beside a real `UIGlassEffect` twin on the studies; the lens page and the touch page on a dot grid still show a small, smooth stretch of the dots in the first few points inside the rim (that is what a lens does; it has no start line, kink or petal). The CPU mirror of the window covers the host profile without inlays only. No new tests beyond the frozen-baseline safety tests; no device run; no M5 cost run.
 
+
+## Presence: a livelier body and edge, with no extra bend (PRESENCE)
+
+> Experimental. `GlassLighting.presence` may change before a stable release.
+
+The last independent review said the restraint cost presence: over the orbs the
+refined capsule and rounded rectangle read as a clear, slightly gray panel next to
+the native glass, whose body and edge carry the colors behind it, and the thick-lens
+capsule with its inlaid dome was nearly flat. The user's rule stands: bends stay as
+soft as they were. So every term here is a color or a light term; no lens thickness,
+maximum offset, dispersion or touch ring was raised, and one refraction term was
+lowered.
+
+**What made the gray cast.** The lab's tint mixed 10 percent of a mid gray into the
+body in linear light. Over a dark saturated color (a shaded red orb) that more than
+doubles the green and blue channels, which is a desaturation, not a veil. The same
+holds for any "lift" that adds a gray. The fix is to take the gray out (`RefinedLook.tint`
+is 0.02 on dark pages, was 0.10; 0.20 on light, was 0.25) and to lift by gain, which
+keeps the hue.
+
+**`GlassLighting.presence` (0...1, default 0).** Refined look only, ignored by
+`.classic`. Packed with the look in `GWLightingUniforms.tint.w` as `1 + level`
+(level 0...255); the shader reads `w > 0.5` as refined and `w - 1` as the level, so a
+refined panel without presence keeps the value 1 and the record keeps its 160 bytes
+and its offsets. Normalization: a non-finite value is rejected with
+`GlassParameterError.nonFiniteLighting(.presence)`, a finite one is clamped to 0...1.
+At 0 nothing below runs and the picture is the shader's old bytes (the frozen-baseline
+suites check this). Shader: `Glass.metal`, "Presence (refined look)".
+
+| Term | What it does | Values (at level 1) |
+| --- | --- | --- |
+| Backdrop pickup | The body mixes toward a soft, slightly more vivid average of the backdrop around the pixel (13 bilinear samples on two rings, radius 0.7 of the bevel, at most half the inscribed radius). No sample is moved: it only colors the body. | 14 % in the middle, 28 % at the rim; the average is 1.3 times more saturated than the backdrop |
+| Saturation | The body's own color. | + 14 % |
+| Luminance gain | A gain, so the hue is kept; a little more toward the light. | + 12 % on dark pages (+ 4 % on light), times 1 +- 0.5 across the panel, and a trace (1.2 %) of the sky |
+| Inner edge glow | A thin glow just inside the outline in the backdrop's own hue, brightened (the sky's color where the backdrop is nearly black), brighter toward the light. | falls off over an eighth of the bevel plus 1.5 px; 6 % all round and 38 % more on the lit side (half on light pages; half over a nearly black backdrop) |
+| Deeper far side | A soft shade just inside the hairline on the side away from the light. | up to 30 %, from 0.4 px in, over 0.3 of the bevel plus 2 px |
+| Inlay shade | A lens inlay (the dome button) gets a shade on its far side that grows toward its base, a lift on its lit side, and a faint contact shade on the glass beside it, away from the light. Its rim light is the existing `rimLine` (0.3 in the lab, was 0.25). | far side 32 %, lit side 22 % of the sky, contact 22 % |
+| Feathered rim refraction | A plain rim refraction (no lens) is multiplied by `smoothstep(0, 0.22 bezel, depth)`. It is never above the plain value. | see the cap below |
+
+**The cap artifact (item 4).** The plain rim refraction moves the sample by
+`maxDisplacement x (1 - depth / bezel)^2`, which is its largest, about 5 points on the
+capsule of the comparison page, exactly at the outline, while outside the outline
+nothing moves. That is a step in the displacement at the silhouette: where an orb's
+edge crosses the end of the capsule, the orb's edge outside and inside the glass
+differ by about 4 points, joined by a straight diagonal, with a small gray wedge
+(the backdrop showing through where the sample came from the other side of the edge).
+It is not the lens falloff or the soft window (those start at 0 at the outline); it was
+the legacy rim path. The feather brings the displacement to 0 at the outline over the
+first fifth of the bevel, so the orb edge bends in smoothly. Captures:
+`gw-presence-cap-before-*`, `gw-presence-cap-after-*` (4 times zoom of the same
+region). The feather rides on `presence`, so panels without it keep the old rim.
+
+**Accessibility (written in `GlassAccessibilityPolicy.presentedLighting`).** Reduce
+Transparency and Increase Contrast set `presence` to 0 (with the other decoration):
+the surface reads as before, with the crisp hairline (captures
+`gw-presence-compare-reduce-transparency-*`, `gw-presence-compare-increase-contrast-*`).
+That also returns the plain rim's step under Increase Contrast, which keeps the panel as
+authored; Reduce Transparency draws an opaque surface. Reduce Motion changes nothing.
+The glow and the shades stay inside a tenth of the panel or follow `bandWidth` terms;
+the body gain is at most 12 percent and the label contrast is the frost scrim's
+business.
+
+**Amber vessel (item 5).** The sheets read as contour lines because each sheet is an
+iso-offset of the gel's distance field with its own thin bright edge, so three of them
+look like nested outlines. `GlassFill.richness` now also softens the sheets (the edge
+2 times wider at richness 1 with 28 % less brightness, the glow behind it wider) and
+its veins (ridge width 5 instead of 9, strength 0.07 instead of 0.13); the study uses
+two sheets, 24 points apart, edge 0.34, wobble 0.85. The specular window and the warm
+thin edges are unchanged.
+
+**Lab changes.** `RefinedLook`: `presence` 0.85 in `lighting` and `enhancedLighting`,
+the lighter tint, `enhance` raises `edgeDepth` to 0.75 on a lens panel (0.6 on a plain
+one) and sets the presence. The paper desk's two captions are placed on one line under
+the row (the button's under the button, the pill's after it); they used to overlap
+(each was at least 300 points wide).
+
+**Result and limits.** On the orbs the capsule, circle and rounded rectangle keep
+their colors (a red orb stays a saturated red under the glass), carry a thin lit rim and
+a soft far side, and the thick-lens capsule reads as thick glass with a visible dome.
+Next to the native glass they are the same family, with a clearer body (the native body
+is frosted). Tuned by eye in four rounds beside a real `UIGlassEffect` twin; no CPU
+mirror; no new test (fast pass); no device run; the 13 samples per pixel are measured by
+no one yet (the M5 run is a later step). The paper-desk marble is a little milky at its
+lit upper left. The presence is not a substitute for frost: a sharp backdrop edge still
+shows sharp.

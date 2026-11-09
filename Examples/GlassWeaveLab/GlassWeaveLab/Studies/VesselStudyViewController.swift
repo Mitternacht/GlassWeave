@@ -205,7 +205,9 @@ final class VesselStudyViewController: StudyViewController {
             wallThickness: 8,
             colors: [Self.color(0.30, 0.05, 0.01), Self.color(1.00, 0.40, 0.05), Self.color(1.00, 0.72, 0.32)],
             emission: 0.85, absorption: 0.7,
-            sheets: GlassFill.Sheets(count: 3, spacing: 16, edge: 0.45, wobble: 0.6),
+            // PRESENCE: two soft sheets, far apart and bent by more noise, so
+            // they read as folds in one gel and not as contour lines.
+            sheets: GlassFill.Sheets(count: 2, spacing: 24, edge: 0.34, wobble: 0.85),
             wallLine: 0.45,
             bubbles: GlassFill.Bubbles(count: 6, size: 2.6, speed: 0.6, seed: 7),
             gloss: 0.7,
