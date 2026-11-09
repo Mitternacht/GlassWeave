@@ -31,6 +31,15 @@ final class GlowGalleryUITests: XCTestCase {
         let diagnostics = app.staticTexts["gallery.diagnostics"]
         XCTAssertTrue(diagnostics.waitForExistence(timeout: 10))
         XCTAssertTrue(wait(for: diagnostics, toContain: "Surface: visible · scene active"), diagnostics.label)
+        // A test that rotated the device may leave the rotation back to
+        // portrait still running; taps computed meanwhile land elsewhere.
+        let window = app.windows.firstMatch
+        let deadline = Date.now.addingTimeInterval(5)
+        while window.frame.width > window.frame.height, Date.now < deadline {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertLessThan(window.frame.width, window.frame.height, "Still in landscape")
+        Thread.sleep(forTimeInterval: 0.5)
         return (app, diagnostics)
     }
 
@@ -240,23 +249,24 @@ final class GlowGalleryUITests: XCTestCase {
         XCTAssertEqual(still.frames, 0, diagnostics.label)
         // The surging orb shows a steady, brighter glow and its interior's
         // still frame: one frame when the surge starts, none while it lasts,
-        // and one when it settles.
+        // and one when it settles, two for the whole five seconds.
+        let beforeCharge = still.last
         app.buttons["gallery.orb"].tap()
         XCTAssertTrue(wait(for: diagnostics, toContain: "orb surging · charges 1"), diagnostics.label)
-        XCTAssertTrue(wait(for: diagnostics, toContain: "2 interiors · 0 moving · quads apart · effect clock stopped · transition idle"), diagnostics.label)
-        let surgeStarted = try freshCount(app, diagnostics)
+        XCTAssertTrue(diagnostics.label.contains("0 moving") && diagnostics.label.contains("effect clock stopped"), diagnostics.label)
         XCTAssertTrue(wait(for: diagnostics, toContain: "orb resting", timeout: 10), diagnostics.label)
+        XCTAssertTrue(wait(for: diagnostics, toContain: "2 interiors · 0 moving · quads apart · effect clock stopped · transition idle"), diagnostics.label)
         Thread.sleep(forTimeInterval: 1)
         let surgeEnded = try freshCount(app, diagnostics)
-        let surging = surgeEnded.submitted - surgeStarted.submitted
-        XCTAssertEqual(surging, 1, "Only settling should draw: \(diagnostics.label)")
+        let surging = surgeEnded.submitted - beforeCharge.submitted
+        XCTAssertEqual(surging, 2, "Only the surge's start and its settling should draw: \(diagnostics.label)")
         // The theme switch cross-dissolves and then settles.
         toggle(app).tap()
         XCTAssertTrue(wait(for: diagnostics, toContain: "appearance dark"), diagnostics.label)
         XCTAssertTrue(wait(for: diagnostics, toContain: "transition idle"), diagnostics.label)
         let afterTheme = try framesOver(2, app, diagnostics)
         XCTAssertEqual(afterTheme.frames, 0, diagnostics.label)
-        report(["Reduce Motion, corona selected: \(still.frames) frames in about 2 s", "orb surge (5 s) and settling: \(surging) frames", "after the theme cross-dissolve: \(afterTheme.frames) frames in about 2 s"], name: "reduce-motion.txt")
+        report(["Reduce Motion, corona selected: \(still.frames) frames in about 2 s", "orb surge (5 s), its start and settling: \(surging) frames", "after the theme cross-dissolve: \(afterTheme.frames) frames in about 2 s"], name: "reduce-motion.txt")
     }
 
     // MARK: Accessibility settings
@@ -270,10 +280,16 @@ final class GlowGalleryUITests: XCTestCase {
         XCTAssertTrue(wait(for: diagnostics, toContain: "Glass: 5 panels · 0 halos · 0 interiors · 0 moving · quads apart · effect clock stopped"), diagnostics.label)
         app.terminate()
 
-        // Increase Contrast: halos and the pulse kept, interiors removed.
-        (app, diagnostics) = launch(["-lab.increaseContrast", "YES", "-lab.gallerySelect", "ember", "-lab.galleryCharge", "YES"])
+        // Increase Contrast: halos kept and interiors removed, so the
+        // selected capsule does not move; a charged orb's pulse is kept
+        // (checked well inside its five-second surge).
+        (app, diagnostics) = launch(["-lab.increaseContrast", "YES", "-lab.gallerySelect", "ember"])
         XCTAssertTrue(wait(for: diagnostics, toContain: "contrast high"), diagnostics.label)
-        XCTAssertTrue(wait(for: diagnostics, toContain: "Glass: 5 panels · 5 halos · 0 interiors · 1 moving · quads apart"), diagnostics.label)
+        XCTAssertTrue(wait(for: diagnostics, toContain: "selected ember"), diagnostics.label)
+        XCTAssertTrue(wait(for: diagnostics, toContain: "Glass: 5 panels · 5 halos · 0 interiors · 0 moving · quads apart · effect clock stopped"), diagnostics.label)
+        app.buttons["gallery.orb"].tap()
+        XCTAssertTrue(wait(for: diagnostics, toContain: "orb surging"), diagnostics.label)
+        XCTAssertTrue(wait(for: diagnostics, toContain: "Glass: 5 panels · 5 halos · 0 interiors · 1 moving · quads apart · effect clock running", timeout: 4), diagnostics.label)
         app.terminate()
     }
 
