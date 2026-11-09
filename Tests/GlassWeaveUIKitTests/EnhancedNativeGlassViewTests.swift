@@ -540,13 +540,22 @@ struct EnhancedNativeGlassViewTests {
         try view.setGlow(Self.energy)
         let first = try #require(view.rimLayer.animation(forKey: EnhancedNativeGlassView.pulseAnimationKey))
         #expect(first.timeOffset == 0)
+        // A sleep returns late when the main actor is busy with the other
+        // tests of the run (every one of them creates a renderer or a glass
+        // view while this one sleeps), so the time the pulse really ran is
+        // measured here instead of assumed to be 0.3 s. The pulse must resume
+        // at that time into its cycle, and the hidden time must not be on top.
+        let clock = ContinuousClock()
+        let started = clock.now
         try await Task.sleep(for: .milliseconds(300))
+        let ran = clock.now - started
         view.isHidden = true
         try await Task.sleep(for: .milliseconds(300))
         view.isHidden = false
         let resumed = try #require(view.rimLayer.animation(forKey: EnhancedNativeGlassView.pulseAnimationKey))
-        // About 0.3 s into the 1.8 s cycle, not the hidden time on top.
-        #expect(resumed.timeOffset > 0.25 && resumed.timeOffset < 0.55, "\(resumed.timeOffset)")
+        let ranSeconds = Double(ran.components.seconds) + Double(ran.components.attoseconds) * 1e-18
+        let expected = ranSeconds.truncatingRemainder(dividingBy: Self.energy.pulsePeriod)
+        #expect(abs(resumed.timeOffset - expected) < 0.1, "ran \(ranSeconds) s, resumed at \(resumed.timeOffset) s")
         #expect(view.haloLayer.animation(forKey: EnhancedNativeGlassView.pulseAnimationKey)?.timeOffset == resumed.timeOffset)
     }
 
