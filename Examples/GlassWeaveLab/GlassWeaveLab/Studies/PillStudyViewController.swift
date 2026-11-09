@@ -152,9 +152,10 @@ final class PillStudyViewController: StudyViewController {
     override func panels(at time: Double) -> [GlassPanel] {
         guard pillAnchor.bounds.width > 0 else { return [] }
         let frame = frame(of: pillAnchor)
-        // ENHANCE: a thicker lens (the bevel bends what is behind its edge
-        // harder), the enhanced rim, and a soft drop shadow.
-        var parameters = RefinedLook.enhancedLens(corner: 999, bezel: 32, thickness: 42, dispersion: 0.7, dark: true)
+        // ENHANCE: a lens whose bevel bends what is behind its edge, the
+        // enhanced rim and a soft drop shadow. POLISH: the bend is subtle and
+        // blended (soft window, 10 point ceiling, faint fringes).
+        var parameters = RefinedLook.enhancedLens(corner: 999, bezel: 32, thickness: 34, dispersion: 0.3, dark: true)
         let domeX = (frame.width - Self.pillHeight) / 2
         parameters.lens.inlays = [
             GlassLens.Inlay(
@@ -166,8 +167,10 @@ final class PillStudyViewController: StudyViewController {
 
         // A light frost, so the spheres behind the middle soften while the
         // bevel stays crisp and magnified; a scrim keeps the time at 4.5:1.
+        // POLISH: the frost is clear at the rim (`clearRim`), so the bevel's
+        // bend stays crisp (a uniform blur would smear what the edge bends).
         parameters.frost = GlassFrost(
-            profile: .uniform, sigma: 2.6, grain: 0.04, thickness: 0.5, saturation: 1.05, brightness: 1
+            profile: .clearRim, sigma: 3.2, transition: 28, grain: 0.04, thickness: 0.4, saturation: 1.05, brightness: 1
         ).legibility(text: .white, contrast: 3.0, rect: self.frame(of: timeLabel).insetBy(dx: -12, dy: -6), feather: 26)
 
         // The pooled glow: four stops along the bottom edge, flowing slowly

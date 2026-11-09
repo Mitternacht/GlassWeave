@@ -453,7 +453,9 @@ struct GlassPanelGeometry: Equatable {
             lensFieldRadius: Float(lens?.fieldRadius ?? 0),
             lensIOR: Float(lens?.indexOfRefraction ?? 0),
             lensMaximumOffset: Float(lens?.maximumOffset ?? 0),
-            lensOffsetScale: Float(lens?.offsetScale ?? 0),
+            // The fraction is the offset scale; the integer part carries the
+            // lens's softness (0 unless asked for; see the record's docs).
+            lensOffsetScale: Float((lens?.offsetScale ?? 0) + 2 * ((lens?.softness ?? 0) * 255).rounded()),
             lensProfileA: Float(lens?.profileA ?? 0),
             lensProfileB: Float(lens?.profileB ?? 0),
             lensDispersion: Float(lens?.dispersion ?? 0),

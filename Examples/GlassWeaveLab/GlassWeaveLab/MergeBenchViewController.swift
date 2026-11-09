@@ -149,6 +149,21 @@ final class MergeBenchViewController: UIViewController {
     private func panels(for progress: Double) -> [GlassPanel] {
         var parameters = Self.parameters()
         parameters.shape = (try? Self.merge.shape(progress: progress)) ?? .roundedRectangle
+        // POLISH: the pill is mostly flat middle, where each round button is
+        // all bevel, so on the dark page it read dimmer. As the surfaces merge
+        // the body takes a little more tint and a quiet sheen from above (one
+        // soft white band along the top inside, the light's side), which brings
+        // the pill to the buttons' brightness. At progress 0 both are 0.
+        let merged = min(max(progress, 0), 1)
+        parameters.tint.strength += 0.02 * merged
+        parameters.light = GlassLight(
+            emitters: [GlassLight.Emitter(
+                placement: .band(angle: 0, reach: 0.9),
+                colors: [GlassLight.Stop(red: 0.78, green: 0.82, blue: 0.94)],
+                intensity: 0.10 * merged
+            )],
+            piping: 0
+        )
         return [GlassPanel(frame: weaveStepper, parameters: parameters)]
     }
 

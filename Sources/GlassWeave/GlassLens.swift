@@ -29,6 +29,7 @@ import Foundation
 /// | ``dispersionTaps`` | ``DispersionTaps`` | — | ``DispersionTaps/threeTap`` | How the spectrum is sampled: one sample each for red, green, and blue, or six wavelengths blended into smooth rainbows. Both keep the weights of every channel summing to 1 in linear light, so white stays white. |
 /// | ``inlays`` | ``Inlay`` | 0 to ``maximumInlays`` | none | Bumps of glass added to the panel's own height: a dome button standing on a pill, part of the same piece of glass, in one panel and one pass. |
 /// | ``allowsFold`` | `Bool` | — | `false` | When `false`, the offsets are scaled down just enough that the sampled position never turns back along the bevel, so content is magnified but never mirrored. When `true`, a thick bevel folds the content over, as a real glass edge can. |
+/// | ``softness`` | normalized | 0...1 | 0 | Opt-in blending (experimental). 0 is the lens exactly as it was. Above 0 the bend rises from nothing at the outline over the first quarter of the bevel and fades out smoothly (a quintic window, flat at both ends) toward the flat top, and the longest offset is approached smoothly instead of being clamped, so the bend has no visible start line, kink or smear. |
 ///
 /// **The math** (see `docs/glass-optics.md`). The height is
 /// `h = thickness × s(t)`, with `t = lensDepth / bevel` and `s` the
@@ -127,6 +128,16 @@ public struct GlassLens: Hashable, Sendable {
     public var dispersionTaps: DispersionTaps
     /// Bumps of glass on the panel; only the first ``maximumInlays`` count.
     public var inlays: [Inlay]
+    /// How smoothly the bend blends into its surroundings, 0...1
+    /// (experimental; may change before a stable release). 0, the default,
+    /// is the lens exactly as it was before this property existed. Above 0
+    /// the offset is multiplied by a window that is 0 at the outline and in
+    /// the flat top and has zero slope and curvature at both ends, and the
+    /// longest offset (``maximumOffset``) is a smooth ceiling and not a hard
+    /// clamp: no visible start of the bevel, no kink, no smear on a soft
+    /// backdrop. 1 applies the full window. A ``Profile/ring(center:width:)``
+    /// has no window (it stands on a flat) and only the smooth ceiling.
+    public var softness: Double
 
     /// The most inlays one panel has: 2.
     public static let maximumInlays = 2
@@ -146,7 +157,8 @@ public struct GlassLens: Hashable, Sendable {
         allowsFold: Bool = false,
         dispersion: Double = 0,
         dispersionTaps: DispersionTaps = .threeTap,
-        inlays: [Inlay] = []
+        inlays: [Inlay] = [],
+        softness: Double = 0
     ) {
         self.profile = profile
         self.thickness = thickness
@@ -156,6 +168,7 @@ public struct GlassLens: Hashable, Sendable {
         self.dispersion = dispersion
         self.dispersionTaps = dispersionTaps
         self.inlays = inlays
+        self.softness = softness
     }
 
     /// No lens: the panel's original rim refraction.
@@ -175,6 +188,7 @@ public struct GlassLens: Hashable, Sendable {
         case indexOfRefraction
         case maximumOffset
         case dispersion
+        case softness
         case squircleExponent
         case ringCenter
         case ringWidth
@@ -194,7 +208,7 @@ public struct GlassLens: Hashable, Sendable {
     package func normalized(maximumLength: Double) throws(GlassParameterError) -> GlassLens {
         var checks: [(Field, Double)] = [
             (.thickness, thickness), (.indexOfRefraction, indexOfRefraction), (.maximumOffset, maximumOffset),
-            (.dispersion, dispersion),
+            (.dispersion, dispersion), (.softness, softness),
         ]
         switch profile {
         case let .squircle(exponent): checks.append((.squircleExponent, exponent))
@@ -221,6 +235,7 @@ public struct GlassLens: Hashable, Sendable {
         lens.indexOfRefraction = clamp(indexOfRefraction, 1, Self.maximumIndexOfRefraction)
         lens.maximumOffset = clamp(maximumOffset, 0, Self.maximumMaximumOffset)
         lens.dispersion = clamp(dispersion, 0, 1)
+        lens.softness = clamp(softness, 0, 1)
         switch profile {
         case let .squircle(exponent): lens.profile = .squircle(exponent: clamp(exponent, 1, 8))
         case let .ring(center, width):

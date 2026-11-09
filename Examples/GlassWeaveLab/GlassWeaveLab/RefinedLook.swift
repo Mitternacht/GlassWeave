@@ -57,7 +57,28 @@ enum RefinedLook {
             profile: .squircle(exponent: 3), thickness: thickness, indexOfRefraction: 1.45, maximumOffset: 44,
             allowsFold: true, dispersion: 0.3, dispersionTaps: .threeTap
         )
+        blend(&parameters.lens)
         return parameters
+    }
+
+    /// POLISH: makes a lens's bend subtle and smoothly blended, like Apple's
+    /// glass: the soft window (`softness` 1: the bend rises from nothing at
+    /// the outline and fades out toward the flat middle with no visible start
+    /// line), a smooth ceiling on the offset (`maximumOffset`, by default 7
+    /// points), a higher-order squircle (a longer, flatter run out of the
+    /// bevel), the index of glass a little lower, and faint fringes. The
+    /// thickness is left as it is: it also gives the rim light its slope. A
+    /// ring is left alone. Idempotent.
+    static func blend(_ lens: inout GlassLens, maximumOffset: Double = 7, dispersion: Double = 0.2) {
+        switch lens.profile {
+        case .rim, .ring: return
+        case let .squircle(exponent): lens.profile = .squircle(exponent: max(exponent, 3.5))
+        default: break
+        }
+        lens.softness = 1
+        lens.maximumOffset = min(lens.maximumOffset, maximumOffset)
+        lens.indexOfRefraction = min(lens.indexOfRefraction, 1.42)
+        lens.dispersion = min(lens.dispersion, dispersion)
     }
 
     // MARK: Enhanced (ENHANCE)
@@ -91,17 +112,17 @@ enum RefinedLook {
         return parameters
     }
 
-    /// A thicker, stronger lens than ``lens(corner:bezel:thickness:dark:)``:
-    /// the squircle is rounder (exponent 2.4), so the bending reaches farther
-    /// in from the outline, the index is 1.5, and the six-tap dispersion is
-    /// visible on a high-contrast edge at the bevel and nowhere else.
+    /// A lens with the enhanced light, a soft shadow and, as the polish asks,
+    /// a bend that is quiet and blended: the squircle is high-order (3.5), the
+    /// index 1.42, the offset ceiling 7 points, the six-tap fringes faint
+    /// (`dispersion` is capped at 0.25) and at the bevel only.
     static func enhancedLens(
         corner: Double = 999, bezel: Double = 28, thickness: Double = 30, dispersion: Double = 0.55, dark: Bool
     ) -> GlassParameters {
         var parameters = enhancedPanel(corner: corner, bezel: bezel, dark: dark)
         parameters.lens = GlassLens(
-            profile: .squircle(exponent: 2.4), thickness: thickness, indexOfRefraction: 1.5, maximumOffset: 64,
-            allowsFold: true, dispersion: dispersion, dispersionTaps: .sixTap
+            profile: .squircle(exponent: 3.5), thickness: thickness, indexOfRefraction: 1.42, maximumOffset: 7,
+            allowsFold: false, dispersion: min(dispersion, 0.25), dispersionTaps: .sixTap, softness: 1
         )
         return parameters
     }
@@ -109,8 +130,8 @@ enum RefinedLook {
     /// Upgrades a panel the page already built (its finish, tint, frost,
     /// light and shape are kept) to the enhanced look: the thick-slab rim, a
     /// firmer rim line, stripes and glints on a polished finish, a soft shadow
-    /// where there is none (`addShadow`), and, for a lens that bends hard at
-    /// the bevel, a thicker glass with visible six-tap dispersion. A panel
+    /// where there is none (`addShadow`), and, for a lens, the blended bend
+    /// of ``blend(_:maximumOffset:dispersion:)`` with six-tap fringes. A panel
     /// that is not lit by the refined look is returned as it is.
     static func enhance(_ parameters: GlassParameters, addShadow: Bool = true) -> GlassParameters {
         var p = parameters
@@ -126,37 +147,37 @@ enum RefinedLook {
         if addShadow, p.grounding == .none {
             p.grounding = enhancedGrounding(dark: dark)
         }
-        switch p.lens.profile {
-        case .rim, .ring: break
-        default:
-            p.lens.thickness = min(p.lens.thickness * 1.25, 60)
-            p.lens.maximumOffset = max(p.lens.maximumOffset, 64)
-            p.lens.dispersion = max(p.lens.dispersion, 0.55)
+        if p.lens.profile != .rim, p.lens.dispersion > 0 {
             p.lens.dispersionTaps = .sixTap
         }
+        blend(&p.lens)
         return p
     }
 
-    /// A polished chrome ring button: a thin ring of glass standing at the
-    /// edge, a clear middle, a bright studio reflected in a band with real
-    /// stripes (dark wall, bright band, dark band), a faint thin film, and a
-    /// few small prismatic glints that turn with the key light.
+    /// A polished chrome ring button: a chunky ring of glass standing at the
+    /// edge (about a third of the radius), a clear middle, a bright studio
+    /// reflected in a band with real stripes (a deep dark stripe between
+    /// bright ones), a faint thin film, and several small prismatic glints that
+    /// turn with the key light.
     static func chromeRing(diameter: Double, azimuth: Double = RefinedLook.azimuth) -> GlassParameters {
-        var ring = panel(corner: diameter / 2, bezel: 13, dark: false)
+        // The ring's proportions follow the diameter (POLISH: chunkier than the
+        // first pass, 0.17 of the diameter against 0.13).
+        let width = max(diameter * 0.17, 12)
+        var ring = panel(corner: diameter / 2, bezel: width, dark: false)
         ring.tint = GlassTint(red: 1, green: 1, blue: 1, strength: 0.05)
         ring.lens = GlassLens(
-            profile: .ring(center: 6.5, width: 11), thickness: 14, indexOfRefraction: 1.5, maximumOffset: 16,
-            allowsFold: false, dispersion: 0.3, dispersionTaps: .sixTap
+            profile: .ring(center: width * 0.5, width: width * 0.84), thickness: width * 1.08, indexOfRefraction: 1.42,
+            maximumOffset: 9, allowsFold: false, dispersion: 0.25, dispersionTaps: .sixTap, softness: 1
         )
         ring.lighting = .enhanced(
-            azimuth: azimuth, environment: .studioLight, finish: .prismatic(spread: 1.2, saturation: 0.3, phase: 0.06)
+            azimuth: azimuth, environment: .studioLight, finish: .prismatic(spread: 1.4, saturation: 0.42, phase: 0.06)
         )
-        ring.lighting.fresnel = 0.8
-        ring.lighting.specular = 0.7
-        ring.lighting.reflection = 0.95
+        ring.lighting.fresnel = 0.85
+        ring.lighting.specular = 0.75
+        ring.lighting.reflection = 1
         ring.lighting.banding = 1
-        ring.lighting.glints = 0.9
-        ring.lighting.bandWidth = 13
+        ring.lighting.glints = 1
+        ring.lighting.bandWidth = width
         return ring
     }
 }

@@ -695,6 +695,35 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 - `Examples/GlassWeaveLab/GlassWeaveLab/RefinedLook.swift`, `MaterialBenchViewController.swift`, `VersusCase.swift`, `Studies/{Pearl,Pill,Shelf}StudyViewController.swift`, `Studies/StudyBackgrounds.metal`
 - `docs/glass-optics.md`, `docs/evidence/captures/`
 
+## POLISH: subtle, blended bends; a calm touch; chrome ring, liquid, merge, shelf and pages (after ENHANCE-LOOK)
+
+**Description:** The user's feedback: "the bends are way too visible, not well blended". Make every bend subtle and smoothly blended into its surroundings like Apple's glass (a smooth, high-order falloff from the rim into the flat interior, small offsets, faint fringes), make the touch response a barely-there pool, ring and gleam, and finish the open visual items: a larger polished chrome ring, a richer liquid, the merged pill's brightness, the shelf scrim, and the shapes, paper desk and compare pages. All opt-in; the off paths stay byte-identical.
+
+**Dependencies:** ENHANCE-LOOK, GW-12, GW-22, GW-28, GW-29. **Scope:** M, about 20 files, no new tests.
+
+**Acceptance criteria:**
+- [x] The earlier stopped run's uncommitted edits were reviewed hunk by hunk: the ones that strengthened bends, touch or dispersion (the stronger-bend helper, the stronger touch values and ring light, the firmer limb light of the pill study's backdrop) were reverted; the chrome-ring, liquid, merge, shelf and page hunks were kept and tuned.
+- [x] A smooth falloff exists in the opt-in lens path: `GlassLens.softness` (0...1, default 0; the offset gets a quintic window that is 0 at the outline and the flat top, and a smooth ceiling replaces the hard clamp), normalized (non-finite rejected naming `.softness`, finite clamped), packed in the integer part of `lensOffsetScale` (record size 1776 and every offset unchanged).
+- [x] Every demo, study and page that bends (pill, lens, shelf, versus, merge, shapes, paper desk, compare, touch, vessel, chrome) uses lower offsets, faint fringes and the soft window through `RefinedLook.blend`; the dot-grid lens page keeps a visible but clearly gentler lens (11 points).
+- [x] Touch: lighter finger light with a wider pool, a wider ring moving the backdrop at most about 2.6 points, fainter catch light and gleam; on a soft backdrop the ring is not visible as a ring.
+- [x] Chrome ring: larger (98 points in the pearl study), deeper stripes, five groups of small prismatic glints, not a white face.
+- [x] Liquid (`GlassFill.richness`, default 0, packed in the fill flags): a restrained specular window on the liquid's surface, brighter warm sheet edges, internal structure, a long soft outer reflection; opaque fills ignore it.
+- [x] The merged pill matches the buttons' brightness on the dark page; the shelf scrim is even and keeps its color (no gray-teal smudge); the shapes, paper desk and compare pages carry the enhanced look.
+- [x] The accessibility rows are written in code and in `GlassAccessibilityPolicy`'s notes (Reduce Transparency removes the lens and makes the fill opaque, so neither new parameter is drawn; Increase Contrast keeps the soft lens and removes the dispersion; Reduce Motion changes nothing for the lens).
+- [x] The frozen-baseline safety tests pass unmodified (see the Evidence).
+- [ ] A numeric test of the window (zero slope and curvature at both ends, never above the ceiling) and a readback test that `softness` 0 draws the old lens. (fast pass: not tested; the existing `GlassBaselineGW22Tests` draw lenses with softness 0 against the frozen shader and pass)
+- [ ] Accessibility captures of the soft lens, the richer liquid and the touch under Reduce Transparency and Increase Contrast. (fast pass: not tested)
+- [ ] Device sign-off, M5 cost of the window and the extra liquid terms. (device only / fast pass: not run)
+
+**Evidence (2026-11-09, fast pass):** What exists: `GlassLens.softness` (`GlassLens.swift`, `GlassLensModel.swift` with the trivial CPU mirror of the window, `GlassPanelGeometry.swift` for the packing, `Glass.metal` "Shape field and thick lens"), `GlassFill.richness` (`GlassFill.swift`, `GlassFillModel.swift`, the fill shader), the retuned `GlassTouch.standard` and ring, the scrim's chroma lift, `RefinedLook.blend` and the retuned `lens`, `enhancedLens`, `enhance` and `chromeRing`, and the retuned pearl, pill, shelf, vessel, merge, shapes, paper, compare, chrome, touch and lens pages. Notes: [glass-optics](../docs/glass-optics.md#polish-subtle-blended-bends-a-calm-touch-the-chrome-ring-and-the-liquid-finish-polish), [interaction](../docs/interaction.md), [studies](../docs/studies.md). End batch, once: package scheme on My Mac 208 passed and 1 failed (`FrameLifecycleTests` "100 hide and show cycles and 100 resizes...", the GPU-timing check the hand-over already lists as load-sensitive; the suite rerun alone passed, 3 of 3); on the iPhone 18 Pro simulator 292 passed, 0 failed (`xcresulttool` summaries). No lab UI test was added or changed, so none was run. Captures (iPhone 18 Pro simulator, inspected, three rounds, studies beside a real `UIGlassEffect` twin): `gw-final-study-*` and `gw-29-study-*-vs-native-*` (the same four pictures), `gw-22-lens-dots-*`, `gw-22-lens-orbs-*`, `gw-23-chrome-page-*`, `gw-25-paper-desk-*`, `gw-26-shapes-orbs-*`, `gw-refine-compare-orbs-*`, `gw-12-touch-{grid-ring,orbs}-*`, `gw-polish-merge-stage-{split,merged}-*`. Limits: the Xcode MCP bridge could not open a workspace, so `xcodebuild` was used; a dot grid still shows a small smooth stretch of the dots in the first points inside a rim (no petals, no start line); the touch ring was inspected as pinned frames only; the CPU mirror of the window skips inlays; tuned by eye.
+
+**Verification:** `xcodebuild test` for the package scheme on My Mac and the iPhone 18 Pro simulator; by-eye comparison of the captures beside the native twin.
+
+**Likely files:**
+- `Sources/GlassWeave/GlassLens.swift`, `GlassLensModel.swift`, `GlassPanelGeometry.swift`, `GlassFill.swift`, `GlassFillModel.swift`, `GlassTouch.swift`, `GlassTouchModel.swift`, `Shaders/Glass.metal`, `GlassWeaveShaderTypes.h` (comment only)
+- `Examples/GlassWeaveLab/GlassWeaveLab/RefinedLook.swift`, `MaterialBenchViewController.swift`, `MergeBenchViewController.swift`, `ShapesBenchViewController.swift`, `TouchBenchViewController.swift`, `Studies/*`
+- `docs/glass-optics.md`, `docs/interaction.md`, `docs/studies.md`, `docs/evidence/captures/`
+
 ## GW-27: Non-blocking presentation, frame pacing and quality tiers (closes GW-04 item 3)
 
 **Description:** No GlassWeave draw stalls the main thread waiting for a drawable. Interaction frames can request up to 120 Hz while ambient motion stays calm, native views over moving glass stay in step, and a quality setting trades extras for frame time.

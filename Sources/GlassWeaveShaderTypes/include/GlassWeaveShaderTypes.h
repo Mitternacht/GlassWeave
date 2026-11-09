@@ -527,8 +527,11 @@ typedef struct GWShapeUniforms {
 ///   at most half the shorter side.
 /// - `lensIOR`: index of refraction, 1 to 2.4.
 /// - `lensMaximumOffset`: the longest a sample moves, in pixels.
-/// - `lensOffsetScale`: 0...1, scales every offset; below 1 only when the
-///   lens may not fold (see `GlassLens.allowsFold`).
+/// - `lensOffsetScale`: the fraction 0...1 scales every offset; below 1 only
+///   when the lens may not fold (see `GlassLens.allowsFold`). Its integer part
+///   carries `GlassLens.softness` as `2 * round(softness * 255)` (zero for a
+///   lens that does not ask for it, so the record's layout and every existing
+///   value are unchanged).
 /// - `lensProfileA`, `lensProfileB`: the profile's parameters (see
 ///   `GWLensProfile`).
 /// - `lensDispersion`: 0...1, how far the wavelengths' indices of refraction
@@ -703,7 +706,9 @@ typedef enum GWFillFlag {
 ///   line strength 0...1 (`z`), and the number of ramp stops 1 to 3 (`w`).
 /// - `gelBounds`: gel mode: the gel's bounding box center (`xy`) and half size
 ///   (`zw`).
-/// - `flags`: `GWFillFlag` bits. `bubbleCount`: 0 to 16. `ior`: the liquid's
+/// - `flags`: `GWFillFlag` bits in bits 0...7 and the finish's richness
+///   (0...255, `GlassFill.richness` times 255) in bits 8...15; zero without
+///   it, so the layout is unchanged. `bubbleCount`: 0 to 16. `ior`: the liquid's
 ///   index of refraction. `padding0`: the liquid's gloss 0...1 (a slot that was
 ///   padding, so the layout is unchanged).
 /// - `gel`: the gel's own `GWShapeUniforms`, relative to `gelBounds.xy`.

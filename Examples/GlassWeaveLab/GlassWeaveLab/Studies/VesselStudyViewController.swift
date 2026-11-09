@@ -208,7 +208,8 @@ final class VesselStudyViewController: StudyViewController {
             sheets: GlassFill.Sheets(count: 3, spacing: 16, edge: 0.45, wobble: 0.6),
             wallLine: 0.45,
             bubbles: GlassFill.Bubbles(count: 6, size: 2.6, speed: 0.6, seed: 7),
-            gloss: 0.7
+            gloss: 0.7,
+            richness: 1
         )
 
         // The small vessel: a level liquid that the slider fills and Nudge
@@ -225,7 +226,8 @@ final class VesselStudyViewController: StudyViewController {
             // A swinging surface ripples; a still one barely does.
             surface: GlassFill.Surface(
                 waveAmplitude: 0.5 + 2.2 * slosh.agitation, wavelength: 60, waveSpeed: 0.8, meniscus: 3
-            )
+            ),
+            richness: 0.8
         )
         return [
             GlassPanel(frame: frame(of: heroAnchor), parameters: hero),

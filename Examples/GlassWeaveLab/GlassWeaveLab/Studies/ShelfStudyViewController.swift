@@ -97,10 +97,14 @@ final class ShelfStudyViewController: StudyViewController {
         parameters.lighting.fresnel = 0.8
         parameters.lighting.specular = 0.66
         // An even frost, and a scrim over the title and the buttons.
-        let textRect = frame(of: titleLabel).union(frame(of: controls)).insetBy(dx: -10, dy: -8)
+        // POLISH: a 30-point feather reached past the text into the pale pebble
+        // above it, and the dimmed cyan read gray-teal. The scrim now keeps
+        // the color rich as it darkens (the shader lifts chroma at constant
+        // luminance) and fades over 22 points, so the body stays even.
+        let textRect = frame(of: titleLabel).union(frame(of: controls)).insetBy(dx: -10, dy: -5)
         parameters.frost = GlassFrost(
             profile: .clearRim, sigma: 8, transition: 30, grain: 0.06, thickness: 0.3, saturation: 1.15, brightness: 1.03
-        ).legibility(text: .white, contrast: 3.0, rect: textRect, feather: 30)
+        ).legibility(text: .white, contrast: 3.0, rect: textRect, feather: 22)
         return [GlassPanel(frame: frame(of: shelfAnchor), parameters: parameters)]
     }
 

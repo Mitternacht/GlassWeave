@@ -12,13 +12,13 @@ internal import GlassWeaveShaderTypes
 struct GlassTouchModel: Equatable {
     /// The strength of the ring's catch light at ring strength 1: the share of
     /// the way to white the key light's side of the ring reaches.
-    static let ringShine = 0.10
+    static let ringShine = 0.06
     /// The gleam's length scale along the rim, in points.
     static let gleamWidthPoints = 7.0
     /// How deep inside the outline the gleam reaches, in points.
     static let gleamBandPoints = 2.4
     /// The gleam's strength at gleam 1.
-    static let gleamStrength = 0.6
+    static let gleamStrength = 0.45
 
     /// The touches that drive the panel with something to show, at most two.
     var states: [GlassTouchState]

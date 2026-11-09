@@ -133,6 +133,14 @@ the ring's catch light and a two-Gaussian light read as a hard-edged disc on the
 dark stage (a gel-disc look); the catch light dropped from 0.22 to 0.10, the ring
 widened (`16 + 0.14 R` points) and the light became one Gaussian.
 
+Round 4 (POLISH, "the bends are way too visible"): the response is quieter and
+better blended. The standard style is now light 0.55 with a 58-point radius, ripple
+0.32 (at most about 2.6 points of displacement) with a wider ring (`22 + 0.2 R`
+points, reach 140), gleam 0.45, the ring's catch light 0.06 and the gleam strength
+0.45. A still frame shows the soft pool; on the dot grid the dots under the ring
+crowd a little; on a soft backdrop the ring is not visible as a ring. See
+[glass-optics](glass-optics.md#polish-subtle-blended-bends-a-calm-touch-the-chrome-ring-and-the-liquid-finish-polish).
+
 ### Limits and deviations
 
 - A panel with frost or a fill draws no touch response: the frost and fill

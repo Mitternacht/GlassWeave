@@ -896,7 +896,30 @@ static float2 gw_lens_profile(uint profile, float t, float a, float b) {
 struct GWLensField {
     float height;
     float2 gradient;
+    /// A factor 0...1 on the offset (`GlassLens.softness`): 1 where the lens
+    /// is not softened, and a smooth window over the bevel where it is. It
+    /// starts at 1 on every field that is built without a lens.
+    float window = 1.0;
 };
+
+/// The lens's softness 0...1 (`GlassLens.softness`), carried in the integer
+/// part of `lensOffsetScale` as `2 * round(softness * 255)` (the scale itself,
+/// 0...1, is the fraction), so the uniform record keeps its layout. Exactly 0
+/// for every lens that does not ask for it.
+static float gw_lens_softness(constant GWGlassUniforms &uniforms) {
+    return floor(uniforms.lensOffsetScale * 0.5) * (1.0 / 255.0);
+}
+
+/// The offset scale, 0...1, with the softness removed.
+static float gw_lens_offset_scale(constant GWGlassUniforms &uniforms) {
+    return uniforms.lensOffsetScale - 2.0 * floor(uniforms.lensOffsetScale * 0.5);
+}
+
+/// The quintic smoothstep, C2 at both ends.
+static float gw_lens_smoother(float edge0, float edge1, float x) {
+    const float t = saturate((x - edge0) / max(edge1 - edge0, 1e-6));
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
 
 /// The host panel's height field: `h = H * s(lensDepth / bevel)`.
 static GWLensField gw_lens_host(GWShapeSample shape, constant GWGlassUniforms &uniforms) {
@@ -915,6 +938,18 @@ static GWLensField gw_lens_host(GWShapeSample shape, constant GWGlassUniforms &u
         const float rise = clamp(uniforms.lensThickness * profile.y / uniforms.lensBevel, -gw_lens_max_slope, gw_lens_max_slope);
         field.gradient = -shape.normal * rise;
     }
+    const float softness = gw_lens_softness(uniforms);
+    if (softness > 0.0 && uniforms.lensProfile != GWLensProfileRing) {
+        // A softened lens: the bend rises from nothing at the outline over the
+        // first quarter of the bevel and fades out toward the flat top from
+        // under a fifth of the way in, both with zero slope and curvature at
+        // the ends, so the bend has no visible start line and no kink where the
+        // bevel ends, and the first pixels at the outline do not smear (the
+        // raw offset climbs to its peak within a pixel or two of the outline,
+        // which would stretch the content there many times over).
+        const float window = gw_lens_smoother(0.0, 0.26, t) * (1.0 - gw_lens_smoother(0.18, 1.0, t));
+        field.window = mix(1.0, window, softness);
+    }
     return field;
 }
 
@@ -930,7 +965,16 @@ static float2 gw_lens_offset(GWLensField field, float ior, constant GWGlassUnifo
     }
     const float3 normal = normalize(float3(-field.gradient, 1.0));
     const float3 ray = refract(float3(0.0, 0.0, -1.0), normal, 1.0 / ior);
-    float2 offset = ray.xy / max(-ray.z, 1e-3) * (field.height * uniforms.lensOffsetScale);
+    float2 offset = ray.xy / max(-ray.z, 1e-3) * (field.height * gw_lens_offset_scale(uniforms));
+    const float softness = gw_lens_softness(uniforms);
+    if (softness > 0.0) {
+        // A softened lens: the window above, and a smooth ceiling (a fourth
+        // power knee, C-infinity) in place of the hard clamp, which would
+        // show as a kink where the offset reaches the maximum.
+        offset *= field.window;
+        const float knee = dot(offset, offset) / max(uniforms.lensMaximumOffset * uniforms.lensMaximumOffset, 1e-6);
+        return offset * rsqrt(sqrt(1.0 + knee * knee));
+    }
     const float length2 = dot(offset, offset);
     if (length2 > uniforms.lensMaximumOffset * uniforms.lensMaximumOffset) {
         offset *= uniforms.lensMaximumOffset * rsqrt(length2);
@@ -954,6 +998,12 @@ static void gw_lens_add_inlays(float2 q, constant GWGlassUniforms &uniforms, thr
         const float t = saturate((radius - r) / inlay.shape.x);
         const float2 profile = gw_lens_profile(inlay.profile, t, inlay.shape.y, inlay.shape.z);
         field.height += inlay.geometry.w * profile.x;
+        const float softness = gw_lens_softness(uniforms);
+        if (softness > 0.0) {
+            // The host's window falls to 0 over the flat top, where the inlay
+            // stands: the inlay brings its own, which only rises from its base.
+            field.window = max(field.window, mix(1.0, gw_lens_smoother(0.0, 0.26, t), softness));
+        }
         if (t < 1.0 && r > 1e-4) {
             const float rise = clamp(inlay.geometry.w * profile.y / inlay.shape.x, -gw_lens_max_slope, gw_lens_max_slope);
             field.gradient -= offset / r * rise;
@@ -1238,7 +1288,17 @@ static float3 gw_frost_scrim(float3 color, float2 pixel, constant GWFrostPanelUn
         const float limit = max((text + 0.05) / frost.scrimRatio - 0.05, 0.0);
         const float limited = gw_frost_soft_limit(luminance, limit);
         if (limited < luminance) {
-            result = color * (limited / max(luminance, 1e-6));
+            const float gain = limited / max(luminance, 1e-6);
+            result = color * gain;
+            // A darkened color keeps its richness: the chroma about the
+            // (unchanged) luminance grows with the dimming, as far as no channel
+            // goes below zero, so a bright cyan becomes a deep blue-teal and
+            // not a gray-teal. The luminance, and so the contrast, is exactly
+            // what the plain scaling gave.
+            const float cmin = min(result.x, min(result.y, result.z));
+            const float room = limited > cmin + 1e-6 ? limited / (limited - cmin) : 1.0;
+            const float lift = min(1.0 + 0.6 * (1.0 - gain), room);
+            result = float3(limited) + (result - float3(limited)) * lift;
         }
     } else {
         const float floorLuminance = min(frost.scrimRatio * (text + 0.05) - 0.05, 1.0);
@@ -1505,7 +1565,9 @@ static float3 gw_enhance_slab(
 static float3 gw_enhance_bands(float3 metal, float3 N, float banding, float lit) {
     const float theta = acos(clamp(N.z, 0.0, 1.0));
     const float stripe = 0.5 + 0.5 * cos(theta * 10.0 - 1.4);
-    const float shaped = 0.08 + 1.6 * smoothstep(0.15, 0.85, stripe);
+    // Polished bands: a deep dark stripe between bright ones, with crisp
+    // transitions (a wider gap between the dark and the bright level).
+    const float shaped = 0.16 + 1.8 * smoothstep(0.2, 0.8, stripe);
     return metal * mix(1.0, shaped * (0.8 + 0.5 * lit), banding);
 }
 
@@ -1521,15 +1583,19 @@ static float3 gw_enhance_glints(float3 N, float glints, constant GWLightingUnifo
     const float g0 = exp(-pow(t / 0.04, 2.0));
     const float g1 = 0.6 * exp(-pow((abs(t) - 0.5) / 0.06, 2.0));
     const float g2 = 0.35 * (exp(-pow((t - 0.26) / 0.04, 2.0)) + exp(-pow((t + 0.26) / 0.04, 2.0)));
-    const float window = gw_refined_bump(tilt, 0.3, 0.2);
+    // Four more small glints (two near the key light, two near the far side),
+    // narrower and fainter: a polished ring catches a few small sparks, not one.
+    const float g3 = 0.42 * (exp(-pow((t - 0.13) / 0.022, 2.0)) + exp(-pow((t + 0.14) / 0.022, 2.0)));
+    const float g4 = 0.32 * (exp(-pow((abs(t) - 0.38) / 0.024, 2.0)));
+    const float window = gw_refined_bump(tilt, 0.3, 0.25);
     float3 color = float3(1.0);
     if (lighting.finish == GWLightingFinishPrismatic) {
-        const float hue = lighting.prism.z + 2.6 * tilt + 0.9 * t;
-        color = gw_light_film(hue, max(lighting.prism.y, 0.7));
+        const float hue = lighting.prism.z + 3.4 * tilt + 1.6 * t;
+        color = gw_light_film(hue, max(lighting.prism.y, 0.95));
     } else {
         color = mix(float3(1.0), lighting.tint.xyz, 0.5);
     }
-    return color * (glints * 1.9 * (g0 + g1 + g2) * window);
+    return color * (glints * 3.4 * (g0 + g1 + g2 + g3 + g4) * window);
 }
 
 /// The refined edge reflection: a smooth gradient, sky toward the light and
@@ -1574,7 +1640,7 @@ static float3 gw_refined_edge(
     // face. The wall is what makes the edge crisp on a light page.
     const float band = gw_refined_bump(tilt, 0.26, 0.20);
     const float wall = smoothstep(0.45, 0.85, tilt);
-    const float3 wallColor = floorColor * (dark ? 1.0 : 0.62) * (0.7 + 0.6 * lit);
+    const float3 wallColor = floorColor * (dark ? 1.0 : 0.78) * (0.7 + 0.6 * lit);
     float3 metal = mix(reflected * (0.75 + 0.25 * band), wallColor, wall) * lighting.tint.xyz;
     const GWEnhance enhance = gw_enhance(lighting);
     if (enhance.banding > 0.0) {
@@ -1961,6 +2027,9 @@ static float3 gw_fill_apply(
     const float2 lightDirection = (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone)
         ? uniforms.lighting.edgeDirection : gw_light_direction;
     const uint seed = uint(fill.detail.y);
+    // The opt-in finish (`GlassFill.richness`): bits 8...15 of the flags. Zero
+    // takes none of the terms below, and the fill is drawn as it was without it.
+    const float richness = float((fill.flags >> 8u) & 255u) * (1.0 / 255.0);
 
     // Through the shell: the field is read where the shell sends this pixel.
     const float2 qf = q + gw_fill_shell_offset(q, rimNormal, rimDisplacement, uniforms);
@@ -2045,6 +2114,28 @@ static float3 gw_fill_apply(
             const float lobeAmplitude = 0.55;
             const float hEff = max(h + lobeAmplitude * lobeWeight * (lobe - 0.5), 0.0);
 
+            // Fine internal structure (richness): a calm two-octave grain that
+            // drifts slowly, and a few faint veins where a slower field crosses
+            // its middle, both read through the dome like the masses.
+            float grain = 0.0;
+            float veins = 0.0;
+            if (richness > 0.0) {
+                // The grain runs along the contour: noise on a frame turned
+                // with the region's boundary (stretched along it, finer across
+                // it), so the body reads as flowing layers and not as clouds.
+                // It fades toward the middle, where the frame has no direction.
+                const float2 tangent = float2(-regionNormal.y, regionNormal.x);
+                const float2 fineDrift = 0.9 * float2(cos(flow + 1.3), sin(flow + 0.4));
+                const float2 frame = float2(dot(qm, tangent) * 0.34, dot(qm, regionNormal) * 1.5) * (cell * 3.0);
+                const float n1 = gw_noise2(frame + fineDrift, int2(0), seed + 71u);
+                const float n2 = gw_noise2(frame * float2(1.8, 2.2) + 7.7 - fineDrift, int2(0), seed + 97u);
+                const float layered = smoothstep(0.03, 0.22, s) * (1.0 - smoothstep(0.5, 0.85, s));
+                grain = ((n1 - 0.5) * 0.7 + (n2 - 0.5) * 0.3) * layered;
+                const float v = gw_noise2(frame * 0.8 + driftB, int2(0), seed + 131u);
+                const float ridge = saturate(1.0 - abs(2.0 * v - 1.0) * 9.0);
+                veins = ridge * ridge * layered;
+            }
+
             // The surface normal: the dome's slope (steep at the boundary, flat
             // in the middle) and the masses' slope. `slopeScale` is how tall
             // the dome is against its radius.
@@ -2072,8 +2163,9 @@ static float3 gw_fill_apply(
             // field's ridges (the medial axis) never show as a crease.
             const float core = smoothstep(0.6 * domeRadius, 1.0 * domeRadius, bodyDepth);
             // Dark amber toward the walls, a calm glow in the thick middle.
-            const float lum = (0.08 + 0.92 * pow(1.0 - exp(-2.4 * hEff), 1.3)) * (0.97 + 0.06 * lobe) * surfaceFade * shade * (1.0 + 0.14 * core);
-            const float t = saturate(hEff * hEff * (0.52 + 0.14 * lobe) + 0.18 * core + 0.30 * facingLight);
+            const float lum = (0.08 + 0.92 * pow(1.0 - exp(-2.4 * hEff), 1.3)) * (0.97 + 0.06 * lobe) * surfaceFade * shade * (1.0 + 0.14 * core)
+                * (1.0 + richness * 0.48 * grain);
+            const float t = saturate(hEff * hEff * (0.52 + 0.14 * lobe) + 0.18 * core + 0.30 * facingLight + richness * 0.12 * grain);
             liquid = glass * transmittance;
             const float3 emitted = gw_fill_ramp(t, fill) * (lum * fill.absorption.w);
             liquid = liquid + (1.0 - liquid) * saturate(emitted);
@@ -2088,6 +2180,10 @@ static float3 gw_fill_apply(
             // The broad highlights are a saturated gold, not the pale of the
             // thin lines (which would wash the amber out to beige).
             const float3 goldColor = mix(fill.ramp1.xyz, fill.ramp2.xyz, 0.55);
+            // Brighter edges stay warm (richness): a thin sheet edge that is
+            // bright without being white-hot.
+            const float3 edgeTint = mix(lineColor, goldColor, 0.40 * richness);
+            const float edgeGain = 0.62 + 0.36 * richness;
             const float facing = dot(regionNormal, lightDirection);
             const float lit = 0.10 + 0.90 * pow(saturate(0.5 + 0.5 * facing), 1.6);
             float plate = 0.0;
@@ -2103,7 +2199,7 @@ static float3 gw_fill_apply(
                 const float width = u < 0.0 ? lineWidth : 2.4 * lineWidth;
                 const float edge = exp(-(u * u) / (width * width));
                 const float bloom = exp(-(u * u) / (34.0 * lineWidth * lineWidth));
-                energy += lineColor * (edgeBrightness * lit * ridge * 0.62 * edge) + goldColor * (edgeBrightness * lit * ridge * 0.20 * bloom);
+                energy += edgeTint * (edgeBrightness * lit * ridge * edgeGain * edge) + goldColor * (edgeBrightness * lit * ridge * 0.20 * bloom);
                 plate += ridge * 0.6 * smoothstep(-lineWidth, 5.0 * lineWidth, u);
                 const float gapU = (u + 3.0 * lineWidth) / (2.6 * lineWidth);
                 gap += ridge * (0.25 + 0.75 * lit) * exp(-gapU * gapU);
@@ -2117,6 +2213,18 @@ static float3 gw_fill_apply(
             const float aligned = saturate(dot(normal3, halfVector));
             const float sheen = 0.85 * pow(aligned, 30.0) + 0.07 * pow(aligned, 6.0);
             energy += mix(goldColor, lineColor, 0.4) * (0.80 * gloss * sheen * surfaceFade);
+            if (richness > 0.0) {
+                // The key light on the liquid's own curved surface: one soft,
+                // elongated window a fixed depth inside the lit boundary,
+                // fading out along it over the quarter turn to either side, so
+                // it reads as a reflection on a curved skin and never as a spot.
+                const float litSide = pow(saturate(0.5 + 0.5 * facing), 3.2);
+                const float windowU = (depthBent - 0.20 * domeRadius) / (0.13 * domeRadius + 2.0);
+                const float window = exp(-windowU * windowU) * litSide * smoothstep(0.04, 0.30, s) * (0.7 + 0.3 * lobe);
+                energy += mix(goldColor, float3(1.0, 0.96, 0.88), 0.72) * (1.7 * richness * gloss * window * surfaceFade);
+                // Faint veins of light inside the body.
+                energy += mix(goldColor, lineColor, 0.3) * (0.13 * richness * veins * (0.45 + 0.55 * lit) * surfaceFade);
+            }
             // Light passing through the thin liquid at the far edge: a narrow
             // hot golden line a little inside the boundary, away from the light.
             const float farSide = pow(saturate(0.5 - 0.5 * facing), 2.0);
@@ -2130,7 +2238,7 @@ static float3 gw_fill_apply(
             const float rim = 0.16 + 0.84 * lit * lit;
             const float edgeLine = exp(-(boundaryD * boundaryD) / (lineWidth * lineWidth));
             const float edgeSoft = exp(-(boundaryD * boundaryD) / (16.0 * lineWidth * lineWidth));
-            energy += lineColor * (edgeBrightness * 0.55 * rim * edgeLine) + goldColor * (edgeBrightness * 0.08 * rim * edgeSoft);
+            energy += edgeTint * (edgeBrightness * (0.55 + 0.24 * richness) * rim * edgeLine) + goldColor * (edgeBrightness * 0.08 * rim * edgeSoft);
             if (!gel) {
                 const float below = (-boundaryD - 3.2 * lineWidth) / (2.6 * lineWidth);
                 energy += lineColor * (gloss * 0.20 * (0.4 + 0.6 * lit) * exp(-below * below));
@@ -2188,9 +2296,13 @@ static float3 gw_fill_apply(
         const float farWall = pow(saturate(0.5 - 0.5 * shellFacing), 3.0);
         const float longReflection = exp(-pow((depth - 0.42 * bezel) / (0.30 * bezel), 2.0));
         const float farRim = exp(-pow((depth - 0.16 * bezel) / (0.06 * bezel + 1.0), 2.0));
+        // The finish's long reflection: a wide, smooth gradient of studio sky
+        // along the lit outer wall, a little farther in than the line above.
+        const float wideReflection = exp(-pow((depth - 0.50 * bezel) / (0.40 * bezel), 2.0));
         const float3 spillEnergy = edgeColor * (fill.absorption.w * glow * outside)
             + fill.line.xyz * (fill.detail.z * presence * wallLine * steep * lit * 0.55)
-            + warmGray * (outside * (0.12 * litWall * longReflection + 0.05 * farWall * farRim) * (0.35 + 0.65 * gloss));
+            + warmGray * (outside * (0.12 * litWall * longReflection + 0.05 * farWall * farRim) * (0.35 + 0.65 * gloss))
+            + float3(0.74, 0.78, 0.88) * (outside * richness * 0.20 * litWall * wideReflection * (0.4 + 0.6 * gloss));
         if (spillEnergy.x > 0.0 || spillEnergy.y > 0.0 || spillEnergy.z > 0.0) {
             result = result + (1.0 - result) * gw_light_knee(spillEnergy);
             touched = 1.0;

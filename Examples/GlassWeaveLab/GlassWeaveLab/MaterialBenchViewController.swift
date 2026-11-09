@@ -283,10 +283,17 @@ final class MaterialBenchViewController: UIViewController {
         switch mode {
         case .bench: demos = Self.benchDemos
         case .lightFields: demos = Self.lightDemos(timeOffset: 0)
-        case .lens: demos = Self.lensDemos.map(Self.enhanced)
+        case .lens: demos = Self.lensDemos.map(Self.enhanced).map { demo in
+            // The lens page exists to show a lens, so its bend may reach a
+            // little farther (11 points) than the other pages' 7; it is still
+            // the soft window and the smooth ceiling.
+            var demo = demo
+            if demo.parameters.lens.softness > 0 { demo.parameters.lens.maximumOffset = 11 }
+            return demo
+        }
         case .chrome: demos = Self.chromeDemos.map(Self.enhanced)
-        case .paper: demos = Self.paperDemos
-        case .compare: demos = Self.compareDemos(dark: page.isDark)
+        case .paper: demos = Self.paperDemos.map(Self.enhanced)
+        case .compare: demos = Self.compareDemos(dark: page.isDark).map(Self.enhanced)
         case .frost: demos = Self.frostDemos.map(Self.enhanced)
         }
         super.init(nibName: nil, bundle: nil)
@@ -436,7 +443,7 @@ final class MaterialBenchViewController: UIViewController {
     /// light plate, a thick lens pill over the orbs, and a smoky dome over
     /// glowing liquid. One light, from the upper left, for all of them.
     private static let chromeDemos: [Demo] = [
-        Demo(caption: String(localized: "Round button: polished chrome ring with small glints"), parameters: RefinedLook.chromeRing(diameter: 84)),
+        Demo(caption: String(localized: "Round button: polished chrome ring with small glints"), parameters: RefinedLook.chromeRing(diameter: 96)),
         Demo(caption: String(localized: "Lens pill: thick edge, quiet pooled light, one soft highlight"), parameters: {
             var pill = RefinedLook.lens(bezel: 40, thickness: 34, dark: true)
             pill.light = pooledLight()
@@ -840,7 +847,7 @@ final class MaterialBenchViewController: UIViewController {
             let bounds = view.bounds
             let inset = bounds.width * 0.04
             let topEnd = bounds.height * 0.33, middleEnd = bounds.height * 0.66
-            frames.append(CGRect(x: inset + 14, y: 130, width: 84, height: 84))
+            frames.append(CGRect(x: inset + 8, y: 124, width: 96, height: 96))
             let pillHeight: CGFloat = 104
             frames.append(CGRect(x: left, y: topEnd + (middleEnd - topEnd - pillHeight - 34) / 2, width: width, height: pillHeight))
             let dome: CGFloat = 150

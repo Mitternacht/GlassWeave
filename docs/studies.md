@@ -30,7 +30,7 @@ A round button with a polished, prismatic chrome ring sits in a round well press
 - Panel 1, the ring button: a `ring` lens (thin band at the edge, clear middle), the refined light with a prismatic finish reflecting a dark studio so the band reads as polished steel with thin-film hints, and a compact drop and contact shadow.
 - Panel 2, the milky capsule: a light frost, a white tint, the refined rim and the same compact shadow.
 - Script: the key light swings 8 degrees to either side over 14 seconds, so the glints travel around the ring.
-- Met: embossed plate and well, a polished ring with prismatic glints, a milky pill, soft drop and contact shadows. Approximated: the ring is steel-silver with faint color; the reference's band is a stronger chrome contrast. The center is clear, not a dome.
+- Met: embossed plate and well, a polished ring with prismatic glints, a milky pill, soft drop and contact shadows. POLISH: the ring is larger (98 points, a band 0.17 of the diameter wide), with deeper stripes and five groups of small glints; its lens bends little (a 9-point ceiling, faint fringes). Approximated: the ring is steel-silver with faint color; the reference's band is a stronger chrome contrast. The center is clear, not a dome.
 
 ## Pill (target: a wide thick lens pill with a pooled bottom glow and a dome button)
 
@@ -39,7 +39,8 @@ A focus-session pill over a soft field of large fuzzy spheres (`study_pill_fragm
 - One capsule panel: a squircle bevel that magnifies what lies behind its edge, six-tap dispersion at the bevel only, a light frost (about 2.6 points) with grain, the refined top highlight, and a four-stop pooled glow along the bottom (a `GlassLight` band: sky, violet, rose, amber) that flows one palette turn per 64 seconds.
 - The dome is an inlay of the same panel (GW-22), at the trailing end, mirrored in right-to-left. A native pause button sits on it and stops the script (and the glow); the native time label carries a 3:1 scrim (large text).
 - Script: the time counts up in seconds from 12:04.
-- Met: lens magnification at the bevel (visible where a sphere gap crosses the pill), light frost, top streak, four-stop pool, inlaid dome. Approximated: the pool is thinner and calmer than the reference's; the dome has little behind it to magnify.
+- POLISH: the bend is subtle and blended (the soft window of `GlassLens.softness`, a 7-point ceiling, faint fringes), and the frost is clear at the rim so the bevel is not smeared.
+- Met: a gentle lens bend at the bevel (smooth where a sphere crosses the pill), light frost, top streak, four-stop pool, inlaid dome. Approximated: the pool is thinner and calmer than the reference's; the dome has little behind it to magnify.
 
 ## Shelf (target: a frosted capsule bending what is behind it, with rainbow fringes)
 
@@ -48,7 +49,8 @@ A frosted capsule holds a large native title and three native buttons, over a bl
 - One capsule panel: an even frost (6 points), a thick bevel with six-tap dispersion (0.42), a thin rim, and a legibility scrim on the title and the controls (3.5:1, 7:1 under Increase Contrast).
 - The pebbles and the arc pass behind the bevel, so the frost's blur and the dispersion show.
 - Cost: the frost pyramid is rebuilt each frame while the pebbles drift (30 times a second); under Reduce Motion nothing ticks.
-- Met: frost, bevel bending and fringes at the bevel, a guaranteed-contrast title. Approximated: a pale pebble under the text band makes a small gray smudge where the scrim darkens it to keep the contrast; the rainbow arc is soft, not a prism.
+- POLISH: the scrim keeps the color rich as it darkens (chroma lift at constant luminance) and fades over 22 points, so no gray-teal smudge sits under the title where a pale pebble is; the bend is the same soft, blended one.
+- Met: frost, a gentle bevel bend with faint fringes, a guaranteed-contrast title. Approximated: the rainbow arc is soft, not a prism.
 
 ## Vessel (target: thick, smoky glass holding a calm luminous liquid, on a dark stage)
 
@@ -57,7 +59,8 @@ An original composition around the GW-28 liquid fill: two vessels, each one pane
 - The large vessel is a rounded rectangle with a refined thick lens (squircle bevel, dispersion 0.10, the thin lit-side rim) and a smoky tint, so the glass is nearly clear and dark. It holds a **gel**: a smooth rounded body low in the glass, one warm ramp (deep amber, orange, pale gold), one contour sheet at low brightness, a thin line in the glass wall, five tiny bubbles.
 - The small vessel is a tall rounded rectangle holding a **level** liquid (surface waves 0.5 pt, meniscus 3 pt). A native "Liquid level" slider fills it and a native "Nudge" button starts a damped slosh (`GlassFillSlosh`) that the 30 Hz script tick steps until it settles; Nudge is disabled under Reduce Motion. The level also lights the table under the small vessel a little more.
 - The surface's effect clock moves the bubbles and the gel's slow wobble (the other studies pause it; a pinned `-lab.studyTime` pauses it here too, so a capture is repeatable). The stage is a still picture, drawn again only when the layout or the level changes.
-- Met: calm luminous liquid with a bright thin edge, smoky thick glass with a crisp rim, sparse tiny bubbles (no rings or crescents), generous negative space, native controls. Approximated: reference 1 has a far richer dark glass (long soft reflections on the outer wall, a thick curved refraction of the liquid through the rim); ours is one rim line and a dark body. A level liquid in a rectangle shows soft diagonal creases where the liquid's depth profile folds at the corners (the dome profile has no smoothing there), so the large vessel uses a gel, whose rounded body has none.
+- POLISH (`GlassFill.richness` 1 and 0.8): a restrained specular window on the liquid's own curved surface, brighter warm sheet edges, fine internal structure in the gel, and a long soft reflection along the lit outer wall.
+- Met: calm luminous liquid with a bright thin edge, smoky thick glass with a crisp rim, sparse tiny bubbles (no rings or crescents), generous negative space, native controls. Approximated: reference 1 has a far richer dark glass (a thick curved refraction of the liquid through the rim); ours is a lit rim, one soft outer reflection and a dark body. A level liquid in a rectangle shows soft diagonal creases where the liquid's depth profile folds at the corners (the dome profile has no smoothing there), so the large vessel uses a gel, whose rounded body has none.
 - One shader change for this study, in the filled pipeline only: the gel's heat noise went from a 50% to a 24% modulation and its fine noise from 14% to 8%, because the first capture looked mottled and dirty. `.none` is untouched (the GW-28 baseline test is unchanged).
 
 ## Captures

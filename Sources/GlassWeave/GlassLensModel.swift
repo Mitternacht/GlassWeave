@@ -68,6 +68,17 @@ enum GlassLensModel {
         return -tx / max(-tz, 1e-3)
     }
 
+    /// The window of a softened lens (`GlassLens.softness` 1) at depth `t`
+    /// into the bevel, 0...1: a quintic rise over the first quarter and a
+    /// quintic fall from under a fifth in to the flat top.
+    static func window(t: Double) -> Double {
+        func smoother(_ edge0: Double, _ edge1: Double, _ x: Double) -> Double {
+            let u = min(max((x - edge0) / max(edge1 - edge0, 1e-6), 0), 1)
+            return u * u * u * (u * (u * 6 - 15) + 10)
+        }
+        return smoother(0, 0.26, t) * (1 - smoother(0.18, 1, t))
+    }
+
     /// The offset magnitude, in pixels, of a glass `height` high whose
     /// surface rises `slope` per pixel toward the interior, before the
     /// maximum and the fold scale.
@@ -157,6 +168,8 @@ extension GlassPanelGeometry {
         var dispersion: Double
         /// 0 (no dispersion), 3, or 6.
         var tapCount: UInt32
+        /// 0...1, `GlassLens.softness` quantized to 1/255 as the shader reads it.
+        var softness: Double
         /// The inlays in target pixels, at most two.
         var inlays: [Inlay]
 
@@ -233,6 +246,7 @@ extension GlassPanelGeometry {
             profileB = b
             dispersion = lens.dispersion
             tapCount = lens.dispersion > 0 ? (lens.dispersionTaps == .sixTap ? 6 : 3) : 0
+            softness = (lens.softness * 255).rounded() / 255
             let hostScale = lens.allowsFold || code == GWLensProfileRim.rawValue ? 1 : GlassLensModel.foldFreeScale(
                 profile: code, a: a, b: b, thickness: thickness, bevel: self.bevel,
                 indexOfRefraction: indexOfRefraction, maximumOffset: maximumOffset
@@ -303,7 +317,18 @@ extension GlassPanelGeometry {
         }
         let slope = (gradient.x * gradient.x + gradient.y * gradient.y).squareRoot()
         var magnitude = GlassLensModel.offset(height: height, slope: slope, indexOfRefraction: lens.indexOfRefraction) * lens.offsetScale
-        magnitude = min(magnitude, lens.maximumOffset)
+        if lens.softness > 0 {
+            // The softened lens: the host's window and the smooth ceiling
+            // (the inlays' own window is not mirrored here).
+            let t = lens.bevel > 0 ? min(shapeField.lensDepth(at: pixel) / lens.bevel, 1) : 1
+            if lens.profileCode != GWLensProfileRing.rawValue, lens.inlays.isEmpty {
+                magnitude *= 1 + lens.softness * (GlassLensModel.window(t: t) - 1)
+            }
+            let knee = magnitude * magnitude / max(lens.maximumOffset * lens.maximumOffset, 1e-6)
+            magnitude /= (1 + knee * knee).squareRoot().squareRoot()
+        } else {
+            magnitude = min(magnitude, lens.maximumOffset)
+        }
         guard slope > 0 else { return pixel }
         return pixel + gradient / slope * magnitude
     }

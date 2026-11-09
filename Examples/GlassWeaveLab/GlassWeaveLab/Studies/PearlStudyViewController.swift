@@ -33,8 +33,8 @@ final class PearlStudyViewController: StudyViewController {
     private let pillTitle = UILabel()
     private let pillDetail = UILabel()
 
-    private static let buttonDiameter: CGFloat = 84
-    private static let wellDiameter: CGFloat = 124
+    private static let buttonDiameter: CGFloat = 98
+    private static let wellDiameter: CGFloat = 140
     private static let plateHeight: CGFloat = 200
 
     override func buildContent(in content: UIView) {
@@ -105,7 +105,7 @@ final class PearlStudyViewController: StudyViewController {
             plateAnchor.heightAnchor.constraint(equalToConstant: Self.plateHeight),
             plateAnchor.centerYAnchor.constraint(equalTo: content.centerYAnchor, constant: -56),
 
-            wellAnchor.leadingAnchor.constraint(equalTo: plateAnchor.leadingAnchor, constant: 24),
+            wellAnchor.leadingAnchor.constraint(equalTo: plateAnchor.leadingAnchor, constant: 18),
             wellAnchor.centerYAnchor.constraint(equalTo: plateAnchor.centerYAnchor),
             wellAnchor.widthAnchor.constraint(equalToConstant: Self.wellDiameter),
             wellAnchor.heightAnchor.constraint(equalToConstant: Self.wellDiameter),
@@ -119,10 +119,10 @@ final class PearlStudyViewController: StudyViewController {
             ringButton.widthAnchor.constraint(equalTo: buttonAnchor.widthAnchor),
             ringButton.heightAnchor.constraint(equalTo: buttonAnchor.heightAnchor),
 
-            // The pill starts 90 points from the button's center, so the
-            // two panels' shadows stay apart.
-            pillAnchor.leadingAnchor.constraint(equalTo: buttonAnchor.centerXAnchor, constant: 100),
-            pillAnchor.trailingAnchor.constraint(equalTo: plateAnchor.trailingAnchor, constant: -26),
+            // The pill starts 106 points from the button's center (the ring's
+            // radius is 49), so the two panels' shadows stay apart.
+            pillAnchor.leadingAnchor.constraint(equalTo: buttonAnchor.centerXAnchor, constant: 106),
+            pillAnchor.trailingAnchor.constraint(equalTo: plateAnchor.trailingAnchor, constant: -20),
             pillAnchor.centerYAnchor.constraint(equalTo: plateAnchor.centerYAnchor),
             pillAnchor.heightAnchor.constraint(equalToConstant: 72),
             pillButton.leadingAnchor.constraint(equalTo: pillAnchor.leadingAnchor),
@@ -159,7 +159,8 @@ final class PearlStudyViewController: StudyViewController {
     override func panels(at time: Double) -> [GlassPanel] {
         guard plateAnchor.bounds.width > 0 else { return [] }
         // ENHANCE: the polished chrome ring (stripes and small prismatic
-        // glints that turn with the light).
+        // glints that turn with the light; POLISH: larger and chunkier, with
+        // clearer bands and glints).
         var ring = RefinedLook.chromeRing(diameter: Double(Self.buttonDiameter), azimuth: lightAzimuth)
         ring.grounding = shadow()
 

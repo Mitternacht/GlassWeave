@@ -88,9 +88,11 @@ public struct GlassTouch: Hashable, Sendable {
     /// No touch response. The default.
     public static let none = GlassTouch()
 
-    /// A restrained response: a soft finger light, a faint ring and a small
-    /// gleam, in the same family as Apple's interactive glass.
-    public static let standard = GlassTouch(fingerLight: 0.60, ripple: 0.8, gleam: 0.7)
+    /// A restrained response: a soft, wide pool of light under the finger, a
+    /// barely-there ring (a wide, soft swell that moves the backdrop about two
+    /// points at most, hard to see in a still frame) and a faint gleam on the
+    /// rim, in the same family as Apple's interactive glass.
+    public static let standard = GlassTouch(fingerLight: 0.55, fingerRadius: 58, ripple: 0.32, rippleRadius: 140, gleam: 0.45)
 
     /// Whether the response can draw anything.
     public var isActive: Bool {
@@ -278,7 +280,7 @@ extension GlassTouch {
         if hasRipple, age < rippleDuration {
             let u = age / rippleDuration
             ringRadius = rippleRadius * (1 - (1 - u) * (1 - u))
-            ringWidth = 16 + 0.14 * ringRadius
+            ringWidth = 22 + 0.2 * ringRadius
             strength = ripple * Self.smooth(u / 0.12) * pow(1 - u, 1.6)
         }
         let fadeOver = ended && since >= fadeOut

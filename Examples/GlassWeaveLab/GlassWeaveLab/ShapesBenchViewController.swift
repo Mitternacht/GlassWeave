@@ -71,7 +71,7 @@ final class ShapesBenchViewController: UIViewController {
     private static func look(
         shape: GlassShape, bezel: Double, glow: [GlassGlow.ColorStop], light: GlassLight, thickness: Double = 24
     ) -> GlassParameters {
-        var parameters = RefinedLook.lens(corner: 999, bezel: bezel, thickness: thickness, dark: true)
+        var parameters = RefinedLook.enhancedLens(corner: 999, bezel: bezel, thickness: thickness, dispersion: 0.3, dark: true)
         parameters.glow = GlassGlow(
             colors: glow, rimWidth: 1.5, rimSoftness: 3, rimIntensity: 0.45, innerGlowRadius: 0, innerGlowIntensity: 0,
             lightAngle: 315, directionality: 0.6, haloRadius: 0, haloIntensity: 0

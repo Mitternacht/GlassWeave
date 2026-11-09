@@ -54,6 +54,7 @@ import Foundation
 /// | ``sheets`` | see ``Sheets`` | see ``Sheets`` | 3 sheets | The contour sheets and their bright edges. |
 /// | ``wallLine`` | normalized | 0...1 | 0.5 | The thin line in the glass wall. |
 /// | ``gloss`` | normalized | 0...1 | 0.6 | How glossy the liquid's curved surface is: its soft specular streak, the bright thin edge and a level's meniscus line. 0 is matte. |
+/// | ``richness`` | normalized | 0...1 | 0 | Opt-in finish (experimental): a restrained specular highlight on the liquid's own curved surface, brighter warm sheet edges, fine internal structure in the body and a long soft reflection along the lit outer wall. 0 draws exactly what a fill drew before it existed. |
 /// | ``bubbles`` | see ``Bubbles`` | see ``Bubbles`` | 5 | The tiny bubbles. |
 /// | ``surface`` | see ``Surface`` | see ``Surface`` | calm | The level surface's waves and meniscus (level mode only); its ``Surface/waveSpeed`` also sets how fast the body's slow flow moves. |
 /// | ``opaque`` | — | — | `false` | A single flat, opaque color: what Reduce Transparency presents. |
@@ -172,6 +173,8 @@ public struct GlassFill: Hashable, Sendable {
         case sheetSpacing, sheetEdge, sheetWobble
         case wallLine
         case gloss
+        /// The ``GlassFill/richness`` finish.
+        case richness
         case bubbleSize, bubbleSpeed
         case waveAmplitude, wavelength, waveSpeed, meniscus
         /// The vessel tilt of a ``GlassFillSlosh``.
@@ -192,6 +195,16 @@ public struct GlassFill: Hashable, Sendable {
     public var bubbles: Bubbles
     public var surface: Surface
     public var gloss: Double
+    /// The opt-in finish, 0...1 (experimental; may change before a stable
+    /// release). 0, the default, draws the fill exactly as it was drawn before
+    /// this property existed. Above 0 the liquid gains, in proportion: a soft
+    /// specular highlight along its own curved surface on the lit side,
+    /// brighter and warmer thin sheet edges, fine internal structure in the
+    /// body (a calm, slow grain and a few faint veins), and a longer, softer
+    /// reflection along the lit outer wall of the vessel. Every added term is
+    /// a smooth gradient: no wedges, rings or hot spots. An ``opaque`` fill
+    /// ignores it.
+    public var richness: Double
     public var opaque: Bool
 
     /// The most colors the emissive ramp uses; further ones are dropped.
@@ -219,7 +232,8 @@ public struct GlassFill: Hashable, Sendable {
         bubbles: Bubbles = Bubbles(),
         surface: Surface = Surface(),
         gloss: Double = 0.6,
-        opaque: Bool = false
+        opaque: Bool = false,
+        richness: Double = 0
     ) {
         self.region = region
         self.wallThickness = wallThickness
@@ -232,6 +246,7 @@ public struct GlassFill: Hashable, Sendable {
         self.surface = surface
         self.gloss = gloss
         self.opaque = opaque
+        self.richness = richness
     }
 
     /// Whether the fill draws anything: a gel, or a level above 0.
@@ -330,7 +345,8 @@ extension GlassFill {
             bubbles: bubbles,
             surface: surface,
             gloss: unit(try finite(gloss, .gloss)),
-            opaque: opaque
+            opaque: opaque,
+            richness: unit(try finite(richness, .richness))
         )
     }
 }

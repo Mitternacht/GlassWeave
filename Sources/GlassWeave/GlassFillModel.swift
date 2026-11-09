@@ -135,7 +135,10 @@ struct GlassFillModel: Equatable {
             record.gelBounds = SIMD4<Float>(Float(gelCenter.x), Float(gelCenter.y), Float(gelModel.halfSize.x), Float(gelModel.halfSize.y))
             record.gel = gelModel.record
         }
-        record.flags = (fill.opaque ? GWFillFlagOpaque.rawValue : 0) | (isFull ? GWFillFlagFull.rawValue : 0)
+        // `richness` rides in bits 8...15 of the flags (zero without it, so the
+        // record's layout and an unset fill's bytes are unchanged).
+        let richness = fill.opaque ? 0 : UInt32((fill.richness * 255).rounded())
+        record.flags = (fill.opaque ? GWFillFlagOpaque.rawValue : 0) | (isFull ? GWFillFlagFull.rawValue : 0) | (richness << 8)
         record.ior = Float(GlassFill.indexOfRefraction)
         bubbles = []
         self.record = record

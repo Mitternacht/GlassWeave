@@ -121,6 +121,9 @@ final class TouchBenchViewController: UIViewController {
     /// pages, with the standard touch response.
     private static func parameters(bezel: Double, thickness: Double) -> GlassParameters {
         var parameters = RefinedLook.enhancedLens(corner: 999, bezel: bezel, thickness: thickness, dispersion: 0.4, dark: true)
+        // POLISH: the bend at the rim is a little quieter still here, so the
+        // touch response (a soft pool, a barely-there ring) is what changes.
+        parameters.lens.maximumOffset = 5.5
         parameters.touch = .standard
         // `-lab.touch.boost <factor>` scales the three strengths, to inspect the
         // response (never above 1 each).
