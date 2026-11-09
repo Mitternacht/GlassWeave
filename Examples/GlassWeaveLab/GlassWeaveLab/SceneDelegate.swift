@@ -22,7 +22,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
         // `-lab.presentation YES` opens GW-27's presentation screen.
         // `-lab.frost YES` opens GW-24a's frost pyramid screen.
-        window.rootViewController = if UserDefaults.standard.bool(forKey: "lab.frost") {
+        // `-lab.study pearl|pill|shelf` opens a material study (GW-29).
+        window.rootViewController = if let study = StudyKind.launchRequested {
+            StudyViewController.make(study)
+        } else if UserDefaults.standard.bool(forKey: "lab.frost") {
             FrostLabViewController()
         } else if UserDefaults.standard.bool(forKey: "lab.presentation") {
             PresentationLabViewController()
