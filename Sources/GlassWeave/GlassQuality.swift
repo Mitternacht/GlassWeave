@@ -18,12 +18,14 @@ import Foundation
 /// | Effect clock rate | 60 Hz | 60 Hz | 30 Hz |
 /// | Interaction rate | 120 Hz | 60 Hz | 60 Hz |
 /// | Interior speed | as set | at most 1 | 0 (a still frame) |
+/// | Fill (GW-28) | as set | at most 2 sheets and 8 bubbles | flat: no sheets, no bubbles, no waves |
 ///
 /// Features that GlassWeave does not have yet are tier *hooks* and are not
-/// implemented: the planned frost levels, dispersion taps, lighting model,
-/// light emitters and liquid fill each get a row in this table when they
-/// land (see `docs/presentation.md`). Only what exists is reduced now: the
-/// rates the effect clock asks the display for, and the glow interiors.
+/// implemented: the planned frost levels, dispersion taps, lighting model and
+/// light emitters each get a row in this table when they land (see
+/// `docs/presentation.md`). Only what exists is reduced now: the rates the
+/// effect clock asks the display for, the glow interiors, and the liquid fill
+/// (GW-28).
 public enum GlassQuality: Int, CaseIterable, Comparable, Hashable, Sendable {
     /// Everything the panel asks for, at the rates the display allows.
     case minimal = 0
@@ -69,11 +71,32 @@ public enum GlassQuality: Int, CaseIterable, Comparable, Hashable, Sendable {
         return reduced
     }
 
+    /// The fill to draw at this tier for `fill` (GW-28): unchanged at
+    /// ``full``, at most 2 sheets and 8 bubbles at ``balanced``, a flat fill
+    /// with no sheets, no bubbles and still waves at ``minimal``. A fill that
+    /// draws nothing is kept as it is.
+    public func reduced(_ fill: GlassFill) -> GlassFill {
+        guard fill.isActive else { return fill }
+        var reduced = fill
+        switch self {
+        case .full: break
+        case .balanced:
+            reduced.sheets.count = min(fill.sheets.count, 2)
+            reduced.bubbles.count = min(fill.bubbles.count, 8)
+        case .minimal:
+            reduced.sheets.count = 0
+            reduced.bubbles.count = 0
+            reduced.surface.waveAmplitude = 0
+        }
+        return reduced
+    }
+
     /// `panel` as drawn at this tier (before the accessibility policy).
     public func reduced(_ panel: GlassPanel) -> GlassPanel {
         guard self != .full else { return panel }
         var reduced = panel
         reduced.parameters.interior = self.reduced(panel.parameters.interior)
+        reduced.parameters.fill = self.reduced(panel.parameters.fill)
         return reduced
     }
 }

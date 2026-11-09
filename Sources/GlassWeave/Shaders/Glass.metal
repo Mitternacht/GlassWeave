@@ -21,6 +21,8 @@ static_assert(alignof(GWLightEmitter) == 16, "GWLightEmitter alignment");
 static_assert(alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 static_assert(sizeof(GWFrostPanelUniforms) == 128, "GWFrostPanelUniforms size");
 static_assert(alignof(GWFrostPanelUniforms) == 8, "GWFrostPanelUniforms alignment");
+static_assert(sizeof(GWFillUniforms) == 784, "GWFillUniforms size");
+static_assert(alignof(GWFillUniforms) == 16, "GWFillUniforms alignment");
 
 // The optical model below is mirrored on the CPU by `GlassPanelGeometry`
 // (GlassPanelGeometry.swift); tests compare the two pixel by pixel. Change
@@ -1712,6 +1714,247 @@ fragment float4 gw_grounding_caustic_fragment(
     return float4(gw_grounding_caustic(in.position.xy, uniforms), 0.0);
 }
 
+// MARK: Liquid and gel fill (GW-28)
+//
+// A luminous liquid or gel inside the glass vessel (docs/glass-optics.md). The
+// code exists only in the `filled` pipeline variants, built with function
+// constant 5 (`gw_fill_constant`) set; without it everything here is compiled
+// out and the shader is the one before GW-28, byte for byte (a frozen copy in
+// the tests proves it). The record is its own buffer (`GWFillUniforms`, bound at
+// `GWGlassBindingIndexFill`), so `GWGlassUniforms` is unchanged. The CPU
+// mirror of the region and the bubbles is `GlassFillModel`.
+//
+// The liquid is seen THROUGH the shell: its field is evaluated at the position
+// the shell sends the pixel to (`q' = q + offset`, the thick lens's or the rim's
+// refraction), so the wall magnifies and bends it. Coverage is cut in pixel
+// space by the inset shell (the glass between the outline and the liquid), so
+// no liquid is shallower than the wall.
+//
+// Body: the liquid's thickness is a parabolic dome `h = 1 - (1 - s)^2` over the
+// depth `s` (the depth into the region over the dome radius). The background
+// seen through it is absorbed, `T = exp(-sigma * h * R)` (Beer-Lambert), and
+// the liquid's own light follows the thickness along a three-stop ramp,
+// `ramp(h) * (1 - exp(-2.6 h)) * emission`, screened over what is left.
+// Contour sheets are iso-offsets of the depth, bent by noise, each with a thin
+// bright edge on the side that faces the light; edges and the bubbles'
+// highlights are added through the light model's soft knee with an analytic
+// bloom (a wide, weak Gaussian around each line). A thin line in the wall at
+// the inset boundary, and a soft glow in the wall, are brighter where the
+// liquid is near.
+
+constant bool gw_fill_constant [[function_constant(5)]];
+constant bool gw_filled = is_function_constant_defined(gw_fill_constant) ? gw_fill_constant : false;
+
+/// The shell's refraction of a pixel as an offset in pixels: the thick lens's
+/// (host profile, inlays) or the original rim's displacement.
+static float2 gw_fill_shell_offset(
+    float2 q, float2 rimNormal, float rimDisplacement, constant GWGlassUniforms &uniforms)
+{
+    if (gw_optics && gw_lens_active(uniforms)) {
+        const GWShapeSample shape = gw_shape_sample(q, uniforms);
+        GWLensField field = gw_lens_host(shape, uniforms);
+        gw_lens_add_inlays(q, uniforms, field);
+        const float2 rim = uniforms.lensProfile == GWLensProfileRim ? -rimNormal * rimDisplacement : float2(0.0);
+        return rim + gw_lens_offset(field, uniforms.lensIOR, uniforms);
+    }
+    return -rimNormal * rimDisplacement;
+}
+
+/// The gel's own shape: the signed distance (renormalized like the panel's,
+/// negative inside) and the outward normal at `q`, relative to the gel's box.
+static float3 gw_fill_gel(float2 q, constant GWShapeUniforms &shape, float2 halfSize) {
+    GWShapeRaw raw;
+    switch (shape.kind) {
+    case GWShapeKindEllipse:
+        raw = gw_shape_ellipse(q, halfSize);
+        break;
+    case GWShapeKindSuperellipse:
+        raw = gw_shape_superellipse(q, halfSize, shape.exponent);
+        break;
+    default:
+        raw = gw_shape_blob(q, shape);
+        break;
+    }
+    const float length2 = length(raw.gradient);
+    const float deep = saturate(-raw.distance / max(0.35 * shape.inscribedRadius, 1.0));
+    const float distance = max(raw.distance / mix(max(length2, 0.3), 1.0, deep), -shape.inscribedRadius);
+    return float3(distance, raw.gradient / max(length2, 1e-4));
+}
+
+/// The emissive ramp at a thickness 0...1: stops at 0, 1/2 and 1.
+static float3 gw_fill_ramp(float t, constant GWFillUniforms &fill) {
+    const uint count = uint(fill.detail.w + 0.5);
+    if (count <= 1u) {
+        return fill.ramp0.xyz;
+    }
+    if (count == 2u) {
+        return mix(fill.ramp0.xyz, fill.ramp1.xyz, t);
+    }
+    return t < 0.5 ? mix(fill.ramp0.xyz, fill.ramp1.xyz, t * 2.0) : mix(fill.ramp1.xyz, fill.ramp2.xyz, (t - 0.5) * 2.0);
+}
+
+/// Two octaves of value noise in 0...1, at the fill's noise scale.
+static float gw_fill_noise(float2 p, uint seed) {
+    return 0.65 * gw_noise2(p, int2(0), seed) + 0.35 * gw_noise2(p * 2.3 + 17.0, int2(0), seed + 0x9e3779b9u);
+}
+
+/// Composites the fill over `glass` (linear light) at `pixel`. `q` is the
+/// pixel relative to the panel's center, `rimNormal` and `rimDisplacement` the
+/// original rim's refraction, `depth` the pixel's depth inside the outline.
+/// `touched` receives 1 where the fill changes the pixel (it is dithered like
+/// the glow) and 0 elsewhere.
+static float3 gw_fill_apply(
+    float3 glass, float2 pixel, float2 q, float2 rimNormal, float rimDisplacement, float depth,
+    constant GWGlassUniforms &uniforms, constant GWFillUniforms &fill, thread float &touched)
+{
+    touched = 0.0;
+    const bool gel = uint(fill.region.x + 0.5) == GWFillModeGel;
+    const bool opaque = (fill.flags & GWFillFlagOpaque) != 0u;
+    const float wall = fill.region.y;
+    const float domeRadius = max(fill.region.z, 1.0);
+    const float2 lightDirection = (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone)
+        ? uniforms.lighting.edgeDirection : gw_light_direction;
+
+    // Through the shell: the field is read where the shell sends this pixel.
+    const float2 qf = q + gw_fill_shell_offset(q, rimNormal, rimDisplacement, uniforms);
+    const float shellD = gw_panel_distance(qf, uniforms);
+    const float insetD = shellD + wall;
+
+    // The region: its signed distance (negative inside), outward normal, and
+    // how deep the liquid is there (the thickness's depth).
+    float outsideD;
+    float2 regionNormal;
+    float boundaryD;
+    float bodyDepth;
+    float surfaceFade = 1.0;
+    if (gel) {
+        const float3 g = gw_fill_gel(qf - fill.gelBounds.xy, fill.gel, fill.gelBounds.zw);
+        boundaryD = g.x;
+        outsideD = g.x;
+        bodyDepth = max(-max(g.x, insetD), 0.0);
+        regionNormal = g.x >= insetD ? g.yz : gw_panel_normal(qf, uniforms.normalRadius, uniforms);
+    } else {
+        float levelD = -1.0e4;
+        if ((fill.flags & GWFillFlagFull) == 0u) {
+            const float k = 6.2831853 / max(fill.waves.y, 1.0);
+            const float wave = fill.waves.x * (0.6 * sin(k * qf.x + fill.waves.z) + 0.4 * sin(k / 0.62 * qf.x + fill.waves.w));
+            const float climb = fill.surface.z * exp(-max(-insetD, 0.0) / max(fill.surface.w, 1.0));
+            const float surfaceY = fill.surface.x + fill.surface.y * qf.x + wave - climb;
+            levelD = (surfaceY - qf.y) * rsqrt(1.0 + fill.surface.y * fill.surface.y);
+        }
+        boundaryD = levelD;
+        outsideD = levelD;
+        // The liquid is as deep as the vessel is, a little thinner right under
+        // the surface.
+        bodyDepth = max(min(-insetD, -levelD * 4.0), 0.0);
+        surfaceFade = 0.72 + 0.28 * smoothstep(0.0, 0.3 * domeRadius, -levelD);
+        regionNormal = levelD >= insetD
+            ? normalize(float2(fill.surface.y, -1.0))
+            : gw_panel_normal(qf, uniforms.normalRadius, uniforms);
+    }
+
+    // Where the liquid is, in pixel space: inside the inset shell and inside
+    // the region (its own edge antialiased at the refracted position).
+    const float insetPixel = gw_panel_distance(q, uniforms) + wall;
+    const float shellCover = saturate(0.5 - insetPixel);
+    const float cover = shellCover * saturate(0.5 - boundaryD);
+
+    const float3 edgeColor = fill.ramp0.xyz;
+    float3 energy = float3(0.0);
+    float3 result = glass;
+
+    if (cover > 0.0) {
+        const float s = saturate(bodyDepth / domeRadius);
+        const float h = 1.0 - (1.0 - s) * (1.0 - s);
+        float3 liquid;
+        if (opaque) {
+            // One flat, opaque color (Reduce Transparency).
+            liquid = fill.ramp1.xyz * (0.55 + 0.45 * fill.absorption.w);
+        } else {
+            const float3 transmittance = exp(-fill.absorption.xyz * (h * domeRadius));
+            // A slow, large-scale variation of the heat: the plateau of a thick
+            // body is never one flat color.
+            const float heatNoise = gw_fill_noise(qf * fill.detail.x * 0.6, uint(fill.detail.y) + 7u);
+            const float fine = gw_fill_noise(qf * fill.detail.x * 2.0, uint(fill.detail.y) + 3u);
+            const float facing = dot(regionNormal, lightDirection);
+            // The side facing the light is a little brighter, like a lit gel.
+            const float shade = 1.0 + 0.14 * facing * saturate(2.0 * (1.0 - s));
+            // The deepest part of a thick body glows hotter: a luminous core.
+            const float core = smoothstep(0.8 * domeRadius, 1.9 * domeRadius, bodyDepth);
+            const float lum = (0.16 + 0.84 * (1.0 - exp(-3.5 * h))) * (0.93 + 0.14 * fine) * surfaceFade * shade * (1.0 + 0.32 * core);
+            const float t = saturate(h * h * (0.50 + 0.50 * heatNoise) + 0.36 * core);
+            liquid = glass * transmittance;
+            const float3 emitted = gw_fill_ramp(t, fill) * (lum * fill.absorption.w);
+            liquid = liquid + (1.0 - liquid) * saturate(emitted);
+
+            // Contour sheets: iso-offsets of the depth, bent by noise, each a
+            // thin bright edge on the lit side with a wide, weak bloom, and the
+            // sheet's inside a touch brighter.
+            const float lineWidth = max(fill.sheets.z, 0.5);
+            const float edgeBrightness = fill.line.w;
+            const float3 lineColor = fill.line.xyz;
+            const float lit = 0.10 + 0.90 * pow(saturate(0.5 + 0.5 * facing), 1.6);
+            float plate = 0.0;
+            for (uint i = 0u; i < min(uint(fill.sheets.x + 0.5), 4u); ++i) {
+                const float bend = (gw_fill_noise(qf * fill.detail.x * 1.4, uint(fill.detail.y) + 31u * (i + 1u)) - 0.5) * 2.0 * fill.sheets.w;
+                const float u = bodyDepth - fill.sheets.y * float(i + 1u) - bend;
+                const float edge = exp(-(u * u) / (lineWidth * lineWidth));
+                const float bloom = exp(-(u * u) / (30.0 * lineWidth * lineWidth));
+                energy += lineColor * (edgeBrightness * lit * (0.68 * edge + 0.26 * bloom));
+                plate += smoothstep(-lineWidth, 4.0 * lineWidth, u);
+            }
+            liquid = liquid + (1.0 - liquid) * (gw_fill_ramp(1.0, fill) * (0.08 * plate * fill.absorption.w));
+            // The liquid's own edge: the surface line of a level, or the gel's
+            // outline, only where it catches the light.
+            const float boundary = exp(-(boundaryD * boundaryD) / (lineWidth * lineWidth));
+            energy += lineColor * (edgeBrightness * 0.55 * lit * lit * (boundary + 0.15 * exp(-(boundaryD * boundaryD) / (16.0 * lineWidth * lineWidth))));
+
+            // Bubbles: small soft discs with a faint highlight, no rings.
+            for (uint i = 0u; i < min(fill.bubbleCount, 16u); ++i) {
+                const float4 bubble = fill.bubbles[i];
+                const float2 offset = qf - bubble.xy;
+                const float r = length(offset);
+                if (r < bubble.z * 1.6) {
+                    const float body = 1.0 - smoothstep(bubble.z * 0.80, bubble.z, r);
+                    liquid = mix(liquid, liquid * 0.80 + lineColor * 0.05, body * 0.55 * bubble.w);
+                    const float2 spot = offset - lightDirection * (bubble.z * 0.38);
+                    const float spotR = length(spot) / max(bubble.z * 0.32, 0.5);
+                    energy += lineColor * (0.85 * bubble.w * exp(-spotR * spotR));
+                }
+            }
+        }
+        if (energy.x > 0.0 || energy.y > 0.0 || energy.z > 0.0) {
+            liquid = liquid + (1.0 - liquid) * gw_light_knee(energy);
+        }
+        result = mix(glass, liquid, cover);
+        touched = 1.0;
+    }
+
+    if (!opaque) {
+        // The liquid lights the glass around it: a soft glow that continues
+        // the liquid's own edge light outward and fades quickly, and a thin
+        // line in the wall at the inset boundary, brighter where the liquid is
+        // near and where the wall is steep. Outside the liquid only.
+        const float outside = 1.0 - cover;
+        const float reach = wall * 1.5 + 8.0;
+        const float near = max(outsideD, 0.0);
+        const float glow = 0.16 * exp(-near / (0.10 * domeRadius + 2.0)) + 0.03 * exp(-near / (0.45 * domeRadius + 4.0));
+        const float presence = exp(-near / reach);
+        const float lineWidth = max(fill.sheets.z, 0.5);
+        const float wallLine = exp(-((insetPixel - 0.6) * (insetPixel - 0.6)) / (1.8 * lineWidth * lineWidth));
+        const float steep = 0.45 + 0.55 * pow(1.0 - saturate(depth / max(uniforms.bezelWidth, 1.0)), 1.5);
+        const float2 shellNormal = gw_panel_normal(q, uniforms.normalRadius, uniforms);
+        const float lit = 0.35 + 0.65 * pow(saturate(0.5 + 0.5 * dot(shellNormal, lightDirection)), 1.5);
+        const float3 spillEnergy = edgeColor * (fill.absorption.w * glow * outside)
+            + fill.line.xyz * (fill.detail.z * presence * wallLine * steep * lit * 0.55);
+        if (spillEnergy.x > 0.0 || spillEnergy.y > 0.0 || spillEnergy.z > 0.0) {
+            result = result + (1.0 - result) * gw_light_knee(spillEnergy);
+            touched = 1.0;
+        }
+    }
+    return result;
+}
+
 /// One rounded glass panel over the background.
 ///
 /// Inside the rim (`bezelWidth` pixels inward from the outline) the sample
@@ -1796,7 +2039,8 @@ fragment float4 gw_glass_fragment(
     constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]],
     texture2d<float, access::sample> source [[texture(GWGlassBindingIndexSourceTexture)]],
     constant GWFrostPanelUniforms &frost [[buffer(GWGlassBindingIndexFrost), function_constant(gw_frosted)]],
-    texture2d<float, access::sample> pyramid [[texture(GWGlassBindingIndexFrostPyramid), function_constant(gw_frosted)]])
+    texture2d<float, access::sample> pyramid [[texture(GWGlassBindingIndexFrostPyramid), function_constant(gw_frosted)]],
+    constant GWFillUniforms &fill [[buffer(GWGlassBindingIndexFill), function_constant(gw_filled)]])
 {
     const float2 pixel = in.position.xy;
     const float2 q = pixel - uniforms.panelCenter;
@@ -1882,6 +2126,12 @@ fragment float4 gw_glass_fragment(
         const float d = gw_panel_distance(q - g.shadowDirection * g.innerOffset, uniforms);
         const float s = g.innerColor.w * gw_blur_edge(d, g.innerSigma);
         glass = glass * (1.0 - s * (1.0 - g.innerColor.xyz));
+    }
+    // The liquid or gel fill (GW-28), seen through the shell, under every
+    // light that follows.
+    float fillAlpha = 0.0;
+    if (gw_filled) {
+        glass = gw_fill_apply(glass, pixel, q, normal, displacement, depth, uniforms, fill, fillAlpha);
     }
     // The edge light: the upper left, or the key light with the light model.
     const float2 edgeLight = (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone)
@@ -1980,7 +2230,7 @@ fragment float4 gw_glass_fragment(
             frostTouched = frostTouched || changed;
             causticScrimmed = true;
         }
-        if (glowAlpha > 0.0 || interiorAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || any(caustic > 0.0) || frostTouched) {
+        if (glowAlpha > 0.0 || interiorAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || any(caustic > 0.0) || frostTouched || fillAlpha > 0.0) {
             const uint2 cell = uint2(pixel) & 3u;
             encodedGlass += ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0;
         }
@@ -1988,7 +2238,7 @@ fragment float4 gw_glass_fragment(
         return float4(encodedGlass * coverage, coverage);
     }
     float3 encoded = gw_glass_encode_srgb(mix(outside, glass, coverage));
-    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || frostTouched) {
+    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || frostTouched || fillAlpha > 0.0) {
         const uint2 cell = uint2(pixel) & 3u;
         encoded = saturate(encoded + ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0);
     }

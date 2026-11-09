@@ -52,6 +52,11 @@ struct GlassPanelGeometry: Equatable {
     /// (GW-24b; the model is in GlassFrost.swift). The pyramid it samples is
     /// the draw's, so the uploaded record is built by ``frostRecord(layout:)``.
     var frost: GlassFrost?
+    /// The liquid or gel fill at the effect time the geometry was built for,
+    /// or `nil` for a panel with none (GW-28; the model is in
+    /// GlassFillModel.swift). The uploaded record is ``fillRecord``; the
+    /// shader reads it as its own buffer, so ``GWGlassUniforms`` is unchanged.
+    var fill: GlassFillModel? = nil
     /// Pixels per point, as the geometry was built for.
     var displayScale: Double
 
@@ -146,6 +151,10 @@ struct GlassPanelGeometry: Equatable {
             parameters.light, displayScale: displayScale, effectTime: effectTime,
             halfSize: halfSize, bezelWidth: bezelWidth
         )
+        // The fill is resolved last: its bubbles ask the finished geometry
+        // where the shell is. A panel with a fill draws no frost.
+        fill = GlassFillModel(parameters.fill, frame: frame, displayScale: displayScale, effectTime: effectTime, geometry: self)
+        if fill != nil { frost = nil }
     }
 
     /// Converts a normalized glow, or returns `nil` when it draws nothing.
@@ -352,6 +361,11 @@ struct GlassPanelGeometry: Equatable {
             panelCenter: SIMD2<Float>(center), panelHalfSize: SIMD2<Float>(halfSize), cornerRadius: Float(cornerRadius),
             displayScale: displayScale, layout: layout
         )
+    }
+
+    /// The fill record for the draw (GW-28), or `nil` when the panel has none.
+    var fillRecord: GWFillUniforms? {
+        fill?.record
     }
 
     /// The record the panel pass reads.

@@ -65,6 +65,9 @@ typedef enum GWGlassBindingIndex {
     /// Fragment texture index of the frost pyramid, bound by the frost
     /// pipeline variants only (GW-24b).
     GWGlassBindingIndexFrostPyramid = 1,
+    /// Fragment buffer index of `GWFillUniforms`, bound by the fill pipeline
+    /// variants only (GW-28).
+    GWGlassBindingIndexFill = 2,
 } GWGlassBindingIndex;
 
 /// The procedural interior a glass panel draws (GW-19), stored in
@@ -637,5 +640,83 @@ typedef struct GWGlassUniforms {
     GWGroundingUniforms grounding;
     GWShapeUniforms shape;
 } GWGlassUniforms;
+
+/// The kind of fill a glass vessel holds (GW-28), stored in
+/// `GWFillUniforms.region.x`. 0 draws no fill: such a panel is drawn by a
+/// pipeline variant that does not contain the fill code.
+typedef enum GWFillMode {
+    GWFillModeNone = 0,
+    /// The inset shell below a waved surface line with a meniscus.
+    GWFillModeLevel = 1,
+    /// A shape of its own (a GW-26 field), clipped to the inset shell.
+    GWFillModeGel = 2,
+} GWFillMode;
+
+/// `GWFillUniforms.flags`: how the fill draws.
+typedef enum GWFillFlag {
+    /// One flat, opaque color: no emission ramp, sheets, lines, bubbles or
+    /// waves (Reduce Transparency).
+    GWFillFlagOpaque = 1,
+    /// The level fill is full: the region is exactly the inset shell.
+    GWFillFlagFull = 2,
+} GWFillFlag;
+
+/// The liquid or gel fill of one panel (GW-28), resolved on the CPU for one
+/// draw. Bound as its own fragment buffer (`GWGlassBindingIndexFill`) to the
+/// fill pipeline variants only, so `GWGlassUniforms` keeps its layout. Lengths
+/// are pixels, colors are linear light, and the motion at the draw's effect
+/// time is already applied (the shader sees no time). Positions are in pixels
+/// from the panel's center, y down, unless noted.
+///
+/// - `ramp0` ... `ramp2`: the emissive ramp over the fill's thickness, from
+///   the thin edge (0) to the deepest part (1): `xyz` the color, `w` unused.
+///   The number of stops is `detail.w`.
+/// - `absorption`: Beer-Lambert coefficient per pixel of fill thickness for
+///   red, green and blue (`xyz`), and the emission strength 0...1 (`w`).
+/// - `line`: the color of the caustic edges and the wall line (`xyz`) and the
+///   brightness of the edges 0...1 (`w`).
+/// - `region`: the mode (`x`, a `GWFillMode`), the wall thickness (`y`), the
+///   dome radius over which the fill's thickness rises (`z`), and the fill's
+///   thickness at its deepest, as a fraction of the dome radius (`w`).
+/// - `surface`: level mode: the surface's height at the panel's center line
+///   (`x`), its slope (`y`, rise over run, y down), the meniscus height (`z`)
+///   and the meniscus width (`w`).
+/// - `waves`: amplitude (`x`), wavelength (`y`), and the two phases in radians
+///   (`zw`) of the surface's waves.
+/// - `sheets`: the contour sheet count (`x`, 0 to 4), their spacing (`y`), the
+///   line width (`z`), and the noise amplitude that bends them (`w`).
+/// - `detail`: the noise scale in 1 per pixel (`x`), the seed (`y`), the wall
+///   line strength 0...1 (`z`), and the number of ramp stops 1 to 3 (`w`).
+/// - `gelBounds`: gel mode: the gel's bounding box center (`xy`) and half size
+///   (`zw`).
+/// - `flags`: `GWFillFlag` bits. `bubbleCount`: 0 to 16. `ior`: the liquid's
+///   index of refraction. `padding0`: set to zero.
+/// - `gel`: the gel's own `GWShapeUniforms`, relative to `gelBounds.xy`.
+/// - `bubbles`: center `xy`, radius `z` and brightness `w` of each bubble at
+///   this draw's time; unused ones are zero.
+///
+/// Layout in bytes: ramp0 0, ramp1 16, ramp2 32, absorption 48, line 64,
+/// region 80, surface 96, waves 112, sheets 128, detail 144, gelBounds 160,
+/// flags 176, bubbleCount 180, ior 184, padding0 188, gel 192 (336 bytes),
+/// bubbles 528 (16 x 16 bytes). Size 784, alignment 16, stride 784.
+typedef struct GWFillUniforms {
+    simd_float4 ramp0;
+    simd_float4 ramp1;
+    simd_float4 ramp2;
+    simd_float4 absorption;
+    simd_float4 line;
+    simd_float4 region;
+    simd_float4 surface;
+    simd_float4 waves;
+    simd_float4 sheets;
+    simd_float4 detail;
+    simd_float4 gelBounds;
+    uint32_t flags;
+    uint32_t bubbleCount;
+    float ior;
+    float padding0;
+    GWShapeUniforms gel;
+    simd_float4 bubbles[16];
+} GWFillUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

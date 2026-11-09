@@ -49,6 +49,7 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | Grounding (`GlassGrounding`) | Reduce Transparency keeps the drop and contact shadows (they ground the opaque surface) and removes the caustic and the inner shadow. Increase Contrast keeps only the contact shadow, at least ``increasedContrastContactOpacity`` dark and ``increasedContrastContactWidth`` points wide, a clearer boundary; the drop shadow, the inner shadow, and the caustic are removed. Reduce Motion changes nothing: grounding is static. |
 /// | Shape (`GlassShape`) | Reduce Transparency and Increase Contrast keep the shape: the opaque surface and the contrasting rim follow its outline. Reduce Motion stills a blob's wobble: its speed becomes 0, so it is drawn at wobble time 0 whatever the effect time (a still, slightly irregular outline). |
 /// | Frost (`GlassFrost`) | Reduce Transparency presents the frost as none, its scrim included: the body is the opaque surface, no pyramid is built and the existing ones are released. Increase Contrast keeps the blur (it is static, and its colors stay the source's own) and raises a legibility scrim to at least ``increasedContrastScrimRatio`` (7:1) where one is set; the lens dispersion it would otherwise show at the bevel is removed by the lens row. Reduce Motion changes nothing: frost is static. |
+/// | Fill (`GlassFill`) | Reduce Transparency presents a flat, opaque fill: one color, with no emission ramp, contour sheets, wall line, bubbles, or waves (``GlassFill/opaque``). Increase Contrast keeps the fill as it is; put no text over a fill, because the sheets and the bubbles sit behind it (the fill has no legibility bound). Reduce Motion stills it: the bubbles stop (speed 0), the waves stop, and a gel's wobble stops, so it is drawn at effect time 0 whatever the effect time. A level fill's slosh is the app's own spring (``GlassFillSlosh``): an app that honors Reduce Motion does not nudge it. |
 /// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
     /// The widest rim a glow keeps under Reduce Transparency, in points.
@@ -96,6 +97,28 @@ public enum GlassAccessibilityPolicy {
         )
         presented.parameters.shape = presentedShape(for: panel.parameters.shape, settings: settings)
         presented.parameters.frost = presentedFrost(for: panel.parameters.frost, settings: settings, traits: traits)
+        presented.parameters.fill = presentedFill(for: panel.parameters.fill, settings: settings)
+        return presented
+    }
+
+    /// The fill to draw for `fill` under `settings` (GW-28): a flat, opaque
+    /// fill under Reduce Transparency; still (bubbles, waves and a gel's
+    /// wobble at speed 0) under Reduce Motion. Increase Contrast keeps the
+    /// fill (put no text over it). A fill that draws nothing is kept as it is.
+    static func presentedFill(for fill: GlassFill, settings: GlassAccessibilitySettings) -> GlassFill {
+        guard fill.isActive else { return fill }
+        var presented = fill
+        if settings.reduceTransparency {
+            presented.opaque = true
+        }
+        if settings.reduceMotion {
+            presented.bubbles.speed = 0
+            presented.surface.waveSpeed = 0
+            if case .gel(.blob(var blob)) = presented.region, blob.wobble.isAnimated {
+                blob.wobble.speed = 0
+                presented.region = .gel(.blob(blob))
+            }
+        }
         return presented
     }
 

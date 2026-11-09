@@ -674,19 +674,24 @@ Merge update: `wantsEffectClock` reads `GlassParameters.isAnimated` of the prese
 **Dependencies:** GW-21, 22, 23, 26, 27. **Scope:** L, about 8 files plus tests.
 
 **Acceptance criteria:**
-- [ ] `.none` or level 0 is byte-identical to the shell-only output.
-- [ ] Level 1 equals the inset region at pixel centers. No fill pixel is shallower than `wallThickness`. A gel stays inside the inset shell (property test).
-- [ ] Waves off: center height = level ± 0.5 px. A 30° vessel tilt settles at −30° ± 0.5°.
-- [ ] Shell refraction of the fill matches the CPU within one step (dot-grid fill).
-- [ ] Absorption and emission monotonic in thickness (radial readback against the CPU).
-- [ ] Bubbles within 0.5 px of the CPU and inside the fill at 1,000 instants.
-- [ ] `t` and `t + 64/speed` byte-identical; replaying an input trace reproduces the bytes.
-- [ ] After an impulse, settled (< 0.1°) within the CPU time, then the effect clock stops.
-- [ ] Reduce Motion and Reduce Transparency UIKit tests pass; CPU mirror within one step.
-- [ ] M5 recorded at 120, 240 and 360 pt; target ≤ +1.0 ms at 240 pt.
-- [ ] **Device only:** p95 for **one** 240 pt vessel at 60 Hz on the baseline device; visual sign-off.
+- [x] `.none` or level 0 is byte-identical to the shell-only output. (`GlassBaselineGW28Tests`: `.none` against the frozen pre-fill shader in seven cases; level 0 is not separately tested: `isActive` is false, so the panel has no fill record and is drawn by its old variant)
+- [ ] Level 1 equals the inset region at pixel centers. No fill pixel is shallower than `wallThickness`. A gel stays inside the inset shell (property test). (fast pass: not tested)
+- [ ] Waves off: center height = level ± 0.5 px. A 30° vessel tilt settles at −30° ± 0.5°. (fast pass: not tested)
+- [ ] Shell refraction of the fill matches the CPU within one step (dot-grid fill). (fast pass: not tested)
+- [ ] Absorption and emission monotonic in thickness (radial readback against the CPU). (fast pass: not tested)
+- [ ] Bubbles within 0.5 px of the CPU and inside the fill at 1,000 instants. (fast pass: not tested)
+- [ ] `t` and `t + 64/speed` byte-identical; replaying an input trace reproduces the bytes. (fast pass: not tested)
+- [ ] After an impulse, settled (< 0.1°) within the CPU time, then the effect clock stops. (fast pass: not tested)
+- [ ] Reduce Motion and Reduce Transparency UIKit tests pass; CPU mirror within one step. (fast pass: not tested; the policy rows are in `GlassAccessibilityPolicy.presentedFill` and the Reduce Transparency and Reduce Motion captures were inspected)
+- [ ] M5 recorded at 120, 240 and 360 pt; target ≤ +1.0 ms at 240 pt. (fast pass: not tested)
+- [ ] **Device only:** p95 for **one** 240 pt vessel at 60 Hz on the baseline device; visual sign-off. (device only: no device was used)
 
-**Evidence:** not started.
+**Evidence:**
+- Exists: `GlassParameters.fill` (`GlassFill`: `.none`, `.level(level:tilt:)`, `.gel(GlassShape)`; wall thickness, a 1 to 3 stop emissive ramp, emission, Beer-Lambert absorption, up to 4 contour sheets, a wall line, up to 16 bubbles, waves and meniscus, an opaque flag; normalized, `nonFiniteFill` errors) in `GlassFill.swift`; `GlassFillSlosh` (deterministic damped spring, fixed 1/240 s steps); the CPU model and bubble placement in `GlassFillModel.swift`; a new `filled` pipeline variant (function constant 5, rounded-rectangle and shaped pipelines) reading its own record `GWFillUniforms` (784 bytes, buffer 2; size and offset asserts in C and MSL, size in the test), so `GWGlassUniforms` is unchanged; the shader's "Liquid and gel fill" section (liquid read at the shell-refracted position, coverage cut by the inset shell, dome thickness, Beer-Lambert, emissive ramp with a core, contour sheets with lit-side caustic edges through the soft knee and an analytic bloom, wall line and glow, soft bubbles); tier rows in `GlassQuality.reduced(_:)` (balanced 2 sheets and 8 bubbles, minimal flat) and policy rows in `GlassAccessibilityPolicy.presentedFill` (Reduce Transparency a flat opaque fill, Reduce Motion still); the lab's "Liquid vessels" page (`-lab.vessel YES`; `-lab.vesselNudge <seconds>` for a still nudge) with the stage backdrop. Design notes: `docs/glass-optics.md` (GW-28).
+- Safety test (the only new test): `GlassBaselineGW28Tests`, byte-identical to the frozen `GlassBaselineGW28.metal` (a copy of the pre-fill shader, GW-24b frost included) with `fill` none, in the `base`, `optics`, `lighting`, `grounded`, `shaped` and `frosted` variants, on a gradient and a checkerboard, plus a control that a gel draws in the `filled` variant and differs: 7 cases, passed. Batch runs at the end: package scheme on My Mac 206 passed, 0 failed; on the iPhone 18 Pro simulator 287 passed and 1 failed (`EnhancedNativeGlassViewTests` "The pulse resumes where it stopped", a wall-clock timing check in code this task did not touch), and the rerun of that suite alone passed (21 of 21). No lab UI test was added or changed, so none was run.
+- Captures (inspected, `docs/evidence/captures/gw-28-*`): the three vessels at rest under Reduce Motion, mid-slosh after a nudge, an ember detail crop, and Reduce Transparency (flat opaque fills). Tuned in four rounds: the first looked like a flat topographic map in brown milk (a pale plateau, white wire-like outlines, a warm fog filling the shell, a pyramid of creases in the level vessel); the fixes were a smoky near-black shell with a quiet tint, a glow that continues the liquid's edge light outward and dies quickly, lit-side weighting of every line, ramp colors that stay orange, a hot core, a smaller dome radius so the plateau hides the medial-axis creases, and the vessel's own inset depth for the level fill.
+- Versus Apple: the native glass buttons (Close, Nudge) sit on the same stage; the vessels' shell reads as the same family (dark smoky body, one thin rim, a quiet specular). Versus the private reference of thick smoky glass with orange liquid: the gap is real. Ours is an emissive gel seen through a flat-shaded shell; the reference has a curved 3D liquid with its own specular highlights, translucent dark amber edges and white-hot sheet edges, bubbles with rings, and gray studio reflections on thick rims. Ours has none of the 3D surface, parallax or back-face reflections, and the liquid is more diffuse.
+- Limits: a panel with a fill draws no frost; the liquid shows the background through one refraction only (the lens's); a level fill's depth uses the vessel's inset depth, so deep contours of a very tall vessel meet in a ridge. Every other criterion is unchecked with the reason "fast pass: not tested"; there is no CPU mirror beyond the region and bubble model, no M5 numbers, and no device sign-off.
 
 **Verification:** As in GW-21, plus slosh tests.
 

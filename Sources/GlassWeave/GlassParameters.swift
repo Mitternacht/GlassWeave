@@ -48,6 +48,7 @@ public struct GlassTint: Hashable, Sendable {
 /// | ``lighting`` | see ``GlassLighting`` | see ``GlassLighting`` | One movable light: a Fresnel outline, a specular streak, studio reflections on the rim, a chrome or prismatic finish, and bloom; ``GlassLighting/legacy`` (the default) keeps the original edge highlight. Experimental. |
 /// | ``frost`` | see ``GlassFrost`` | see ``GlassFrost`` | A blur that varies over the shape, grain, and a text-legibility scrim; ``GlassFrost/none`` (the default) is the clear glass. Experimental. |
 /// | ``grounding`` | see ``GlassGrounding`` | see ``GlassGrounding`` | Depth cues for light pages: a drop shadow, a contact shadow, an inner shadow, and a colored caustic, all away from the key light; ``GlassGrounding/none`` (the default) draws nothing. Experimental. |
+/// | ``fill`` | see ``GlassFill`` | see ``GlassFill`` | A luminous liquid or gel held inside the glass, seen through the shell; ``GlassFill/none`` (the default) draws nothing. A panel with a fill draws no frost. Experimental. |
 ///
 /// **Normalization rule.** When a renderer accepts parameters, a non-finite
 /// value (NaN or infinity) anywhere is rejected with
@@ -56,7 +57,7 @@ public struct GlassTint: Hashable, Sendable {
 /// value: negative lengths become zero, lengths longer than half the
 /// panel's shorter side become that half, and coefficients and tint
 /// components are clamped to 0...1. ``GlassGlow``, ``GlassInterior``,
-/// ``GlassLight``, ``GlassLens``, ``GlassLighting``, ``GlassGrounding``, and ``GlassShape`` document the same rule for their fields. The renderer reports the values it actually uses through
+/// ``GlassLight``, ``GlassLens``, ``GlassLighting``, ``GlassGrounding``, ``GlassShape``, and ``GlassFill`` document the same rule for their fields. The renderer reports the values it actually uses through
 /// ``GlassRenderer/panel``.
 public struct GlassParameters: Hashable, Sendable {
     /// Outline corner radius, in points.
@@ -99,6 +100,10 @@ public struct GlassParameters: Hashable, Sendable {
     /// glass it has always been, or a blur that varies over the shape, with an
     /// optional text-legibility scrim. Experimental.
     public var frost: GlassFrost
+    /// A luminous liquid or gel held inside the glass (GW-28), seen through the
+    /// shell, drawn by its own pipeline variant; ``GlassFill/none`` for none.
+    /// A panel with a fill draws no frost. Experimental.
+    public var fill: GlassFill
 
     /// The most edge illumination can brighten the outline: this fraction of
     /// the way from the glass color to white, at ``edgeHighlight`` 1.
@@ -117,7 +122,8 @@ public struct GlassParameters: Hashable, Sendable {
         lighting: GlassLighting = .legacy,
         grounding: GlassGrounding = .none,
         shape: GlassShape = .roundedRectangle,
-        frost: GlassFrost = .none
+        frost: GlassFrost = .none,
+        fill: GlassFill = .none
     ) {
         self.cornerRadius = cornerRadius
         self.bezelWidth = bezelWidth
@@ -132,12 +138,14 @@ public struct GlassParameters: Hashable, Sendable {
         self.grounding = grounding
         self.shape = shape
         self.frost = frost
+        self.fill = fill
     }
 
     /// Whether a host must keep drawing new frames for this panel's glow
-    /// pulse, interior, light, or shape wobble, which change with time.
+    /// pulse, interior, light, shape wobble, or fill's bubbles and waves,
+    /// which change with time.
     public var isAnimated: Bool {
-        glow.isAnimated || interior.isAnimated || light.isAnimated || shape.isAnimated
+        glow.isAnimated || interior.isAnimated || light.isAnimated || shape.isAnimated || fill.isAnimated
     }
 }
 
@@ -229,8 +237,14 @@ public enum GlassParameterError: Error, Hashable, Sendable, CustomStringConverti
     /// A value of a ``GlassFrost`` is NaN or infinite (GW-24b).
     case nonFiniteFrost(GlassFrostError.Field)
 
+    /// A value of a ``GlassFill`` or a ``GlassFillSlosh`` is NaN or infinite
+    /// (GW-28).
+    case nonFiniteFill(GlassFill.Field)
+
     public var description: String {
         switch self {
+        case let .nonFiniteFill(field):
+            "The glass fill parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case let .nonFiniteFrost(field):
             "The glass frost parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case let .nonFiniteShape(field):
@@ -272,6 +286,7 @@ extension GlassParameters {
         let lighting = try lighting.normalized(maximumLength: maximumLength)
         let grounding = try grounding.normalized(maximumLength: maximumLength)
         let shape = try shape.normalized()
+        let fill = try fill.normalized(maximumLength: maximumLength)
         let frost: GlassFrost
         do {
             frost = try self.frost.normalized()
@@ -298,7 +313,8 @@ extension GlassParameters {
             lighting: lighting,
             grounding: grounding,
             shape: shape,
-            frost: frost
+            frost: frost,
+            fill: fill
         )
     }
 }

@@ -10,7 +10,7 @@ using namespace metal;
 // `bgra8Unorm_srgb` view of the same texture.
 //
 // Parameters (`constant float4 *`, one block):
-//   x pixels per point, y page (0...8), z width in points, w height in points
+//   x pixels per point, y page (0...9), z width in points, w height in points
 //
 // Pages: 0 dot grid, 1 checkerboard, 2 color ribbons, 3 charcoal stage,
 // 4 light paper, 5 orbs (GW-22: soft shaded spheres on a dusk gradient, an
@@ -22,7 +22,9 @@ using namespace metal;
 // printed colored dots, for shadows and caustics), 8 prism (GW-24b: an original
 // backdrop for frost: a dusk page with two soft rainbow arcs, colored glows and
 // a sparse field of small lights, so a frosted panel's blur, its dispersion at
-// the bevel, and the color behind it all show).
+// the bevel, and the color behind it all show), 9 stage (GW-28: a near-black
+// stage with a faint cool pool of light from above and a very dim dot lattice,
+// for the liquid vessels, whose liquid is the only light).
 
 struct BenchVertexOut {
     float4 position [[position]];
@@ -290,6 +292,14 @@ fragment float4 bench_background_fragment(
     }
     case 8: {
         color = bench_prism_color(p, size, pixel);
+        break;
+    }
+    case 9: {
+        const float2 spot = (p - float2(size.x * 0.5, size.y * 0.22)) / float2(size.x * 0.95, size.y * 0.55);
+        const float base = 0.010 + 0.028 * saturate(1.0 - dot(spot, spot));
+        color = float3(base) * float3(0.95, 1.0, 1.10);
+        const float2 local = (fract(p / 24.0) - 0.5) * 24.0;
+        color += float3(0.030, 0.031, 0.034) * bench_fill(length(local) - 0.9, pixel);
         break;
     }
     case 6: {

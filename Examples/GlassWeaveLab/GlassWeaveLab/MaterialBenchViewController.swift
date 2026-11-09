@@ -33,6 +33,11 @@ enum BenchPage: Int, CaseIterable {
     /// lights (GW-24b), for frost: the blur, the dispersion at the bevel and
     /// the color behind the glass all show.
     case prism
+    /// A near-black stage with a faint pool of light from above and a very
+    /// dim dot lattice (GW-28): the page the liquid vessels sit on, dark
+    /// enough that the liquid is the only light, with just enough structure
+    /// for the shell's refraction to show.
+    case stage
 
     /// The name used on the command line and in accessibility identifiers.
     var identifier: String {
@@ -46,6 +51,7 @@ enum BenchPage: Int, CaseIterable {
         case .chrome: "chrome"
         case .paperDesk: "paperdesk"
         case .prism: "prism"
+        case .stage: "stage"
         }
     }
 
@@ -60,6 +66,7 @@ enum BenchPage: Int, CaseIterable {
         case .chrome: String(localized: "Chrome")
         case .paperDesk: String(localized: "Paper desk")
         case .prism: String(localized: "Prism")
+        case .stage: String(localized: "Stage")
         }
     }
 
@@ -262,7 +269,7 @@ final class MaterialBenchViewController: UIViewController {
         self.mode = mode
         self.page = page
         switch mode {
-        case .bench: pages = BenchPage.allCases.filter { $0 != .chrome && $0 != .paperDesk && $0 != .prism }
+        case .bench: pages = BenchPage.allCases.filter { $0 != .chrome && $0 != .paperDesk && $0 != .prism && $0 != .stage }
         case .lightFields: pages = [.charcoal, .ribbons, .paper]
         case .lens: pages = [.orbs, .dotGrid, .checkerboard, .ribbons]
         case .chrome: pages = [.chrome]

@@ -714,6 +714,89 @@ and `gw-26-shapes-orbs-iphone18pro-sim.png`.
   `ShaderLayoutTests` changed only the record size, the new offset and the
   record's new memberwise argument.
 
+## GW-28: Liquid and gel fill
+
+`GlassParameters.fill` (`GlassFill`, default `.none`) puts a luminous liquid or
+gel inside the glass. Source: `GlassFill.swift` (API, normalization,
+`GlassFillSlosh`), `GlassFillModel.swift` (CPU model and bubbles), the "Liquid
+and gel fill" section of `Glass.metal`. Experimental.
+
+**Pipeline.** A panel with an active fill is drawn by the `filled` variant:
+function constant 5 (`gw_fill_constant`), two pipelines (rounded rectangle and
+freeform shape), all built at initialization. The fill is its own record,
+`GWFillUniforms` (784 bytes, bound at fragment buffer 2 to those variants only),
+so `GWGlassUniforms` keeps its 1776 bytes and every frozen shader still
+compiles. With `.none` the code is compiled out: byte for byte the shader
+before GW-28, proved by `GlassBaselineGW28Tests` against a frozen copy that
+includes the GW-24b frost. A panel with a fill draws no frost (the variant
+excludes it).
+
+**Seen through the shell.** The fill's field is read at the position the shell
+sends the pixel to (`q' = q + offset`, the thick lens's or the rim's
+refraction), so the wall magnifies and bends it. The coverage is cut in pixel
+space by the inset shell (`outline distance + wallThickness`), so no liquid is
+shallower than the wall. The wall line and the glow outside the liquid are also
+drawn in pixel space.
+
+**Regions.** `.level(level:tilt:)`: below a waved surface line
+`y = y0 + tan(tilt) x + waves - meniscus`, the meniscus climbing the inset wall
+as `m exp(-d / reach)`; level 1 is exactly the inset shell. `.gel(shape)`: its
+own GW-26 field (frame units, any shape but the rounded rectangle, which becomes
+a squircle), `max(gel distance, inset distance)`. A blob's wobble is its
+loop-locked motion.
+
+**Body.** Thickness is a parabolic dome `h = 1 - (1 - s)^2` over the depth `s`
+into the region (the depth over a dome radius: 55 % of the gel's inscribed
+radius, 60 % of a level vessel's inset depth, so the plateau of a thick body
+hides the creases of the distance field's medial axis). Beer-Lambert absorbs
+what is behind: `T = exp(-sigma h R)` with `sigma = 3 absorption (1 - mid color)
+/ R`. The liquid's own light is `ramp(t) (0.16 + 0.84 (1 - exp(-3.5 h))) emission`
+screened over what is left, with `t = h^2 (0.5 + 0.5 noise) + 0.36 core` (a slow
+noise, and a hotter core where the body is deepest). The ramp has up to three
+stops (thin edge, middle, deep). The dome slope `2 (1 - s)` and the key light
+brighten the lit side a little; the liquid's index is 1.33 (record field `ior`).
+
+**Edges.** Up to four contour sheets: iso-offsets of the depth, bent by noise,
+each a thin line `exp(-(u / w)^2)` plus a wide weak bloom `exp(-(u / 5.5 w)^2)`,
+weighted toward the side that faces the key light
+(`0.10 + 0.90 facing^1.6`), added through the light model's soft knee (so
+nothing exceeds 1), and each sheet's inside is lifted a little. The wall line is
+a thin Gaussian at the inset boundary, stronger where the liquid is near
+(`exp(-distance / reach)`) and where the wall is steep; a soft glow that
+continues the liquid's edge light outward fades within about a tenth of the dome
+radius.
+
+**Bubbles.** Up to 16, computed on the CPU per draw (`placeBubbles`): candidate
+points from a hash of the seed, kept only if inside the region with room for
+their radius, their drift, a gel's wobble and a level's waves; each drifts on a
+small loop of whole turns per 64 s, so none is ever outside the liquid and the
+motion repeats exactly. Drawn as a small soft disc (a little dimmer than the
+liquid) with a faint highlight toward the light: no ring, no crescent.
+
+**Slosh.** `GlassFillSlosh` is a deterministic damped spring in fixed 1/240 s
+steps. `nudge(velocity:)` reports the vessel's horizontal velocity (the surface
+swings the other way); the rest angle is `-vesselTilt`; `isSettled` is within
+0.1 degrees and 0.5 degrees per second, after which nothing needs redrawing. The
+app passes `tilt` into the region and may scale the waves by `agitation`.
+
+**Tiers and accessibility.** Balanced: at most 2 sheets and 8 bubbles. Minimal: no
+sheets, no bubbles, flat surface. Reduce Transparency: a flat opaque fill
+(`opaque`: one color, no ramp, sheets, lines, bubbles or waves). Reduce Motion:
+bubbles, waves and a gel's wobble at speed 0. Increase Contrast keeps the fill;
+no text over a fill (it has no legibility bound).
+
+**Look and limits.** Tuned in four rounds against Apple's own glass (the native
+Close and Nudge buttons on the same stage): a dark, mostly clear smoky body
+(tint strength 0.5), a thin crisp rim from the refined light model, and a calm
+gel whose light falls off quickly. Compared with the private reference of thick
+smoky glass with orange liquid, the gap is real: ours is an emissive gel seen
+through a flat-shaded shell. It has no 3D liquid surface, no specular highlights
+on the liquid's own curved surface, no parallax and no back-face reflections, and
+the liquid is more diffuse and less translucent than a photograph's. A level fill
+has no second tap for the background seen through the liquid (the lens's single
+refraction is all the background gets). Quads of panels must not overlap, as
+always.
+
 ## Apple-grade defaults (REFINE)
 
 > Experimental. `GlassLighting.Look`, `GlassLighting.look`, and

@@ -108,6 +108,8 @@ final class LabViewController: UIViewController {
     private let paperButton = UIButton(configuration: .bordered())
     /// Opens the shapes page (GW-26).
     private let shapesButton = UIButton(configuration: .bordered())
+    /// Opens the liquid vessels page (GW-28).
+    private let vesselButton = UIButton(configuration: .bordered())
     /// Opens native glass beside GlassWeave's on one backdrop (REFINE).
     private let compareButton = UIButton(configuration: .bordered())
     /// Open GW-27's presentation screen and GW-24a's frost pyramid screen.
@@ -210,6 +212,9 @@ final class LabViewController: UIViewController {
             } else if defaults.bool(forKey: "lab.shapes") {
                 openedBenchAtLaunch = true
                 openShapes(page: BenchPage.named(defaults.string(forKey: "lab.shapesBackdrop")) ?? .charcoal, animated: false)
+            } else if defaults.bool(forKey: "lab.vessel") {
+                openedBenchAtLaunch = true
+                openVessel(animated: false)
             } else if defaults.bool(forKey: "lab.paper") {
                 openedBenchAtLaunch = true
                 openBench(.paper, page: .paperDesk, animated: false)
@@ -246,6 +251,14 @@ final class LabViewController: UIViewController {
         let shapes = ShapesBenchViewController(page: page)
         shapes.modalPresentationStyle = .fullScreen
         present(shapes, animated: animated)
+    }
+
+    /// Presents the liquid vessels page (GW-28) over the whole window.
+    private func openVessel(animated: Bool) {
+        guard presentedViewController == nil else { return }
+        let vessel = VesselBenchViewController(page: .stage)
+        vessel.modalPresentationStyle = .fullScreen
+        present(vessel, animated: animated)
     }
 
     /// Presents the glow gallery (GW-20) over the whole window. While it is
@@ -570,6 +583,10 @@ final class LabViewController: UIViewController {
         shapesButton.accessibilityIdentifier = "lab.openShapes"
         shapesButton.addAction(UIAction { [weak self] _ in self?.openShapes(page: .charcoal, animated: true) }, for: .primaryActionTriggered)
         shapesButton.isHidden = benchmark != nil
+        vesselButton.configuration?.title = String(localized: "Liquid vessels")
+        vesselButton.accessibilityIdentifier = "lab.openVessel"
+        vesselButton.addAction(UIAction { [weak self] _ in self?.openVessel(animated: true) }, for: .primaryActionTriggered)
+        vesselButton.isHidden = benchmark != nil
         compareButton.configuration?.title = String(localized: "Native vs refined glass")
         compareButton.accessibilityIdentifier = "lab.openCompare"
         compareButton.addAction(UIAction { [weak self] _ in self?.openBench(.compare, page: .charcoal, animated: true) }, for: .primaryActionTriggered)
@@ -614,7 +631,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, compareButton, presentationButton, frostButton, frostGlassButton, benchButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, vesselButton, compareButton, presentationButton, frostButton, frostGlassButton, benchButton, measureButton])
        stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false

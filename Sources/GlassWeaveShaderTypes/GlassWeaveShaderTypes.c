@@ -175,3 +175,26 @@ _Static_assert(offsetof(GWShapePrimitive, shape) == 16, "primitive shape offset"
 _Static_assert(offsetof(GWShapePrimitive, kind) == 32, "primitive kind offset");
 _Static_assert(GWShapeKindRoundedRectangle == 0 && GWShapeKindEllipse == 1 && GWShapeKindSuperellipse == 2 && GWShapeKindBlob == 3, "GWShapeKind values");
 _Static_assert(GWShapePrimitiveCircle == 0 && GWShapePrimitiveCapsule == 1 && GWShapePrimitiveBox == 2, "GWShapePrimitiveKind values");
+
+_Static_assert(sizeof(GWFillUniforms) == 784, "GWFillUniforms size");
+_Static_assert(_Alignof(GWFillUniforms) == 16, "GWFillUniforms alignment");
+_Static_assert(offsetof(GWFillUniforms, ramp0) == 0, "fill ramp0 offset");
+_Static_assert(offsetof(GWFillUniforms, ramp1) == 16, "fill ramp1 offset");
+_Static_assert(offsetof(GWFillUniforms, ramp2) == 32, "fill ramp2 offset");
+_Static_assert(offsetof(GWFillUniforms, absorption) == 48, "fill absorption offset");
+_Static_assert(offsetof(GWFillUniforms, line) == 64, "fill line offset");
+_Static_assert(offsetof(GWFillUniforms, region) == 80, "fill region offset");
+_Static_assert(offsetof(GWFillUniforms, surface) == 96, "fill surface offset");
+_Static_assert(offsetof(GWFillUniforms, waves) == 112, "fill waves offset");
+_Static_assert(offsetof(GWFillUniforms, sheets) == 128, "fill sheets offset");
+_Static_assert(offsetof(GWFillUniforms, detail) == 144, "fill detail offset");
+_Static_assert(offsetof(GWFillUniforms, gelBounds) == 160, "fill gelBounds offset");
+_Static_assert(offsetof(GWFillUniforms, flags) == 176, "fill flags offset");
+_Static_assert(offsetof(GWFillUniforms, bubbleCount) == 180, "fill bubbleCount offset");
+_Static_assert(offsetof(GWFillUniforms, ior) == 184, "fill ior offset");
+_Static_assert(offsetof(GWFillUniforms, padding0) == 188, "fill padding0 offset");
+_Static_assert(offsetof(GWFillUniforms, gel) == 192, "fill gel offset");
+_Static_assert(offsetof(GWFillUniforms, bubbles) == 528, "fill bubbles offset");
+_Static_assert(GWFillModeNone == 0 && GWFillModeLevel == 1 && GWFillModeGel == 2, "GWFillMode values");
+_Static_assert(GWFillFlagOpaque == 1 && GWFillFlagFull == 2, "GWFillFlag values");
+_Static_assert(GWGlassBindingIndexFill == 2, "GWGlassBindingIndexFill value");
