@@ -34,8 +34,8 @@ kernel void gw_test_background_uniforms_probe(
 }
 
 /// Writes the shader's view of a GWGlassUniforms record, field by field
-/// (including the nested background record), plus its size, alignment, and
-/// field offsets.
+/// (including the nested background record and the glow), plus its size,
+/// alignment, and field offsets.
 kernel void gw_test_glass_uniforms_probe(
     constant GWGlassUniforms &record [[buffer(0)]],
     device float *values [[buffer(1)]],
@@ -68,6 +68,28 @@ kernel void gw_test_glass_uniforms_probe(
     values[22] = record.tint.y;
     values[23] = record.tint.z;
     values[24] = record.tint.w;
+    const float4 glowColors[4] = {record.glowColor0, record.glowColor1, record.glowColor2, record.glowColor3};
+    for (uint i = 0; i < 4; ++i) {
+        values[25 + 4 * i] = glowColors[i].x;
+        values[26 + 4 * i] = glowColors[i].y;
+        values[27 + 4 * i] = glowColors[i].z;
+        values[28 + 4 * i] = glowColors[i].w;
+    }
+    values[41] = record.glowStopTurns.x;
+    values[42] = record.glowStopTurns.y;
+    values[43] = record.glowStopTurns.z;
+    values[44] = record.glowStopTurns.w;
+    values[45] = record.glowLightDirection.x;
+    values[46] = record.glowLightDirection.y;
+    values[47] = float(record.glowStopCount);
+    values[48] = record.glowRimWidth;
+    values[49] = record.glowRimFeather;
+    values[50] = record.glowRimIntensity;
+    values[51] = record.glowInnerRadius;
+    values[52] = record.glowInnerIntensity;
+    values[53] = record.glowCenterOpacity;
+    values[54] = record.glowDirectionality;
+    values[55] = record.glowNormalRadius;
 
     layout[0] = sizeof(GWGlassUniforms);
     layout[1] = alignof(GWGlassUniforms);
@@ -81,4 +103,19 @@ kernel void gw_test_glass_uniforms_probe(
     layout[9] = __builtin_offsetof(GWGlassUniforms, maxDisplacement);
     layout[10] = __builtin_offsetof(GWGlassUniforms, edgeHighlight);
     layout[11] = __builtin_offsetof(GWGlassUniforms, tint);
+    layout[12] = __builtin_offsetof(GWGlassUniforms, glowColor0);
+    layout[13] = __builtin_offsetof(GWGlassUniforms, glowColor1);
+    layout[14] = __builtin_offsetof(GWGlassUniforms, glowColor2);
+    layout[15] = __builtin_offsetof(GWGlassUniforms, glowColor3);
+    layout[16] = __builtin_offsetof(GWGlassUniforms, glowStopTurns);
+    layout[17] = __builtin_offsetof(GWGlassUniforms, glowLightDirection);
+    layout[18] = __builtin_offsetof(GWGlassUniforms, glowStopCount);
+    layout[19] = __builtin_offsetof(GWGlassUniforms, glowRimWidth);
+    layout[20] = __builtin_offsetof(GWGlassUniforms, glowRimFeather);
+    layout[21] = __builtin_offsetof(GWGlassUniforms, glowRimIntensity);
+    layout[22] = __builtin_offsetof(GWGlassUniforms, glowInnerRadius);
+    layout[23] = __builtin_offsetof(GWGlassUniforms, glowInnerIntensity);
+    layout[24] = __builtin_offsetof(GWGlassUniforms, glowCenterOpacity);
+    layout[25] = __builtin_offsetof(GWGlassUniforms, glowDirectionality);
+    layout[26] = __builtin_offsetof(GWGlassUniforms, glowNormalRadius);
 }

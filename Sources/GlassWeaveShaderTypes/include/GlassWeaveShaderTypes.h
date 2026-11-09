@@ -11,6 +11,10 @@
 // round-trip test with distinctive values.
 
 #include <simd/simd.h>
+#ifndef __METAL_VERSION__
+// Metal's standard library defines the fixed-width integer types itself.
+#include <stdint.h>
+#endif
 
 /// Argument-table indices for the background presentation pass.
 typedef enum GWBackgroundBindingIndex {
@@ -77,11 +81,35 @@ typedef enum GWGlassBindingIndex {
 ///   white (already scaled by the documented maximum).
 /// - `tint`: tint color in linear light (`xyz`) and tint strength (`w`).
 ///
+/// Glow (GW-17), appended after the GW-05 fields, which keep their layout.
+/// `glowStopCount` 0 disables the whole glow; every other glow field is then
+/// zero. See docs/glow.md for the math.
+/// - `glowColor0` … `glowColor3`: stop colors in linear light (`xyz`, `w`
+///   zero), ordered by angle; unused stops are zero.
+/// - `glowStopTurns`: stop angles in turns (0 at the top, clockwise), each in
+///   [0, 1), ascending; unused lanes are zero.
+/// - `glowLightDirection`: unit vector toward the light, y down.
+/// - `glowStopCount`: number of stops, 0 to 4.
+/// - `glowRimWidth`, `glowRimFeather`: rim band width and the width of its
+///   soft inner edge, in pixels (the feather is at least 1 when the rim is
+///   drawn).
+/// - `glowRimIntensity`, `glowInnerIntensity`, `glowCenterOpacity`,
+///   `glowDirectionality`: normalized, 0...1. The rim intensity is zero when
+///   there is no rim.
+/// - `glowInnerRadius`: inner glow reach, in pixels.
+/// - `glowNormalRadius`: corner radius of the field that orients the light,
+///   in pixels.
+///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
 /// maxDisplacement 76, edgeHighlight 80, explicit padding 84, 88, 92 (set
-/// to zero), tint 96.
-/// Size 112, alignment 16, stride 112.
+/// to zero), tint 96; glowColor0 112, glowColor1 128, glowColor2 144,
+/// glowColor3 160, glowStopTurns 176, glowLightDirection 192,
+/// glowStopCount 200, glowRimWidth 204, glowRimFeather 208,
+/// glowRimIntensity 212, glowInnerRadius 216, glowInnerIntensity 220,
+/// glowCenterOpacity 224, glowDirectionality 228, glowNormalRadius 232,
+/// explicit padding 236 (set to zero).
+/// Size 240, alignment 16, stride 240.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
     simd_float2 targetSize;
@@ -96,6 +124,22 @@ typedef struct GWGlassUniforms {
     float padding1;
     float padding2;
     simd_float4 tint;
+    simd_float4 glowColor0;
+    simd_float4 glowColor1;
+    simd_float4 glowColor2;
+    simd_float4 glowColor3;
+    simd_float4 glowStopTurns;
+    simd_float2 glowLightDirection;
+    uint32_t glowStopCount;
+    float glowRimWidth;
+    float glowRimFeather;
+    float glowRimIntensity;
+    float glowInnerRadius;
+    float glowInnerIntensity;
+    float glowCenterOpacity;
+    float glowDirectionality;
+    float glowNormalRadius;
+    float padding3;
 } GWGlassUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

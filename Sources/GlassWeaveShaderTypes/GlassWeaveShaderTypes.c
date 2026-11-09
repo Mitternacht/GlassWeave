@@ -13,7 +13,7 @@ _Static_assert(offsetof(GWBackgroundUniforms, uvOrigin) == 16, "uvOrigin offset"
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMin) == 24, "sampleClampMin offset");
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMax) == 32, "sampleClampMax offset");
 
-_Static_assert(sizeof(GWGlassUniforms) == 112, "GWGlassUniforms size");
+_Static_assert(sizeof(GWGlassUniforms) == 240, "GWGlassUniforms size");
 _Static_assert(_Alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 _Static_assert(offsetof(GWGlassUniforms, background) == 0, "background offset");
 _Static_assert(offsetof(GWGlassUniforms, targetSize) == 40, "targetSize offset");
@@ -25,3 +25,18 @@ _Static_assert(offsetof(GWGlassUniforms, normalRadius) == 72, "normalRadius offs
 _Static_assert(offsetof(GWGlassUniforms, maxDisplacement) == 76, "maxDisplacement offset");
 _Static_assert(offsetof(GWGlassUniforms, edgeHighlight) == 80, "edgeHighlight offset");
 _Static_assert(offsetof(GWGlassUniforms, tint) == 96, "tint offset");
+_Static_assert(offsetof(GWGlassUniforms, glowColor0) == 112, "glowColor0 offset");
+_Static_assert(offsetof(GWGlassUniforms, glowColor1) == 128, "glowColor1 offset");
+_Static_assert(offsetof(GWGlassUniforms, glowColor2) == 144, "glowColor2 offset");
+_Static_assert(offsetof(GWGlassUniforms, glowColor3) == 160, "glowColor3 offset");
+_Static_assert(offsetof(GWGlassUniforms, glowStopTurns) == 176, "glowStopTurns offset");
+_Static_assert(offsetof(GWGlassUniforms, glowLightDirection) == 192, "glowLightDirection offset");
+_Static_assert(offsetof(GWGlassUniforms, glowStopCount) == 200, "glowStopCount offset");
+_Static_assert(offsetof(GWGlassUniforms, glowRimWidth) == 204, "glowRimWidth offset");
+_Static_assert(offsetof(GWGlassUniforms, glowRimFeather) == 208, "glowRimFeather offset");
+_Static_assert(offsetof(GWGlassUniforms, glowRimIntensity) == 212, "glowRimIntensity offset");
+_Static_assert(offsetof(GWGlassUniforms, glowInnerRadius) == 216, "glowInnerRadius offset");
+_Static_assert(offsetof(GWGlassUniforms, glowInnerIntensity) == 220, "glowInnerIntensity offset");
+_Static_assert(offsetof(GWGlassUniforms, glowCenterOpacity) == 224, "glowCenterOpacity offset");
+_Static_assert(offsetof(GWGlassUniforms, glowDirectionality) == 228, "glowDirectionality offset");
+_Static_assert(offsetof(GWGlassUniforms, glowNormalRadius) == 232, "glowNormalRadius offset");

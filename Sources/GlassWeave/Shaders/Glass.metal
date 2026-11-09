@@ -5,7 +5,7 @@ using namespace metal;
 
 // The shader's view of the shared record must match the host layout asserted
 // in GlassWeaveShaderTypes.c.
-static_assert(sizeof(GWGlassUniforms) == 112, "GWGlassUniforms size");
+static_assert(sizeof(GWGlassUniforms) == 240, "GWGlassUniforms size");
 static_assert(alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 
 // The optical model below is mirrored on the CPU by `GlassPanelGeometry`
@@ -85,6 +85,71 @@ static float2 gw_rounded_rect_normal(float2 q, float2 halfSize, float radius) {
     return float2(0.0, gw_sign(q.y));
 }
 
+/// The 4 x 4 ordered-dither (Bayer) matrix, row by row.
+constant float gw_bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
+
+/// The glow color at an angle in turns (0 at the top, clockwise), in linear
+/// light: linear interpolation between the neighbouring stops around the
+/// circle, which wraps from the last stop back to the first. Stops are
+/// ordered by angle; one stop is a solid color.
+static float3 gw_glow_color(float turn, constant GWGlassUniforms &uniforms) {
+    const float3 colors[4] = {
+        uniforms.glowColor0.xyz, uniforms.glowColor1.xyz,
+        uniforms.glowColor2.xyz, uniforms.glowColor3.xyz,
+    };
+    const uint count = min(uniforms.glowStopCount, 4u);
+    if (count <= 1u) {
+        return colors[0];
+    }
+    // `following` stops lie at or before `turn`.
+    uint following = 0u;
+    for (uint i = 0u; i < count; ++i) {
+        if (uniforms.glowStopTurns[i] <= turn) {
+            following = i + 1u;
+        }
+    }
+    const uint previous = (following + count - 1u) % count;
+    const uint next = following % count;
+    const float start = following == 0u ? uniforms.glowStopTurns[previous] - 1.0 : uniforms.glowStopTurns[previous];
+    const float end = following == count ? uniforms.glowStopTurns[next] + 1.0 : uniforms.glowStopTurns[next];
+    const float fraction = saturate((turn - start) / max(end - start, 1e-6));
+    return mix(colors[previous], colors[next], fraction);
+}
+
+/// The glow layer's opacity and color at a pixel inside the panel
+/// (docs/glow.md): a rim band, an inner glow falling off as (1 - t)^2, and
+/// a center fill, all in one color, with the rim and inner glow lit from
+/// one side. Returns the opacity in `w`.
+static float4 gw_glow(float2 q, float depth, constant GWGlassUniforms &uniforms) {
+    // The angle around the center with the panel scaled to a square. The
+    // precise atan2: on the axis through the center `-p.y` is a signed
+    // zero, which the fast-math atan2 puts in the wrong half-plane.
+    const float2 p = q / uniforms.panelHalfSize;
+    float turn = 0.0;
+    if (p.x != 0.0 || p.y != 0.0) {
+        turn = precise::atan2(p.x, -p.y) * (0.5 / M_PI_F);
+        turn = turn - floor(turn);
+    }
+    const float3 color = gw_glow_color(turn, uniforms);
+
+    const float2 normal = gw_rounded_rect_normal(q, uniforms.panelHalfSize, uniforms.glowNormalRadius);
+    const float facing = (1.0 + dot(normal, uniforms.glowLightDirection)) * 0.5;
+    const float light = (1.0 - uniforms.glowDirectionality) + uniforms.glowDirectionality * facing * facing;
+
+    float rim = 0.0;
+    if (uniforms.glowRimIntensity > 0.0) {
+        rim = uniforms.glowRimIntensity * light
+            * (1.0 - smoothstep(uniforms.glowRimWidth, uniforms.glowRimWidth + uniforms.glowRimFeather, depth));
+    }
+    float inner = 0.0;
+    if (uniforms.glowInnerRadius > 0.0) {
+        const float t = saturate(depth / uniforms.glowInnerRadius);
+        inner = uniforms.glowInnerIntensity * (1.0 - t) * (1.0 - t) * light;
+    }
+    const float alpha = 1.0 - (1.0 - uniforms.glowCenterOpacity) * (1.0 - inner) * (1.0 - rim);
+    return float4(color, alpha);
+}
+
 /// One rounded glass panel over the background.
 ///
 /// Inside the rim (`bezelWidth` pixels inward from the outline) the sample
@@ -96,9 +161,14 @@ static float2 gw_rounded_rect_normal(float2 q, float2 halfSize, float radius) {
 ///
 /// The tint mixes in linear light, then edge illumination moves the rim at
 /// most `edgeHighlight` of the way to white, strongest at the outline and on
-/// the side facing the light. The outline is antialiased over one pixel by
-/// mixing with the undisplaced background in linear light, so the edge has
-/// no dark or bright fringe. Every pixel is written opaque.
+/// the side facing the light. With a glow (GW-17, `glowStopCount` > 0), the
+/// glow layer is composited over that glass in linear light as a
+/// premultiplied layer `(color * alpha, alpha)`. The outline is antialiased
+/// over one pixel by mixing with the undisplaced background in linear light,
+/// so the edge has no dark or bright fringe. Where the glow draws, a 4 x 4
+/// ordered dither of at most 0.47 of an 8-bit step breaks up bands; where it
+/// does not (and always without a glow) the output is exactly the glow-free
+/// result. Every pixel is written opaque.
 fragment float4 gw_glass_fragment(
     GWGlassVertexOut in [[stage_in]],
     constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]],
@@ -124,5 +194,17 @@ fragment float4 gw_glass_fragment(
     const float highlight = uniforms.edgeHighlight * rim * rim * rim * (0.4 + 0.6 * facing);
     glass = glass + (1.0 - glass) * highlight;
 
-    return float4(gw_glass_encode_srgb(mix(background, glass, coverage)), 1.0);
+    float glowAlpha = 0.0;
+    if (uniforms.glowStopCount > 0u) {
+        const float4 glow = gw_glow(q, depth, uniforms);
+        glowAlpha = glow.w;
+        glass = mix(glass, glow.xyz, glowAlpha);
+    }
+
+    float3 encoded = gw_glass_encode_srgb(mix(background, glass, coverage));
+    if (glowAlpha > 0.0) {
+        const uint2 cell = uint2(pixel) & 3u;
+        encoded = saturate(encoded + ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0);
+    }
+    return float4(encoded, 1.0);
 }

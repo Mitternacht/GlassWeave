@@ -52,6 +52,10 @@ struct GlassParametersTests {
     @Test(arguments: GlassParameterError.Field.allCases, nonFiniteValues)
     func `A non-finite value is rejected and names its field`(field: GlassParameterError.Field, value: Double) {
         var panel = GlassPanel(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        // A visible glow with two stops, so a bad value in either is found.
+        panel.parameters.glow = GlassGlow(colors: [
+            .init(red: 1, green: 0.5, blue: 0, angle: 0), .init(red: 0, green: 0.5, blue: 1, angle: 180),
+        ])
         switch field {
         case .frame: panel.frame.size.width = value
         case .cornerRadius: panel.parameters.cornerRadius = value
@@ -62,6 +66,18 @@ struct GlassParametersTests {
         case .tintGreen: panel.parameters.tint.green = value
         case .tintBlue: panel.parameters.tint.blue = value
         case .tintStrength: panel.parameters.tint.strength = value
+        case .glowColorRed: panel.parameters.glow.colors[1].red = value
+        case .glowColorGreen: panel.parameters.glow.colors[0].green = value
+        case .glowColorBlue: panel.parameters.glow.colors[1].blue = value
+        case .glowColorAngle: panel.parameters.glow.colors[1].angle = value
+        case .glowRimWidth: panel.parameters.glow.rimWidth = value
+        case .glowRimSoftness: panel.parameters.glow.rimSoftness = value
+        case .glowRimIntensity: panel.parameters.glow.rimIntensity = value
+        case .glowInnerGlowRadius: panel.parameters.glow.innerGlowRadius = value
+        case .glowInnerGlowIntensity: panel.parameters.glow.innerGlowIntensity = value
+        case .glowCenterOpacity: panel.parameters.glow.centerOpacity = value
+        case .glowLightAngle: panel.parameters.glow.lightAngle = value
+        case .glowDirectionality: panel.parameters.glow.directionality = value
         }
         #expect(throws: GlassParameterError.nonFinite(field)) {
             try panel.normalized()

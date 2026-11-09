@@ -35,11 +35,25 @@ public final class GlassRenderer {
 
     /// Creates a renderer that submits to `commandQueue` on its device.
     /// Loads the package shader library and builds both pipelines now.
-    public init(commandQueue: any MTLCommandQueue) throws {
+    public convenience init(commandQueue: any MTLCommandQueue) throws {
         let library = try BackgroundRenderer.makeLibrary(device: commandQueue.device)
+        try self.init(
+            commandQueue: commandQueue, library: library,
+            panelLibrary: library, panelVertex: "gw_glass_vertex", panelFragment: "gw_glass_fragment"
+        )
+    }
+
+    /// Creates a renderer whose panel pass uses the named functions from
+    /// `panelLibrary`. The package uses its own glass shader; tests use this
+    /// to draw with a frozen earlier version of it (the panel record's
+    /// earlier layout is a prefix of the current one).
+    init(
+        commandQueue: any MTLCommandQueue, library: any MTLLibrary,
+        panelLibrary: any MTLLibrary, panelVertex: String, panelFragment: String
+    ) throws {
         panelPipeline = try BackgroundRenderer.makePipeline(
-            device: commandQueue.device, library: library, label: "GlassWeave glass panel",
-            vertex: "gw_glass_vertex", fragment: "gw_glass_fragment"
+            device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel",
+            vertex: panelVertex, fragment: panelFragment
         )
         background = try BackgroundRenderer(commandQueue: commandQueue, library: library)
         self.device = commandQueue.device

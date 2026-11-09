@@ -40,6 +40,7 @@ public struct GlassTint: Hashable, Sendable {
 /// | ``refraction`` | normalized | 0...1 | Rim displacement. At the outline the sample moves `refraction × bezelWidth / 2` toward the panel interior, falling off quadratically to zero at the rim's inner edge. Zero samples in place. |
 /// | ``edgeHighlight`` | normalized | 0...1 | Edge illumination. One moves the outline at most ``maximumEdgeHighlight`` of the way to white on the side facing the upper-left light. |
 /// | ``tint`` | normalized | components and strength 0...1 | See ``GlassTint``. |
+/// | ``glow`` | see ``GlassGlow`` | see ``GlassGlow`` | A colored rim, inner glow, and center fill drawn over the glass; ``GlassGlow/none`` (the default) draws nothing. |
 ///
 /// **Normalization rule.** When a renderer accepts parameters, a non-finite
 /// value (NaN or infinity) anywhere is rejected with
@@ -47,8 +48,9 @@ public struct GlassTint: Hashable, Sendable {
 /// value. A finite value outside its range is clamped to the nearest valid
 /// value: negative lengths become zero, lengths longer than half the
 /// panel's shorter side become that half, and coefficients and tint
-/// components are clamped to 0...1. The renderer reports the values it
-/// actually uses through ``GlassRenderer/panel``.
+/// components are clamped to 0...1. ``GlassGlow`` documents the same rule
+/// for its fields. The renderer reports the values it actually uses through
+/// ``GlassRenderer/panel``.
 public struct GlassParameters: Hashable, Sendable {
     /// Outline corner radius, in points.
     public var cornerRadius: Double
@@ -60,6 +62,9 @@ public struct GlassParameters: Hashable, Sendable {
     public var edgeHighlight: Double
     /// Tint mixed into the glass.
     public var tint: GlassTint
+    /// A colored glow at the edge, drawn over the glass; ``GlassGlow/none``
+    /// for none.
+    public var glow: GlassGlow
 
     /// The most edge illumination can brighten the outline: this fraction of
     /// the way from the glass color to white, at ``edgeHighlight`` 1.
@@ -70,13 +75,15 @@ public struct GlassParameters: Hashable, Sendable {
         bezelWidth: Double = 16,
         refraction: Double = 0.6,
         edgeHighlight: Double = 0.5,
-        tint: GlassTint = .none
+        tint: GlassTint = .none,
+        glow: GlassGlow = .none
     ) {
         self.cornerRadius = cornerRadius
         self.bezelWidth = bezelWidth
         self.refraction = refraction
         self.edgeHighlight = edgeHighlight
         self.tint = tint
+        self.glow = glow
     }
 }
 
@@ -111,6 +118,22 @@ public enum GlassParameterError: Error, Hashable, Sendable, CustomStringConverti
         case tintGreen
         case tintBlue
         case tintStrength
+        /// A ``GlassGlow/ColorStop/red`` in ``GlassGlow/colors``.
+        case glowColorRed
+        /// A ``GlassGlow/ColorStop/green`` in ``GlassGlow/colors``.
+        case glowColorGreen
+        /// A ``GlassGlow/ColorStop/blue`` in ``GlassGlow/colors``.
+        case glowColorBlue
+        /// A ``GlassGlow/ColorStop/angle`` in ``GlassGlow/colors``.
+        case glowColorAngle
+        case glowRimWidth
+        case glowRimSoftness
+        case glowRimIntensity
+        case glowInnerGlowRadius
+        case glowInnerGlowIntensity
+        case glowCenterOpacity
+        case glowLightAngle
+        case glowDirectionality
     }
 
     /// The value is NaN or infinite. Finite out-of-range values are clamped
@@ -139,6 +162,7 @@ extension GlassParameters {
         for (field, value) in checks where !value.isFinite {
             throw .nonFinite(field)
         }
+        let glow = try glow.normalized(maximumLength: maximumLength)
         let length = { (value: Double) in min(max(value, 0), maximumLength) }
         let unit = { (value: Double) in min(max(value, 0), 1) }
         return GlassParameters(
@@ -149,7 +173,8 @@ extension GlassParameters {
             tint: GlassTint(
                 red: unit(tint.red), green: unit(tint.green), blue: unit(tint.blue),
                 strength: unit(tint.strength)
-            )
+            ),
+            glow: glow
         )
     }
 }

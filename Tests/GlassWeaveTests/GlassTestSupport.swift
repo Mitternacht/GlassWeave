@@ -105,15 +105,31 @@ struct GlassReference {
         glass = glass * (1 - geometry.tintStrength) + tint * geometry.tintStrength
         let highlight = geometry.highlight(at: pixel)
         glass = glass + (SIMD3(repeating: 1) - glass) * highlight
+        let glowAlpha = geometry.glowAlpha(at: pixel)
+        if glowAlpha > 0 {
+            let rgb = geometry.glowColor(atTurn: geometry.glowTurn(at: pixel))
+            glass = glass + (SIMD3(rgb.z, rgb.y, rgb.x) - glass) * glowAlpha
+        }
         return background * (1 - coverage) + glass * coverage
     }
 
-    /// The predicted output bytes (blue, green, red) on the 0...255 scale.
+    /// Whether the glow draws at a pixel, so the shader dithers it.
+    func isDithered(x: Int, y: Int) -> Bool {
+        let pixel = SIMD2(Double(x) + 0.5, Double(y) + 0.5)
+        guard let geometry, !geometry.isEmpty, geometry.coverage(at: pixel) > 0 else { return false }
+        return geometry.glowAlpha(at: pixel) > 0
+    }
+
+    /// The predicted output bytes (blue, green, red) on the 0...255 scale,
+    /// before rounding, including the glow's ordered dither.
     func encodedColor(x: Int, y: Int) -> SIMD3<Double> {
         let c = linearColor(x: x, y: y)
-        return SIMD3(
+        let encoded = SIMD3(
             GlassPanelGeometry.encodeSRGB(c.x), GlassPanelGeometry.encodeSRGB(c.y), GlassPanelGeometry.encodeSRGB(c.z)
         ) * 255
+        guard isDithered(x: x, y: y) else { return encoded }
+        let dithered = encoded + SIMD3(repeating: GlassPanelGeometry.ditherOffset(column: x, row: y))
+        return dithered.clamped(lowerBound: .zero, upperBound: SIMD3(repeating: 255))
     }
 }
 
