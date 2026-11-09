@@ -865,7 +865,7 @@ Visual verdict, honest: see HANDOFF.md, "Visual verdict". Limits: simulator and 
 - iPad Pro 13-inch (M5) simulator: `StudyUITests` and `VersusUITests`, 2 passed. No lab UI test covers the Touch, Merge or SwiftUI pages (no new tests, by instruction), so those were launched on the iPad and inspected (captures, no overlap or clipping).
 - `scripts/consumer_check.sh` at the merged commit, My Mac: passed (the pin resolved to that commit only).
 
-Hygiene: 4 commits since `3f824b1` (the three task commits and the merge), all with the author and committer `Mitternacht` (noreply address) and the co-author line; no match in the added lines or the tracked tree for a home-folder or volume path, team setting, address, device identifier or the reference folder name; no tracked image has the SHA-256 of a reference picture; the CI blocking-wait grep and the documentation-example check pass.
+Hygiene: 4 commits since `3f824b1` when checked (the three task commits and the merge, before the one that records this), all with the author and committer `Mitternacht` (noreply address) and the co-author line; no match in the added lines or the tracked tree for a home-folder or volume path, team setting, address, device identifier or the reference folder name; no tracked image has the SHA-256 of a reference picture; the CI blocking-wait grep and the documentation-example check pass.
 
 Checklist audit: no tick was added or removed. The three sections already gave a reason on every unticked line and an evidence line for every ticked one; the verification updates in each section record what was re-run. Tick counts: GW-12 4 ticked and 5 unticked, GW-13 8 and 3, GW-15 2 and 1.
 
