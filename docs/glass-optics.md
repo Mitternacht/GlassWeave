@@ -579,3 +579,134 @@ the caustic is a thin colored fringe, not a bright patch with a sharp core.
   monotonicity, darkening centroid, seam, two-neighbour readback, CPU
   encoded-space mirror), the M5 cost run, and the device-only light-mode check
   (see the checklist).
+
+## GW-26: Freeform shapes: ellipses, squircles and smooth blobs
+
+> Experimental. `GlassShape`, `GlassBlob`, `GlassParameters.shape`,
+> `GlassPanel.shapeBounds`, `GlassParameterError.nonFiniteShape(_:)` and
+> `GlassRenderer.PipelineVariant.shaped` may change before a stable release.
+
+Native glass takes a shape from a fixed set. `GlassParameters.shape:
+GlassShape` (default `.roundedRectangle`, the original path, byte for byte)
+adds `.ellipse`, `.superellipse(exponent:)` (2...10; `.squircle` is 4) and
+`.blob(GlassBlob)`: a smooth union of up to six circles, capsules and rotated
+rounded boxes, with an optional loop-locked wobble. **Every** effect follows
+the outline: the antialiased edge, the rim refraction, the thick lens (height,
+normal, dispersion, inlays), the glow's rim, inner glow and halo, the interior
+and the inner light, the light model's Fresnel line, reflections and bloom,
+and the grounding's drop, contact and inner shadows and caustic. The shader
+(`Glass.metal`, "Freeform shapes") is the reference; the CPU mirror is only the
+trivial one (`GlassShapeField` types, used for the quad and the inscribed
+radius).
+
+### The shape field
+
+Every shape answers the four things of the GW-22 interface (`GWShapeSample`):
+
+| Quantity | Ellipse and squircle | Blob |
+| --- | --- | --- |
+| distance | first-order `(k0 - 1) / abs(grad k0)` of the homogeneous `k0 = (abs(x/a)^n + abs(y/b)^n)^(1/n)`; exact on the outline and on the axes; the gradient has unit length | polynomial smooth minimum of the primitives' distances, `min - k h^2 / 4` with `h = max(k - abs(a - b), 0) / k`, folded in order; renormalized by `max(abs(grad), 0.3)` so the antialiased edge is one pixel wide, the renormalization fading out deeper than 35 % of the inscribed radius |
+| normal | `grad / abs(grad)` | the blended gradient, `(1 - h/2) grad(min) + (h/2) grad(other)`, normalized: C1 through a neck |
+| lens depth | `max(-distance, 0)` | the same |
+| inscribed radius | the shorter half side | sampled on the CPU (a lower bound: the raw field is 1-Lipschitz) |
+
+The lens depth is C1 only while the bevel is narrower than the outline's
+smallest radius of curvature (for a blob, its smallest convex part); a wider
+bevel creases along the medial axis, where the rounded rectangle's
+`lensFieldRadius` would have rounded it. The renderer clamps the bevel to the
+inscribed radius.
+
+### Coordinates, bounds, normalization
+
+Blob coordinates are **frame units**: origin at the frame's center, y down, 1
+is half the frame's shorter side, so a blob scales with its frame and a circle
+stays a circle. The quad is the outline's bounding box, not the frame: the CPU
+takes the union of the primitives' own extents and the sampled extent of the
+blob (48 x 48 samples, 1.5 cells of margin, inside the largest bulge
+`(n - 1) k / 4` a smooth union can add), plus the wobble's amplitude, and the
+shader's `panelCenter` and `panelHalfSize` are that box. `GlassPanel.shapeBounds`
+reports it in points; `reachesTarget` uses it. The glow's angle (turns around
+the box, panel scaled to a square) and the light emitters' unit space stay
+those of the box; the interior's and the light's depth fraction use the
+inscribed radius (`min(halfSize)` for the rounded rectangle, unchanged). A
+blob's bounds and inscribed radius are cached by shape and frame size.
+
+Normalization follows the rule. A non-finite value throws
+`GlassParameterError.nonFiniteShape(_:)` naming the `GlassShape.Field`;
+finite values are clamped: exponent 2...10, positions -4...4, radii and half
+sizes 0...4, corner radius to the smaller half size, smoothness 0...2, wobble
+amplitude 0...0.1, wobble speed 0...3; an empty blob becomes one circle of
+radius 1; primitives past six are dropped (a non-finite value in a dropped one
+still throws). A blob's lengths (bezel, rim, reach) are capped at its
+inscribed radius instead of half the shorter side. `cornerRadius` is ignored by
+the other shapes; lens inlays are placed relative to the quad's center.
+
+### Pipeline
+
+The shape code exists only in the `shaped` pipeline variant, built with
+function constant 3 (`gw_shape_constant`). A panel with a shape draws in it
+whatever else it draws: the variant has the lens, light-model and grounding
+code too, each gated at run time by the panel's own record (a zero record is
+the effect off). The grounding pre-pass has shaped shadow and caustic
+pipelines, so the shadow is the shape's. Rounded-rectangle panels keep their
+four variants with the constant set to false, so the shader is the GW-25 one
+(a frozen copy, `GlassBaselineGW25.metal`, proves it). The panel record grows
+by `GWShapeUniforms` (336 bytes) to 1776; sizes asserted in C, MSL and Swift.
+
+### Wobble
+
+Three plane waves (amplitude `amplitude / 3` each, wavelength 1.6 frame units)
+whose phases turn 6, 9 and 13 times per 64 s of wobble time
+`(effectTime + timeOffset) x speed`, so the shape repeats exactly every 64 s.
+The raw distance and its gradient both include the waves, so the normal and
+every effect follow. The surface's effect clock does not run for it: like
+`GlassLight`, a host moves `timeOffset` from its own clock (the lab does).
+Reduce Motion: `GlassAccessibilityPolicy.presentedShape` sets `speed` 0, a
+still, slightly irregular outline. Reduce Transparency and Increase Contrast
+keep the shape.
+
+### Overlapping quads (rule 10)
+
+`GlassRenderer.overlappingQuads(displayScale:)` (package) lists every pair of
+panels whose quads share area; the quad is the bounding box grown by one pixel,
+the halo and the grounding's reach. The lab's shapes page computes the same
+from `shapeBounds` (the package API is not visible to the app) and prints
+`quads overlap: none`.
+
+### Lab: the shapes page
+
+`-lab.shapes YES` (or the "Shapes" button) opens an ellipse with a pooled
+light band, a squircle with an orb, a pebble blob (a smooth union of two
+circles and a capsule) and a wobbling triple (three circles and a tilted box)
+joined by smooth necks, each with a glow, an inner light, a thick lens with
+six-tap dispersion, and the light model. `-lab.shapesBackdrop <page>` picks
+the bench page (default charcoal); `-lab.shapesTime <s>` freezes the wobble.
+Captures: `docs/evidence/captures/gw-26-shapes-charcoal-iphone18pro-sim.png`
+and `gw-26-shapes-orbs-iphone18pro-sim.png`.
+
+### Deviations and limits
+
+- **Fast pass.** One safety test (a rounded rectangle is byte-identical to the
+  frozen GW-25 shader in the four variants and the grounding pre-pass, and an
+  ellipse draws in the `shaped` variant and differs). Not done, and unchecked:
+  the circle and capsule distance tests, the 360-direction outline and ellipse
+  area tests, the neck smoothness measurements, the blob CPU mirror of the
+  glow, halo and light, the antialiasing and quad-containment tests, the wobble
+  period test, the M5 cost run, the "pebble garden" capture, and the
+  device-only cost.
+- **One superset variant instead of a shape flag on each variant**: a panel
+  with a shape always pays for the lens, light-model and grounding code in its
+  pipeline (four more pipelines at init). Cheaper per variant would need
+  sixteen pipelines.
+- **The renormalization fades out deep inside** (35 % of the inscribed radius):
+  a primitive's medial lines, where its gradient jumps, jumped the depth in
+  the middle of a blob (a hard-edged wedge in the first capture).
+- **An arc light is an angular fan from the box's center**: on a blob it
+  draws a wedge; the lab's pebble uses a band.
+- **A shaped panel's `inscribedRadius` is a lower bound**, so a depth fraction
+  reaches 1 slightly early, and the ellipse's distance is first order (exact at
+  the outline and on the axes' ends), so depth deep inside an elongated
+  ellipse is clamped to the shorter half side.
+- **`PipelineVariant` gained a case** and `GlassParameterError` a case;
+  `ShaderLayoutTests` changed only the record size, the new offset and the
+  record's new memberwise argument.

@@ -589,16 +589,16 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 **Dependencies:** GW-22. **Scope:** M, about 7 files plus tests.
 
 **Acceptance criteria:**
-- [ ] `.roundedRectangle` is byte-identical, glow and interior included.
-- [ ] Circle and capsule distances within 1e-4 px on the CPU and one step on the GPU.
-- [ ] Outline within 0.5 px of the mirror over 360 directions; ellipse area within 0.5% of πab.
-- [ ] Neck smoothness: the normal angle changes ≤ 3° between adjacent pixels across smooth-union necks. A two-circle union with a circular lens over a checkerboard has no jump > 2 steps on the bisector.
-- [ ] Glow rim, halo and light piping on a blob match the CPU within one step.
-- [ ] Antialiasing ramp 1 px; wobble periodic and still under Reduce Motion; every covered pixel inside the CPU quad.
-- [ ] M5: 6-primitive blob ≤ +0.15 ms. "Pebble garden" capture.
-- [ ] **Device only:** cost.
+- [x] `.roundedRectangle` is byte-identical, glow and interior included. (`GlassBaselineGW25Tests`, five cases, versus the frozen GW-25 shader in the base, optics, lighting and grounded variants and the grounding pre-pass.)
+- [ ] Circle and capsule distances within 1e-4 px on the CPU and one step on the GPU. (fast pass: not tested)
+- [ ] Outline within 0.5 px of the mirror over 360 directions; ellipse area within 0.5% of πab. (fast pass: not tested)
+- [ ] Neck smoothness: the normal angle changes ≤ 3° between adjacent pixels across smooth-union necks. A two-circle union with a circular lens over a checkerboard has no jump > 2 steps on the bisector. (fast pass: not tested; the necks of the capture look smooth)
+- [ ] Glow rim, halo and light piping on a blob match the CPU within one step. (fast pass: not tested; no CPU mirror of the per-pixel glow on a blob)
+- [ ] Antialiasing ramp 1 px; wobble periodic and still under Reduce Motion; every covered pixel inside the CPU quad. (fast pass: not tested; the Reduce Motion policy row is in code and the lab shows `still`)
+- [ ] M5: 6-primitive blob ≤ +0.15 ms. "Pebble garden" capture. (fast pass: not tested; no M5 run, no pebble garden capture, the shapes page is the capture)
+- [ ] **Device only:** cost. (device only: not run)
 
-**Evidence:** not started.
+**Evidence (2026-11-09):** `GlassShape` (`.roundedRectangle`, `.ellipse`, `.superellipse(exponent:)`, `.blob(GlassBlob)`: up to six circles, capsules and rotated boxes in frame units, a smoothness, and a loop-locked wobble) is `GlassParameters.shape`, normalized (`nonFiniteShape(_:)`), with the CPU field types, bounds and inscribed radius (`GlassShape.swift`), the shaped pipeline variant (function constant 3; also shaped grounding pre-pass pipelines), `GWShapeUniforms` (336 bytes, record 1776, asserted in C, MSL and Swift), `GlassPanel.shapeBounds`, `GlassRenderer.overlappingQuads(displayScale:)` (package), and the Reduce Motion row (`presentedShape`). The shader's edge, rim refraction, lens, glow, halo, interior, light, light model and grounding all read the shape field. Design: [glass-optics.md](../docs/glass-optics.md). Test: `GlassBaselineGW25Tests` (the one safety test; a rounded rectangle is byte-identical to the frozen `GlassBaselineGW25.metal`, and an ellipse draws in `shaped` and differs); `ShaderLayoutTests` changed only for the new record size. Xcode MCP unavailable (workspace open timed out), so `xcodebuild`: My Mac 203 passed, 0 failed; iPhone 18 Pro simulator first run 282 passed, 3 failed (`FrameLifecycleTests` 100 cycles, two `EnhancedNativeGlassViewTests`, none touching shapes), each rerun alone passed (21 and 3 passed). No lab UI test added or changed, none run. Captures (iPhone 18 Pro simulator, inspected, 3 tuning rounds): [charcoal](../docs/evidence/captures/gw-26-shapes-charcoal-iphone18pro-sim.png) and [orbs](../docs/evidence/captures/gw-26-shapes-orbs-iphone18pro-sim.png): an ellipse, a squircle, a pebble and a wobbling triple, each with glow, halo, light, lens and light model hugging the outline, `quads overlap: none`. Limits: the ellipse and superellipse distances are first order; a blob's quad is a sampled box; the arc light is a fan from the box's center; no liquid yet (ref 1's outline only).
 
 **Verification:** As in GW-21.
 

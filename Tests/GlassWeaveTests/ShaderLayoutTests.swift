@@ -57,10 +57,13 @@ struct ShaderLayoutTests {
     }
 
     @Test func `Host layout of the glass uniforms matches the documented record`() {
-        #expect(MemoryLayout<GWGlassUniforms>.size == 1440)
+        #expect(MemoryLayout<GWGlassUniforms>.size == 1776)
         #expect(MemoryLayout<GWGlassUniforms>.alignment == 16)
-        #expect(MemoryLayout<GWGlassUniforms>.stride == 1440)
+        #expect(MemoryLayout<GWGlassUniforms>.stride == 1776)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.grounding) == 1312)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.shape) == 1440)
+        #expect(MemoryLayout<GWShapeUniforms>.size == 336)
+        #expect(MemoryLayout<GWShapePrimitive>.size == 48)
         #expect(MemoryLayout<GWGroundingUniforms>.size == 128)
         #expect(MemoryLayout<GWGroundingUniforms>.alignment == 16)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.background) == 0)
@@ -255,7 +258,8 @@ struct ShaderLayoutTests {
                 GWLensInlay(geometry: [3.5, -7.75, 11.25, 2.5], shape: [11.25, 0, 0, 0.25], profile: 1, padding0: 0, padding1: 0, padding2: 0)
             ),
             lighting: GWLightingUniforms(),
-            grounding: GWGroundingUniforms()
+            grounding: GWGroundingUniforms(),
+            shape: GWShapeUniforms()
         )
         let lightExpected: [Float] = [
             1.5, -2.25, 3.125, -4.0625, 5.5, -6.75, 0.03125, 0.0625, 7.875, -8.5,
@@ -304,7 +308,7 @@ struct ShaderLayoutTests {
         #expect(readSeeds == [0xdeadbeef] + (0..<4).map { Self.emitter($0).seed })
         let readLayout = Array(UnsafeBufferPointer(start: layout.contents().assumingMemoryBound(to: UInt32.self), count: 63))
         #expect(readLayout == [
-            1440, 16, 0, 40, 48, 56, 64, 68, 72, 76, 80, 96,
+            1776, 16, 0, 40, 48, 56, 64, 68, 72, 76, 80, 96,
             112, 128, 144, 160, 176, 192, 200, 204, 208, 212, 216, 220, 224, 228, 232,
             240, 244,
             256, 272, 288, 304, 308, 312, 316, 320, 324, 328, 332,

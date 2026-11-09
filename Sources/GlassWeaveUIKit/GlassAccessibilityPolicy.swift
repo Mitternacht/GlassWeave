@@ -47,6 +47,7 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | Thick lens (`GlassLens`) | Reduce Transparency removes it, dispersion included (the panel is the opaque surface). Increase Contrast keeps the lens, whose samples stay within the source's own colors so the legibility bound for text still holds, and removes the chromatic dispersion, which would put colored fringes behind text. Reduce Motion changes nothing: the lens is static. |
 /// | Light model (`GlassLighting`) | Reduce Transparency keeps a thin, crisp rim: the Fresnel outline as a contrasting hairline within ``reducedTransparencyRimWidth`` of the outline, with no reflections, specular streak, rim light, chrome or prismatic finish, or bloom (the panel is the opaque surface). Increase Contrast removes the reflections, the specular streak, the rim light, the finish, and the bloom: only the Fresnel outline in the bevel band remains, as a contrasting hairline (evenly lit) that is a clearer boundary. Reduce Motion changes nothing: the light moves only when the app moves it. |
 /// | Grounding (`GlassGrounding`) | Reduce Transparency keeps the drop and contact shadows (they ground the opaque surface) and removes the caustic and the inner shadow. Increase Contrast keeps only the contact shadow, at least ``increasedContrastContactOpacity`` dark and ``increasedContrastContactWidth`` points wide, a clearer boundary; the drop shadow, the inner shadow, and the caustic are removed. Reduce Motion changes nothing: grounding is static. |
+/// | Shape (`GlassShape`) | Reduce Transparency and Increase Contrast keep the shape: the opaque surface and the contrasting rim follow its outline. Reduce Motion stills a blob's wobble: its speed becomes 0, so it is drawn at wobble time 0 whatever the effect time (a still, slightly irregular outline). |
 /// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
     /// The widest rim a glow keeps under Reduce Transparency, in points.
@@ -88,7 +89,17 @@ public enum GlassAccessibilityPolicy {
         presented.parameters.light = presentedLight(
             for: panel.parameters.light, bezelWidth: panel.parameters.bezelWidth, settings: settings, traits: traits
         )
+        presented.parameters.shape = presentedShape(for: panel.parameters.shape, settings: settings)
         return presented
+    }
+
+    /// The shape to draw for `shape` under `settings` (GW-26): the same shape,
+    /// with a blob's wobble stilled (speed 0) under Reduce Motion. A shape that
+    /// does not move is kept as it is.
+    static func presentedShape(for shape: GlassShape, settings: GlassAccessibilitySettings) -> GlassShape {
+        guard settings.reduceMotion, case var .blob(blob) = shape, blob.wobble.isAnimated else { return shape }
+        blob.wobble.speed = 0
+        return .blob(blob)
     }
 
     /// The light model to draw for `lighting` under `settings` and `traits`

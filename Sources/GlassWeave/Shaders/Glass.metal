@@ -5,7 +5,10 @@ using namespace metal;
 
 // The shader's view of the shared record must match the host layout asserted
 // in GlassWeaveShaderTypes.c.
-static_assert(sizeof(GWGlassUniforms) == 1440, "GWGlassUniforms size");
+static_assert(sizeof(GWGlassUniforms) == 1776, "GWGlassUniforms size");
+static_assert(sizeof(GWShapeUniforms) == 336, "GWShapeUniforms size");
+static_assert(alignof(GWShapeUniforms) == 16, "GWShapeUniforms alignment");
+static_assert(sizeof(GWShapePrimitive) == 48, "GWShapePrimitive size");
 static_assert(sizeof(GWGroundingUniforms) == 128, "GWGroundingUniforms size");
 static_assert(alignof(GWGroundingUniforms) == 16, "GWGroundingUniforms alignment");
 static_assert(sizeof(GWLightingUniforms) == 160, "GWLightingUniforms size");
@@ -96,6 +99,217 @@ static float2 gw_rounded_rect_normal(float2 q, float2 halfSize, float radius) {
     return float2(0.0, gw_sign(q.y));
 }
 
+// MARK: Freeform shapes (GW-26)
+//
+// An ellipse, a superellipse, or a smooth blob replaces the rounded rectangle
+// everywhere the panel's outline matters: the antialiased edge, the rim
+// refraction and the lens, the glow, the halo, the interior and light, the
+// light model, and the grounding. The code exists only in the `shaped`
+// pipeline variant, built with function constant 3 (`gw_shape_constant`) set;
+// without it everything here is compiled out and the shader is the one of
+// GW-25, byte for byte (a frozen copy in the tests proves it). The CPU mirror
+// is `GlassShapeField` (GlassShape.swift).
+//
+// Every shape answers with the same four things (`GWShapeSample`): a signed
+// distance renormalized by the gradient length so the antialiased edge is one
+// pixel wide, the outward normal, the lens depth, and the inscribed radius.
+// The distance to a blob is the polynomial smooth minimum of its primitives'
+// distances, whose gradient is the blended gradient of the primitives: C1, so
+// the normal turns smoothly through a neck.
+
+constant bool gw_shape_constant [[function_constant(3)]];
+constant bool gw_shaped = is_function_constant_defined(gw_shape_constant) ? gw_shape_constant : false;
+
+/// What the optics ask of a panel's shape (GlassShapeField.swift documents
+/// the interface; every shape kind returns the same four things).
+struct GWShapeSample {
+    /// Signed distance to the outline in pixels: negative inside.
+    float distance;
+    /// The unit direction in which `lensDepth` falls (outward).
+    float2 normal;
+    /// Pixels inside the shape, 0 at and outside the outline. C1: the inward
+    /// distance of the rounded rectangle of `lensFieldRadius`, whose
+    /// iso-contours keep a corner radius of at least the bevel width; for a
+    /// freeform shape the inward distance, whose iso-contours keep a radius
+    /// of curvature of at least the bevel width where the bevel is narrower
+    /// than the outline's smallest radius of curvature.
+    float lensDepth;
+    /// Radius of the largest circle inside the shape, in pixels.
+    float inscribedRadius;
+};
+
+/// A distance and its gradient (not unit length where fields blend).
+struct GWShapeRaw {
+    float distance;
+    float2 gradient;
+};
+
+/// The ellipse of half sizes `radii`: the first-order distance
+/// `k0 (k0 - 1) / k1` with `k0 = |q / r|` and `k1 = |q / r^2|`, exact on the
+/// outline and on the axes' ends, whose gradient has unit length.
+static GWShapeRaw gw_shape_ellipse(float2 q, float2 radii) {
+    const float2 n = q / (radii * radii);
+    const float k1 = length(n);
+    const float k0 = length(q / radii);
+    GWShapeRaw raw;
+    raw.distance = k1 > 1e-6 ? k0 * (k0 - 1.0) / k1 : -min(radii.x, radii.y);
+    raw.gradient = k1 > 1e-6 ? n / k1 : float2(0.0, -1.0);
+    return raw;
+}
+
+/// The superellipse `|x/a|^n + |y/b|^n = 1`: the first-order distance
+/// `(k0 - 1) / |grad k0|` of the homogeneous function
+/// `k0 = (|x/a|^n + |y/b|^n)^(1/n)`; exact on the axes. `n = 2` is the ellipse.
+static GWShapeRaw gw_shape_superellipse(float2 q, float2 radii, float n) {
+    const float2 a = max(abs(q) / radii, 1e-6);
+    const float k0 = pow(pow(a.x, n) + pow(a.y, n), 1.0 / n);
+    const float2 slope = pow(a, float2(n - 1.0)) / radii / pow(max(k0, 1e-6), n - 1.0);
+    const float length2 = length(slope);
+    GWShapeRaw raw;
+    if (abs(q.x) + abs(q.y) < 1e-4 || length2 < 1e-6) {
+        raw.distance = -min(radii.x, radii.y);
+        raw.gradient = float2(0.0, -1.0);
+        return raw;
+    }
+    raw.distance = (k0 - 1.0) / length2;
+    raw.gradient = float2(q.x >= 0.0 ? 1.0 : -1.0, q.y >= 0.0 ? 1.0 : -1.0) * slope / length2;
+    return raw;
+}
+
+/// One blob primitive's distance and gradient at `q`.
+static GWShapeRaw gw_shape_primitive(float2 q, constant GWShapePrimitive &primitive) {
+    GWShapeRaw raw;
+    if (primitive.kind == GWShapePrimitiveCircle) {
+        const float2 offset = q - primitive.geometry.xy;
+        const float length2 = length(offset);
+        raw.distance = length2 - primitive.geometry.z;
+        raw.gradient = length2 > 1e-4 ? offset / length2 : float2(0.0, -1.0);
+    } else if (primitive.kind == GWShapePrimitiveCapsule) {
+        const float2 a = primitive.geometry.xy;
+        const float2 axis = primitive.geometry.zw - a;
+        const float2 offset = q - a;
+        const float h = saturate(dot(offset, axis) / max(dot(axis, axis), 1e-6));
+        const float2 away = offset - axis * h;
+        const float length2 = length(away);
+        raw.distance = length2 - primitive.shape.x;
+        const float2 across = normalize(float2(axis.y, -axis.x) + float2(1e-6, 0.0));
+        raw.gradient = length2 > 1e-4 ? away / length2 : across;
+    } else {
+        // A rounded box turned by the angle whose cosine and sine are in
+        // `shape.yz`: evaluated in its own frame, the gradient turned back.
+        const float2 offset = q - primitive.geometry.xy;
+        const float c = primitive.shape.y;
+        const float s = primitive.shape.z;
+        const float2 local = float2(c * offset.x + s * offset.y, -s * offset.x + c * offset.y);
+        const float2 halfSize = primitive.geometry.zw;
+        const float radius = primitive.shape.x;
+        const float2 d = abs(local) - (halfSize - radius);
+        raw.distance = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - radius;
+        float2 normal;
+        if (d.x > 0.0 && d.y > 0.0) {
+            normal = normalize(d) * float2(local.x >= 0.0 ? 1.0 : -1.0, local.y >= 0.0 ? 1.0 : -1.0);
+        } else if (d.x > d.y) {
+            normal = float2(local.x >= 0.0 ? 1.0 : -1.0, 0.0);
+        } else {
+            normal = float2(0.0, local.y >= 0.0 ? 1.0 : -1.0);
+        }
+        raw.gradient = float2(c * normal.x - s * normal.y, s * normal.x + c * normal.y);
+    }
+    return raw;
+}
+
+/// The polynomial smooth minimum of two fields, with the blended gradient:
+/// `min - k h^2 / 4` for `h = max(k - |a - b|, 0) / k`, whose gradient is
+/// `(1 - h/2) grad(min) + (h/2) grad(other)`. C1 across the blend.
+static void gw_shape_union(thread GWShapeRaw &a, GWShapeRaw b, float k) {
+    const float h = max(k - abs(a.distance - b.distance), 0.0) / max(k, 1e-4);
+    const bool first = a.distance < b.distance;
+    const float lower = first ? a.distance : b.distance;
+    const float2 near = first ? a.gradient : b.gradient;
+    const float2 far = first ? b.gradient : a.gradient;
+    a.distance = lower - h * h * k * 0.25;
+    a.gradient = near * (1.0 - 0.5 * h) + far * (0.5 * h);
+}
+
+/// The blob: the smooth union of its primitives, plus the wobble, three plane
+/// waves of amplitude `wobbleAmplitude / 3` each whose phases the CPU resolves
+/// from the effect time (they loop exactly).
+static GWShapeRaw gw_shape_blob(float2 q, constant GWShapeUniforms &shape) {
+    GWShapeRaw raw = gw_shape_primitive(q, shape.primitives[0]);
+    for (uint i = 1u; i < min(shape.primitiveCount, 6u); ++i) {
+        gw_shape_union(raw, gw_shape_primitive(q, shape.primitives[i]), shape.smoothness);
+    }
+    if (shape.wobbleAmplitude > 0.0) {
+        const float2 directions[3] = {float2(0.96, 0.28), float2(-0.5, 0.866025), float2(-0.6, -0.8)};
+        const float k = 6.2831853 / max(shape.wobbleWavelength, 1.0);
+        for (uint i = 0u; i < 3u; ++i) {
+            const float phase = dot(directions[i], q) * k + shape.wobblePhases[i];
+            raw.distance += shape.wobbleAmplitude * (1.0 / 3.0) * sin(phase);
+            raw.gradient += directions[i] * (shape.wobbleAmplitude * (1.0 / 3.0) * k * cos(phase));
+        }
+    }
+    return raw;
+}
+
+/// The shape field at `q`: the raw distance renormalized by the gradient
+/// length (at least 0.3, so a flat saddle never inflates it past the
+/// inscribed radius; fading out deep inside), the unit outward normal, and the
+/// lens depth.
+static GWShapeSample gw_shape_field(float2 q, constant GWGlassUniforms &uniforms) {
+    constant GWShapeUniforms &shape = uniforms.shape;
+    GWShapeRaw raw;
+    switch (shape.kind) {
+    case GWShapeKindEllipse:
+        raw = gw_shape_ellipse(q, uniforms.panelHalfSize);
+        break;
+    case GWShapeKindSuperellipse:
+        raw = gw_shape_superellipse(q, uniforms.panelHalfSize, shape.exponent);
+        break;
+    default:
+        raw = gw_shape_blob(q, shape);
+        break;
+    }
+    const float length2 = length(raw.gradient);
+    // The renormalization only matters near the outline, where it keeps the
+    // antialiased edge one pixel wide. Deeper than 35 % of the inscribed
+    // radius it fades out: a primitive's own medial lines, where its gradient
+    // jumps, would otherwise jump the depth.
+    const float deep = saturate(-raw.distance / max(0.35 * shape.inscribedRadius, 1.0));
+    GWShapeSample sample;
+    sample.distance = max(raw.distance / mix(max(length2, 0.3), 1.0, deep), -shape.inscribedRadius);
+    sample.normal = raw.gradient / max(length2, 1e-4);
+    sample.lensDepth = max(-sample.distance, 0.0);
+    sample.inscribedRadius = shape.inscribedRadius;
+    return sample;
+}
+
+/// The panel's signed distance to its outline in pixels: the shape's, or the
+/// rounded rectangle's.
+static float gw_panel_distance(float2 q, constant GWGlassUniforms &uniforms) {
+    if (gw_shaped) {
+        return gw_shape_field(q, uniforms).distance;
+    }
+    return gw_rounded_rect_distance(q, uniforms.panelHalfSize, uniforms.cornerRadius);
+}
+
+/// The panel's outward unit normal that orients the rim and the light: the
+/// shape's, or the rounded rectangle's with the corner radius `radius`.
+static float2 gw_panel_normal(float2 q, float radius, constant GWGlassUniforms &uniforms) {
+    if (gw_shaped) {
+        return gw_shape_field(q, uniforms).normal;
+    }
+    return gw_rounded_rect_normal(q, uniforms.panelHalfSize, radius);
+}
+
+/// The radius of the largest circle inside the panel, in pixels: the depth
+/// fractions of the interior and the light divide by it.
+static float gw_panel_inscribed(constant GWGlassUniforms &uniforms) {
+    if (gw_shaped) {
+        return uniforms.shape.inscribedRadius;
+    }
+    return min(uniforms.panelHalfSize.x, uniforms.panelHalfSize.y);
+}
+
 /// The 4 x 4 ordered-dither (Bayer) matrix, row by row.
 constant float gw_bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
 
@@ -145,7 +359,7 @@ static float4 gw_glow_shade(float2 q, constant GWGlassUniforms &uniforms) {
 
     // The same normal field inside and outside the outline, so the light is
     // continuous across it.
-    const float2 normal = gw_rounded_rect_normal(q, uniforms.panelHalfSize, uniforms.glowNormalRadius);
+    const float2 normal = gw_panel_normal(q, uniforms.glowNormalRadius, uniforms);
     const float facing = (1.0 + dot(normal, uniforms.glowLightDirection)) * 0.5;
     const float light = (1.0 - uniforms.glowDirectionality) + uniforms.glowDirectionality * facing * facing;
     return float4(color, light);
@@ -586,21 +800,6 @@ static float4 gw_light_emitter(
 constant bool gw_optics_constant [[function_constant(0)]];
 constant bool gw_optics = is_function_constant_defined(gw_optics_constant) ? gw_optics_constant : false;
 
-/// What the optics ask of a panel's shape (GlassShapeField.swift documents
-/// the interface; a later shape kind returns the same four things).
-struct GWShapeSample {
-    /// Signed distance to the outline in pixels: negative inside.
-    float distance;
-    /// The unit direction in which `lensDepth` falls (outward).
-    float2 normal;
-    /// Pixels inside the shape, 0 at and outside the outline. C1: the inward
-    /// distance of the rounded rectangle of `lensFieldRadius`, whose
-    /// iso-contours keep a corner radius of at least the bevel width.
-    float lensDepth;
-    /// Radius of the largest circle inside the shape, in pixels.
-    float inscribedRadius;
-};
-
 /// The rounded-rectangle shape field.
 static GWShapeSample gw_shape_rounded_rect(float2 q, constant GWGlassUniforms &uniforms) {
     GWShapeSample shape;
@@ -609,6 +808,14 @@ static GWShapeSample gw_shape_rounded_rect(float2 q, constant GWGlassUniforms &u
     shape.lensDepth = max(-gw_rounded_rect_distance(q, uniforms.panelHalfSize, uniforms.lensFieldRadius), 0.0);
     shape.inscribedRadius = min(uniforms.panelHalfSize.x, uniforms.panelHalfSize.y);
     return shape;
+}
+
+/// The panel's shape field: the freeform shape's, or the rounded rectangle's.
+static GWShapeSample gw_shape_sample(float2 q, constant GWGlassUniforms &uniforms) {
+    if (gw_shaped) {
+        return gw_shape_field(q, uniforms);
+    }
+    return gw_shape_rounded_rect(q, uniforms);
 }
 
 /// The steepest surface slope the optics use (rise over run).
@@ -794,7 +1001,7 @@ static float3 gw_lens_glass(
     float2 pixel, float2 q, float2 rimNormal, float rimDisplacement,
     constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
 {
-    const GWShapeSample shape = gw_shape_rounded_rect(q, uniforms);
+    const GWShapeSample shape = gw_shape_sample(q, uniforms);
     GWLensField field = gw_lens_host(shape, uniforms);
     gw_lens_add_inlays(q, uniforms, field);
     const float2 rim = uniforms.lensProfile == GWLensProfileRim ? -rimNormal * rimDisplacement : float2(0.0);
@@ -849,12 +1056,19 @@ static float3 gw_light_normal(float2 q, constant GWGlassUniforms &uniforms, thre
     field.height = 0.0;
     field.gradient = float2(0.0);
     if (uniforms.lensProfile != GWLensProfileRim) {
-        const GWShapeSample shape = gw_shape_rounded_rect(q, uniforms);
+        const GWShapeSample shape = gw_shape_sample(q, uniforms);
         field = gw_lens_host(shape, uniforms);
         outward = shape.normal;
     } else {
-        outward = gw_rounded_rect_normal(q, uniforms.panelHalfSize, lighting.fieldRadius);
-        const float depth = max(-gw_rounded_rect_distance(q, uniforms.panelHalfSize, lighting.fieldRadius), 0.0);
+        float depth;
+        if (gw_shaped) {
+            const GWShapeSample shape = gw_shape_field(q, uniforms);
+            outward = shape.normal;
+            depth = shape.lensDepth;
+        } else {
+            outward = gw_rounded_rect_normal(q, uniforms.panelHalfSize, lighting.fieldRadius);
+            depth = max(-gw_rounded_rect_distance(q, uniforms.panelHalfSize, lighting.fieldRadius), 0.0);
+        }
         const float t = lighting.bevel > 0.0 ? saturate(depth / lighting.bevel) : 1.0;
         if (t < 1.0) {
             const float2 profile = gw_lens_profile(GWLensProfileCircular, t, 0.0, 0.0);
@@ -1024,7 +1238,7 @@ static float3 gw_light_model(
             const float k = lighting.bloomWidth * float(i) * 0.25;
             for (uint side = 0u; side < 2u; ++side) {
                 const float2 tap = q + outward * (side == 0u ? k : -k);
-                const float tapDistance = gw_rounded_rect_distance(tap, uniforms.panelHalfSize, uniforms.cornerRadius);
+                const float tapDistance = gw_panel_distance(tap, uniforms);
                 if (tapDistance > 0.0) {
                     continue;
                 }
@@ -1085,14 +1299,14 @@ static float3 gw_grounding_multiplier(float2 pixel, constant GWGlassUniforms &un
     if (g.dropColor.w > 0.0) {
         // The outline moved away from the light, grown by the spread, with a
         // Gaussian edge: the blurred shadow of a rounded rectangle.
-        const float d = gw_rounded_rect_distance(q - g.shadowDirection * g.dropOffset, uniforms.panelHalfSize, uniforms.cornerRadius) - g.dropSpread;
+        const float d = gw_panel_distance(q - g.shadowDirection * g.dropOffset, uniforms) - g.dropSpread;
         const float s = g.dropColor.w * gw_blur_edge(d, g.dropSigma);
         multiplier *= 1.0 - s * (1.0 - g.dropColor.xyz);
     }
     if (g.contactColor.w > 0.0 && g.contactWidth > 0.0) {
         // A tight, dark line where the glass meets the page: full at the
         // outline, falling quadratically over `contactWidth` pixels.
-        const float d = gw_rounded_rect_distance(q - g.shadowDirection * g.contactOffset, uniforms.panelHalfSize, uniforms.cornerRadius);
+        const float d = gw_panel_distance(q - g.shadowDirection * g.contactOffset, uniforms);
         const float c = saturate(1.0 - d / g.contactWidth);
         multiplier *= 1.0 - g.contactColor.w * c * c * (1.0 - g.contactColor.xyz);
     }
@@ -1109,10 +1323,10 @@ static float3 gw_grounding_caustic(float2 pixel, constant GWGlassUniforms &unifo
     constant GWGroundingUniforms &g = uniforms.grounding;
     if (g.causticColor.w <= 0.0 || g.causticWidth <= 0.0) { return float3(0.0); }
     const float2 q = pixel - uniforms.panelCenter - g.shadowDirection * g.causticOffset;
-    const float d = gw_rounded_rect_distance(q, uniforms.panelHalfSize, uniforms.cornerRadius);
+    const float d = gw_panel_distance(q, uniforms);
     const float reach = g.causticWidth * (3.0 + 1.2 * g.causticDispersion);
     if (abs(d) > reach) { return float3(0.0); }
-    const float2 n = gw_rounded_rect_normal(q, uniforms.panelHalfSize, uniforms.cornerRadius);
+    const float2 n = gw_panel_normal(q, uniforms.cornerRadius, uniforms);
     const float facing = saturate(dot(n, g.shadowDirection));
     if (facing <= 0.0) { return float3(0.0); }
     // The three wavelengths' bands sit at slightly different distances.
@@ -1251,7 +1465,7 @@ fragment float4 gw_glass_fragment(
 {
     const float2 pixel = in.position.xy;
     const float2 q = pixel - uniforms.panelCenter;
-    const float distance = gw_rounded_rect_distance(q, uniforms.panelHalfSize, uniforms.cornerRadius);
+    const float distance = gw_panel_distance(q, uniforms);
     const float coverage = saturate(0.5 - distance);
     float3 background = gw_glass_sample(pixel, uniforms, source);
     const bool grounded = gw_grounding && (uniforms.grounding.flags & GWGroundingFlagActive) != 0u;
@@ -1296,7 +1510,7 @@ fragment float4 gw_glass_fragment(
 
     const float depth = max(-distance, 0.0);
     const float rim = uniforms.bezelWidth > 0.0 ? saturate(1.0 - depth / uniforms.bezelWidth) : 0.0;
-    const float2 normal = gw_rounded_rect_normal(q, uniforms.panelHalfSize, uniforms.normalRadius);
+    const float2 normal = gw_panel_normal(q, uniforms.normalRadius, uniforms);
     const float displacement = uniforms.maxDisplacement * rim * rim;
     float3 glass;
     if (gw_optics && gw_lens_active(uniforms)) {
@@ -1311,7 +1525,7 @@ fragment float4 gw_glass_fragment(
         // The inner shadow: the rim nearest the light shades the glass just
         // inside it, as an inset shadow moved away from the light.
         constant GWGroundingUniforms &g = uniforms.grounding;
-        const float d = gw_rounded_rect_distance(q - g.shadowDirection * g.innerOffset, uniforms.panelHalfSize, uniforms.cornerRadius);
+        const float d = gw_panel_distance(q - g.shadowDirection * g.innerOffset, uniforms);
         const float s = g.innerColor.w * gw_blur_edge(d, g.innerSigma);
         glass = glass * (1.0 - s * (1.0 - g.innerColor.xyz));
     }
@@ -1341,7 +1555,7 @@ fragment float4 gw_glass_fragment(
     // The interior, light screened over the glowing glass (GW-19).
     float interiorAlpha = 0.0;
     if (uniforms.interiorEffect != GWInteriorEffectNone) {
-        const float w = saturate(depth / min(uniforms.panelHalfSize.x, uniforms.panelHalfSize.y));
+        const float w = saturate(depth / gw_panel_inscribed(uniforms));
         const float fade = 1.0 - uniforms.interiorCenterFade * smoothstep(0.3, 0.85, w);
         if (fade > 0.0) {
             const float e = gw_interior_value(q, w, uniforms);
@@ -1355,7 +1569,7 @@ fragment float4 gw_glass_fragment(
     // Inner light, over the glass, the glow, and the interior (GW-21).
     float lightAlpha = 0.0;
     if (uniforms.lightEmitterCount > 0u) {
-        const float minHalf = max(min(uniforms.panelHalfSize.x, uniforms.panelHalfSize.y), 1e-3);
+        const float minHalf = max(gw_panel_inscribed(uniforms), 1e-3);
         const float w = saturate(depth / minHalf);
         const float fade = (1.0 - uniforms.lightCenterFade * smoothstep(0.3, 0.85, w)) * uniforms.lightBodyScale;
         const float pipeBand = uniforms.lightPipingWidth > 0.0 ? gw_light_falloff(depth / uniforms.lightPipingWidth) : 0.0;

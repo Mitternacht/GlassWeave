@@ -106,6 +106,8 @@ final class LabViewController: UIViewController {
     private let lensButton = UIButton(configuration: .bordered())
     private let chromeButton = UIButton(configuration: .bordered())
     private let paperButton = UIButton(configuration: .bordered())
+    /// Opens the shapes page (GW-26).
+    private let shapesButton = UIButton(configuration: .bordered())
     /// Whether `-lab.bench` or `-lab.lightFields` has opened its screen yet.
     private var openedBenchAtLaunch = false
     /// The control rows; vertical at accessibility text sizes.
@@ -190,6 +192,9 @@ final class LabViewController: UIViewController {
             if let page = BenchPage.fromBenchArgument {
                 openedBenchAtLaunch = true
                 openBench(.bench, page: page, animated: false)
+            } else if defaults.bool(forKey: "lab.shapes") {
+                openedBenchAtLaunch = true
+                openShapes(page: BenchPage.named(defaults.string(forKey: "lab.shapesBackdrop")) ?? .charcoal, animated: false)
             } else if defaults.bool(forKey: "lab.paper") {
                 openedBenchAtLaunch = true
                 openBench(.paper, page: .paperDesk, animated: false)
@@ -213,6 +218,14 @@ final class LabViewController: UIViewController {
         let bench = MaterialBenchViewController(mode: mode, page: page)
         bench.modalPresentationStyle = .fullScreen
         present(bench, animated: animated)
+    }
+
+    /// Presents the shapes page (GW-26) over the whole window.
+    private func openShapes(page: BenchPage, animated: Bool) {
+        guard presentedViewController == nil else { return }
+        let shapes = ShapesBenchViewController(page: page)
+        shapes.modalPresentationStyle = .fullScreen
+        present(shapes, animated: animated)
     }
 
     /// Presents the glow gallery (GW-20) over the whole window. While it is
@@ -533,6 +546,10 @@ final class LabViewController: UIViewController {
         paperButton.accessibilityIdentifier = "lab.openPaper"
         paperButton.addAction(UIAction { [weak self] _ in self?.openBench(.paper, page: .paperDesk, animated: true) }, for: .primaryActionTriggered)
         paperButton.isHidden = benchmark != nil
+        shapesButton.configuration?.title = String(localized: "Shapes")
+        shapesButton.accessibilityIdentifier = "lab.openShapes"
+        shapesButton.addAction(UIAction { [weak self] _ in self?.openShapes(page: .charcoal, animated: true) }, for: .primaryActionTriggered)
+        shapesButton.isHidden = benchmark != nil
 
         let tintRow = Self.row([tintControl, UIView(), Self.caption(String(localized: "Enabled")), enabledSwitch])
         let motionRow = Self.row([pauseButton, UIView(), Self.caption(String(localized: "Frame ID")), overlaySwitch])
@@ -555,7 +572,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, lightFieldsButton, lensButton, chromeButton, paperButton, benchButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, benchButton, measureButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false

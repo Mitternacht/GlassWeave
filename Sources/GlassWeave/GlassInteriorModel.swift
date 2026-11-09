@@ -63,7 +63,7 @@ extension GlassPanelGeometry {
     /// shorter side: 0 at the outline, 1 at the deepest points.
     func interiorDepthFraction(at pixel: SIMD2<Double>) -> Double {
         let depth = max(-signedDistance(at: pixel), 0)
-        return min(max(depth / min(halfSize.x, halfSize.y), 0), 1)
+        return min(max(depth / (shape?.inscribedRadius ?? min(halfSize.x, halfSize.y)), 0), 1)
     }
 
     /// The center fade at a pixel inside the panel:

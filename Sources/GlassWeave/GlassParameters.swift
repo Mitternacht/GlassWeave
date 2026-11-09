@@ -35,7 +35,8 @@ public struct GlassTint: Hashable, Sendable {
 ///
 /// | Property | Unit | Valid range | Meaning |
 /// | --- | --- | --- | --- |
-/// | ``cornerRadius`` | points | 0 to half the panel's shorter side | Outline corner radius. |
+/// | ``cornerRadius`` | points | 0 to half the panel's shorter side | Outline corner radius of the rounded rectangle; ignored by the other ``shape``s. |
+/// | ``shape`` | see ``GlassShape`` | see ``GlassShape`` | The outline: the rounded rectangle (the default), an ellipse, a squircle, or a smooth blob. Every effect follows it. Experimental. |
 /// | ``bezelWidth`` | points | 0 to half the panel's shorter side | Width of the curved rim inside the outline. Refraction and edge illumination happen only there; the interior is flat and shows the background in place. |
 /// | ``refraction`` | normalized | 0...1 | Rim displacement. At the outline the sample moves `refraction × bezelWidth / 2` toward the panel interior, falling off quadratically to zero at the rim's inner edge. Zero samples in place. |
 /// | ``edgeHighlight`` | normalized | 0...1 | Edge illumination. One moves the outline at most ``maximumEdgeHighlight`` of the way to white on the side facing the upper-left light. |
@@ -54,7 +55,7 @@ public struct GlassTint: Hashable, Sendable {
 /// value: negative lengths become zero, lengths longer than half the
 /// panel's shorter side become that half, and coefficients and tint
 /// components are clamped to 0...1. ``GlassGlow``, ``GlassInterior``,
-/// ``GlassLight``, ``GlassLens``, ``GlassLighting``, and ``GlassGrounding`` document the same rule for their fields. The renderer reports the values it actually uses through
+/// ``GlassLight``, ``GlassLens``, ``GlassLighting``, ``GlassGrounding``, and ``GlassShape`` document the same rule for their fields. The renderer reports the values it actually uses through
 /// ``GlassRenderer/panel``.
 public struct GlassParameters: Hashable, Sendable {
     /// Outline corner radius, in points.
@@ -89,6 +90,10 @@ public struct GlassParameters: Hashable, Sendable {
     /// and a colored caustic, away from the key light; ``GlassGrounding/none``
     /// for none. Experimental.
     public var grounding: GlassGrounding
+    /// The outline (GW-26): ``GlassShape/roundedRectangle`` for the original
+    /// rounded rectangle, or an ellipse, a squircle, or a smooth blob that
+    /// every effect follows. Experimental.
+    public var shape: GlassShape
 
     /// The most edge illumination can brighten the outline: this fraction of
     /// the way from the glass color to white, at ``edgeHighlight`` 1.
@@ -105,7 +110,8 @@ public struct GlassParameters: Hashable, Sendable {
         light: GlassLight = .none,
         lens: GlassLens = .none,
         lighting: GlassLighting = .legacy,
-        grounding: GlassGrounding = .none
+        grounding: GlassGrounding = .none,
+        shape: GlassShape = .roundedRectangle
     ) {
         self.cornerRadius = cornerRadius
         self.bezelWidth = bezelWidth
@@ -118,12 +124,13 @@ public struct GlassParameters: Hashable, Sendable {
         self.lens = lens
         self.lighting = lighting
         self.grounding = grounding
+        self.shape = shape
     }
 
     /// Whether a host must keep drawing new frames for this panel's glow
-    /// pulse, interior, or light, which change with time.
+    /// pulse, interior, light, or shape wobble, which change with time.
     public var isAnimated: Bool {
-        glow.isAnimated || interior.isAnimated || light.isAnimated
+        glow.isAnimated || interior.isAnimated || light.isAnimated || shape.isAnimated
     }
 }
 
@@ -209,8 +216,13 @@ public enum GlassParameterError: Error, Hashable, Sendable, CustomStringConverti
     /// A value of a ``GlassGrounding`` is NaN or infinite.
     case nonFiniteGrounding(GlassGrounding.Field)
 
+    /// A value of a ``GlassShape`` is NaN or infinite (GW-26).
+    case nonFiniteShape(GlassShape.Field)
+
     public var description: String {
         switch self {
+        case let .nonFiniteShape(field):
+            "The glass shape parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case let .nonFiniteGrounding(field):
             "The glass grounding parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case let .nonFiniteLighting(field):
@@ -247,6 +259,7 @@ extension GlassParameters {
         let lens = try lens.normalized(maximumLength: maximumLength)
         let lighting = try lighting.normalized(maximumLength: maximumLength)
         let grounding = try grounding.normalized(maximumLength: maximumLength)
+        let shape = try shape.normalized()
         let length = { (value: Double) in min(max(value, 0), maximumLength) }
         let unit = { (value: Double) in min(max(value, 0), 1) }
         return GlassParameters(
@@ -263,7 +276,8 @@ extension GlassParameters {
             light: light,
             lens: lens,
             lighting: lighting,
-            grounding: grounding
+            grounding: grounding,
+            shape: shape
         )
     }
 }
@@ -291,7 +305,11 @@ extension GlassPanel {
         let width = max(Double(frame.size.width), 0)
         let height = max(Double(frame.size.height), 0)
         let frame = CGRect(x: frame.origin.x, y: frame.origin.y, width: width, height: height)
-        let parameters = try parameters.normalized(maximumLength: min(width, height) / 2)
+        // A blob's lengths are capped at its inscribed radius, the others' at
+        // half the shorter side.
+        let shape = try parameters.shape.normalized()
+        let maximumLength = shape.maximumLength(frameSize: frame.size)
+        let parameters = try parameters.normalized(maximumLength: maximumLength)
         return GlassPanel(frame: frame, parameters: parameters)
     }
 

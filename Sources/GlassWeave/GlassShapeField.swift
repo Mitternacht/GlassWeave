@@ -1,7 +1,8 @@
 import Foundation
 
-/// The shape of a panel as the optics see it: the interface later shape
-/// kinds (ellipses, squircles, blobs; GW-26) plug into.
+/// The shape of a panel as the optics see it: the interface every shape kind
+/// plugs into (the rounded rectangle, and since GW-26 ellipses, squircles and
+/// blobs: `EllipseField`, `SuperellipseField`, `BlobField` in GlassShape.swift).
 ///
 /// The thick-lens optics, the light model, and frost ask the shape for four
 /// things at a pixel, and nothing else about it:
@@ -13,9 +14,8 @@ import Foundation
 /// | ``lensDepth(at:)`` | How deep the pixel is inside the shape, in pixels, 0 at and outside the outline. **C1**: its gradient is continuous everywhere inside up to the shape's medial axis, and its iso-contours keep a corner radius of at least the bevel width. A height `h = H × s(depth / bevel)` built on it therefore has no crease along corner diagonals, even when the bevel is wider than the corner radius. |
 /// | ``inscribedRadius`` | The radius of the largest circle inside the shape, in pixels. A dome's bevel. |
 ///
-/// The shader has the same interface as `GWShapeSample` and
-/// `gw_shape_rounded_rect` in `Glass.metal`; both implement the rounded
-/// rectangle today.
+/// The shader has the same interface as `GWShapeSample`, with
+/// `gw_shape_rounded_rect` and `gw_shape_field` in `Glass.metal`.
 package protocol GlassShapeField {
     func signedDistance(at pixel: SIMD2<Double>) -> Double
     func outwardNormal(at pixel: SIMD2<Double>) -> SIMD2<Double>

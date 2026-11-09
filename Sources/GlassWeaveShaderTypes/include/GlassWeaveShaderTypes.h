@@ -325,6 +325,81 @@ typedef enum GWGroundingFlag {
     GWGroundingFlagInner = 8,
 } GWGroundingFlag;
 
+/// The outline a glass panel has (GW-26), stored in `GWShapeUniforms.kind`.
+/// The shader's rounded-rectangle code and the shaped pipeline variant never
+/// meet: a rounded-rectangle panel is drawn by a variant without any shape
+/// code, and its shape record is all zero.
+typedef enum GWShapeKind {
+    GWShapeKindRoundedRectangle = 0,
+    /// The ellipse of half sizes `panelHalfSize`.
+    GWShapeKindEllipse = 1,
+    /// The superellipse `|x/a|^n + |y/b|^n = 1`, half sizes `panelHalfSize`,
+    /// exponent `n` in `GWShapeUniforms.exponent`.
+    GWShapeKindSuperellipse = 2,
+    /// A smooth union of up to six primitives.
+    GWShapeKindBlob = 3,
+} GWShapeKind;
+
+/// One primitive of a blob (GW-26), stored in `GWShapePrimitive.kind`.
+typedef enum GWShapePrimitiveKind {
+    GWShapePrimitiveCircle = 0,
+    GWShapePrimitiveCapsule = 1,
+    GWShapePrimitiveBox = 2,
+} GWShapePrimitiveKind;
+
+/// One primitive of a blob (GW-26), in pixels from the panel's center (y
+/// down).
+/// - circle: `geometry` = center x, center y, radius, 0.
+/// - capsule: `geometry` = end a x, a y, end b x, b y; `shape.x` = radius.
+/// - box: `geometry` = center x, center y, half width, half height;
+///   `shape` = corner radius, cosine and sine of the rotation, 0.
+///
+/// Layout in bytes: geometry 0, shape 16, kind 32, explicit padding 36, 40,
+/// 44 (set to zero). Size 48, alignment 16, stride 48.
+typedef struct GWShapePrimitive {
+    simd_float4 geometry;
+    simd_float4 shape;
+    uint32_t kind;
+    uint32_t padding0;
+    uint32_t padding1;
+    uint32_t padding2;
+} GWShapePrimitive;
+
+/// The outline of one panel (GW-26), resolved on the CPU for one draw, all
+/// lengths in pixels. `kind` 0 (an all-zero record) is the rounded rectangle:
+/// that panel is drawn by a pipeline variant that does not contain the shape
+/// code. For the other kinds `panelCenter` and `panelHalfSize` are the
+/// outline's bounding box (the panel's quad), not the layout frame.
+/// - `kind`: a `GWShapeKind` value.
+/// - `primitiveCount`: 1 to 6 for a blob.
+/// - `exponent`: the superellipse's `n`, 2 to 10.
+/// - `smoothness`: the blob's smooth-union blend distance `k`.
+/// - `inscribedRadius`: a lower bound of the radius of the largest circle
+///   inside the outline; depth fractions and the dome's bevel use it.
+/// - `wobbleAmplitude`, `wobbleWavelength`: the blob's wobble, a sum of three
+///   plane waves, in pixels; amplitude 0 draws none.
+/// - `wobblePhases`: the three waves' phases in radians, resolved on the CPU
+///   from the effect time so the wobble loops exactly (the shader sees no
+///   time).
+/// - `primitives`: the blob's primitives; unused ones are zero.
+///
+/// Layout in bytes: kind 0, primitiveCount 4, exponent 8, smoothness 12,
+/// inscribedRadius 16, wobbleAmplitude 20, wobbleWavelength 24, explicit
+/// padding 28 (set to zero), wobblePhases 32, primitives 48 (6 x 48 bytes).
+/// Size 336, alignment 16, stride 336.
+typedef struct GWShapeUniforms {
+    uint32_t kind;
+    uint32_t primitiveCount;
+    float exponent;
+    float smoothness;
+    float inscribedRadius;
+    float wobbleAmplitude;
+    float wobbleWavelength;
+    float padding0;
+    simd_float4 wobblePhases;
+    GWShapePrimitive primitives[6];
+} GWShapeUniforms;
+
 /// Per-draw parameters for one rounded glass panel, in target pixels.
 ///
 /// Coordinate space: target pixels, origin at the top-left corner of the
@@ -450,6 +525,12 @@ typedef enum GWGroundingFlag {
 /// contain the grounding code, as it was in GW-23. See docs/glass-optics.md.
 /// - `grounding`: a `GWGroundingUniforms` record.
 ///
+/// Shape (GW-26), appended after the GW-25 fields, which keep their layout.
+/// `shape.kind` 0 is the rounded rectangle (every other field of the record is
+/// then zero); the panel is then drawn by a pipeline variant that does not
+/// contain the shape code, as it was in GW-25. See docs/glass-optics.md.
+/// - `shape`: a `GWShapeUniforms` record.
+///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
 /// maxDisplacement 76, edgeHighlight 80, explicit padding 84, 88, 92 (set
@@ -472,7 +553,7 @@ typedef enum GWGroundingFlag {
 /// lensMaximumOffset 1028, lensOffsetScale 1032, lensProfileA 1036,
 /// lensProfileB 1040, lensDispersion 1044, lensTapCount 1048, lensInlayCount 1052,
 /// lensInlays 1056 (2 × 48 bytes); lighting 1152 (160 bytes); grounding 1312
-/// (128 bytes). Size 1440, alignment 16, stride 1440.
+/// (128 bytes); shape 1440 (336 bytes). Size 1776, alignment 16, stride 1776.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
     simd_float2 targetSize;
@@ -543,6 +624,7 @@ typedef struct GWGlassUniforms {
     GWLensInlay lensInlays[2];
     GWLightingUniforms lighting;
     GWGroundingUniforms grounding;
+    GWShapeUniforms shape;
 } GWGlassUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

@@ -13,7 +13,7 @@ _Static_assert(offsetof(GWBackgroundUniforms, uvOrigin) == 16, "uvOrigin offset"
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMin) == 24, "sampleClampMin offset");
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMax) == 32, "sampleClampMax offset");
 
-_Static_assert(sizeof(GWGlassUniforms) == 1440, "GWGlassUniforms size");
+_Static_assert(sizeof(GWGlassUniforms) == 1776, "GWGlassUniforms size");
 _Static_assert(_Alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 _Static_assert(offsetof(GWGlassUniforms, background) == 0, "background offset");
 _Static_assert(offsetof(GWGlassUniforms, targetSize) == 40, "targetSize offset");
@@ -154,3 +154,24 @@ _Static_assert(offsetof(GWGroundingUniforms, reach) == 116, "grounding reach off
 _Static_assert(offsetof(GWGroundingUniforms, flags) == 120, "grounding flags offset");
 _Static_assert(offsetof(GWGroundingUniforms, padding0) == 124, "grounding padding0 offset");
 _Static_assert(GWGroundingFlagActive == 1 && GWGroundingFlagShadow == 2 && GWGroundingFlagCaustic == 4 && GWGroundingFlagInner == 8, "GWGroundingFlag values");
+
+_Static_assert(offsetof(GWGlassUniforms, shape) == 1440, "shape offset");
+_Static_assert(sizeof(GWShapeUniforms) == 336, "GWShapeUniforms size");
+_Static_assert(_Alignof(GWShapeUniforms) == 16, "GWShapeUniforms alignment");
+_Static_assert(offsetof(GWShapeUniforms, kind) == 0, "shape kind offset");
+_Static_assert(offsetof(GWShapeUniforms, primitiveCount) == 4, "shape primitiveCount offset");
+_Static_assert(offsetof(GWShapeUniforms, exponent) == 8, "shape exponent offset");
+_Static_assert(offsetof(GWShapeUniforms, smoothness) == 12, "shape smoothness offset");
+_Static_assert(offsetof(GWShapeUniforms, inscribedRadius) == 16, "shape inscribedRadius offset");
+_Static_assert(offsetof(GWShapeUniforms, wobbleAmplitude) == 20, "shape wobbleAmplitude offset");
+_Static_assert(offsetof(GWShapeUniforms, wobbleWavelength) == 24, "shape wobbleWavelength offset");
+_Static_assert(offsetof(GWShapeUniforms, padding0) == 28, "shape padding0 offset");
+_Static_assert(offsetof(GWShapeUniforms, wobblePhases) == 32, "shape wobblePhases offset");
+_Static_assert(offsetof(GWShapeUniforms, primitives) == 48, "shape primitives offset");
+_Static_assert(sizeof(GWShapePrimitive) == 48, "GWShapePrimitive size");
+_Static_assert(_Alignof(GWShapePrimitive) == 16, "GWShapePrimitive alignment");
+_Static_assert(offsetof(GWShapePrimitive, geometry) == 0, "primitive geometry offset");
+_Static_assert(offsetof(GWShapePrimitive, shape) == 16, "primitive shape offset");
+_Static_assert(offsetof(GWShapePrimitive, kind) == 32, "primitive kind offset");
+_Static_assert(GWShapeKindRoundedRectangle == 0 && GWShapeKindEllipse == 1 && GWShapeKindSuperellipse == 2 && GWShapeKindBlob == 3, "GWShapeKind values");
+_Static_assert(GWShapePrimitiveCircle == 0 && GWShapePrimitiveCapsule == 1 && GWShapePrimitiveBox == 2, "GWShapePrimitiveKind values");

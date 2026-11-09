@@ -44,6 +44,10 @@ struct GlassPanelGeometry: Equatable {
     /// The grounding in target pixels, or `nil` for a panel drawn without it
     /// (GW-25; resolved in GlassGrounding.swift).
     var grounding: Grounding?
+    /// The freeform outline in target pixels, or `nil` for the rounded
+    /// rectangle (GW-26; the model is in GlassShape.swift). With a shape,
+    /// ``center`` and ``halfSize`` are the outline's bounding box.
+    var shape: GlassShapeModel?
 
     /// A visible ``GlassGlow`` converted to target pixels and linear light.
     struct Glow: Equatable {
@@ -93,8 +97,13 @@ struct GlassPanelGeometry: Equatable {
         precondition(displayScale.isFinite && displayScale > 0, "The display scale must be finite and positive")
         let frame = panel.frame
         let parameters = panel.parameters
-        center = SIMD2(Double(frame.midX), Double(frame.midY)) * displayScale
-        halfSize = SIMD2(Double(frame.width), Double(frame.height)) * (displayScale / 2)
+        let shapeModel = GlassShapeModel(parameters.shape, frame: frame, displayScale: displayScale, effectTime: effectTime)
+        shape = shapeModel
+        center = shapeModel?.center ?? SIMD2(Double(frame.midX), Double(frame.midY)) * displayScale
+        halfSize = shapeModel?.halfSize ?? SIMD2(Double(frame.width), Double(frame.height)) * (displayScale / 2)
+        // The effects that size themselves by the shorter half side use the
+        // inscribed radius of a freeform shape instead.
+        let inscribedHalfSize = shapeModel.map { SIMD2(repeating: $0.inscribedRadius) } ?? halfSize
         cornerRadius = parameters.cornerRadius * displayScale
         bezelWidth = parameters.bezelWidth * displayScale
         normalRadius = max(cornerRadius, bezelWidth)
@@ -108,11 +117,11 @@ struct GlassPanelGeometry: Equatable {
         tintStrength = parameters.tint.strength
         lens = Lens(
             parameters.lens, displayScale: displayScale, cornerRadius: cornerRadius,
-            bezelWidth: bezelWidth, halfSize: halfSize
+            bezelWidth: bezelWidth, halfSize: inscribedHalfSize
         )
         lighting = Lighting(
             parameters.lighting, offset: lightOffset, displayScale: displayScale,
-            bezelWidth: bezelWidth, cornerRadius: cornerRadius, halfSize: halfSize, lens: lens
+            bezelWidth: bezelWidth, cornerRadius: cornerRadius, halfSize: inscribedHalfSize, lens: lens
         )
         grounding = Grounding(parameters.grounding, lighting: lighting, offset: lightOffset, displayScale: displayScale)
         // One light: the glow follows the key light unless told otherwise.
@@ -171,6 +180,7 @@ struct GlassPanelGeometry: Equatable {
     /// Signed distance to the outline in pixels: negative inside, positive
     /// outside.
     func signedDistance(at pixel: SIMD2<Double>) -> Double {
+        if let shape { return shape.signedDistance(at: pixel) }
         let q = pixel - center
         let d = abs(q) - (halfSize - cornerRadius)
         let outside = SIMD2(max(d.x, 0), max(d.y, 0))
@@ -186,6 +196,7 @@ struct GlassPanelGeometry: Equatable {
     /// The outward unit normal of the panel rectangle with corner radius
     /// `radius`: radial in the corner regions, axis-aligned along the edges.
     func outwardNormal(at pixel: SIMD2<Double>, radius: Double) -> SIMD2<Double> {
+        if let shape { return shape.outwardNormal(at: pixel) }
         let q = pixel - center
         let d = abs(q) - (halfSize - radius)
         if d.x > 0, d.y > 0 {
@@ -396,7 +407,8 @@ struct GlassPanelGeometry: Equatable {
             lensInlayCount: UInt32(lens?.inlays.count ?? 0),
             lensInlays: lens?.inlayRecords ?? (Lens.Inlay.empty, Lens.Inlay.empty),
             lighting: lighting?.record ?? Lighting.empty,
-            grounding: grounding?.record ?? Grounding.empty
+            grounding: grounding?.record ?? Grounding.empty,
+            shape: shape?.record ?? GWShapeUniforms()
         )
     }
 
