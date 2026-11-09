@@ -13,7 +13,7 @@ _Static_assert(offsetof(GWBackgroundUniforms, uvOrigin) == 16, "uvOrigin offset"
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMin) == 24, "sampleClampMin offset");
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMax) == 32, "sampleClampMax offset");
 
-_Static_assert(sizeof(GWGlassUniforms) == 1008, "GWGlassUniforms size");
+_Static_assert(sizeof(GWGlassUniforms) == 1056, "GWGlassUniforms size");
 _Static_assert(_Alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 _Static_assert(offsetof(GWGlassUniforms, background) == 0, "background offset");
 _Static_assert(offsetof(GWGlassUniforms, targetSize) == 40, "targetSize offset");
@@ -67,6 +67,19 @@ _Static_assert(offsetof(GWGlassUniforms, lightBodyScale) == 548, "lightBodyScale
 _Static_assert(offsetof(GWGlassUniforms, padding7) == 552, "padding7 offset");
 _Static_assert(offsetof(GWGlassUniforms, padding8) == 556, "padding8 offset");
 _Static_assert(offsetof(GWGlassUniforms, lightEmitters) == 560, "lightEmitters offset");
+_Static_assert(offsetof(GWGlassUniforms, lensProfile) == 1008, "lensProfile offset");
+_Static_assert(offsetof(GWGlassUniforms, lensThickness) == 1012, "lensThickness offset");
+_Static_assert(offsetof(GWGlassUniforms, lensBevel) == 1016, "lensBevel offset");
+_Static_assert(offsetof(GWGlassUniforms, lensFieldRadius) == 1020, "lensFieldRadius offset");
+_Static_assert(offsetof(GWGlassUniforms, lensIOR) == 1024, "lensIOR offset");
+_Static_assert(offsetof(GWGlassUniforms, lensMaximumOffset) == 1028, "lensMaximumOffset offset");
+_Static_assert(offsetof(GWGlassUniforms, lensOffsetScale) == 1032, "lensOffsetScale offset");
+_Static_assert(offsetof(GWGlassUniforms, lensProfileA) == 1036, "lensProfileA offset");
+_Static_assert(offsetof(GWGlassUniforms, lensProfileB) == 1040, "lensProfileB offset");
+_Static_assert(offsetof(GWGlassUniforms, padding9) == 1044, "padding9 offset");
+_Static_assert(offsetof(GWGlassUniforms, padding10) == 1048, "padding10 offset");
+_Static_assert(offsetof(GWGlassUniforms, padding11) == 1052, "padding11 offset");
+_Static_assert(GWLensProfileRim == 0 && GWLensProfileCircular == 1 && GWLensProfileSquircle == 2 && GWLensProfileChamfer == 3 && GWLensProfileDome == 4 && GWLensProfileRing == 5, "GWLensProfile values");
 
 _Static_assert(sizeof(GWLightEmitter) == 112, "GWLightEmitter size");
 _Static_assert(_Alignof(GWLightEmitter) == 16, "GWLightEmitter alignment");

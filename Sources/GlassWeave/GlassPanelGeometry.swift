@@ -35,6 +35,9 @@ struct GlassPanelGeometry: Equatable {
     /// for, or `nil` when the panel's light draws nothing (GW-21; the model
     /// is in GlassLightModel.swift).
     var light: Light?
+    /// The thick lens in target pixels, or `nil` for the original rim
+    /// refraction (GW-22; the model is in GlassLensModel.swift).
+    var lens: Lens?
 
     /// A visible ``GlassGlow`` converted to target pixels and linear light.
     struct Glow: Equatable {
@@ -106,6 +109,10 @@ struct GlassPanelGeometry: Equatable {
         light = Light(
             parameters.light, displayScale: displayScale, effectTime: effectTime,
             halfSize: halfSize, bezelWidth: bezelWidth
+        )
+        lens = Lens(
+            parameters.lens, displayScale: displayScale, cornerRadius: cornerRadius,
+            bezelWidth: bezelWidth, halfSize: halfSize
         )
     }
 
@@ -357,7 +364,17 @@ struct GlassPanelGeometry: Equatable {
             lightPipingWidth: light?.pipingWidth ?? 0,
             lightBodyScale: light?.bodyScale ?? 0,
             padding7: 0, padding8: 0,
-            lightEmitters: light?.records ?? Light.emptyRecords
+            lightEmitters: light?.records ?? Light.emptyRecords,
+            lensProfile: lens?.profileCode ?? GWLensProfileRim.rawValue,
+            lensThickness: Float(lens?.thickness ?? 0),
+            lensBevel: Float(lens?.bevel ?? 0),
+            lensFieldRadius: Float(lens?.fieldRadius ?? 0),
+            lensIOR: Float(lens?.indexOfRefraction ?? 0),
+            lensMaximumOffset: Float(lens?.maximumOffset ?? 0),
+            lensOffsetScale: Float(lens?.offsetScale ?? 0),
+            lensProfileA: Float(lens?.profileA ?? 0),
+            lensProfileB: Float(lens?.profileB ?? 0),
+            padding9: 0, padding10: 0, padding11: 0
         )
     }
 

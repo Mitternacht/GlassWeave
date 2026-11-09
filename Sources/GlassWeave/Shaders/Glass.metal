@@ -5,7 +5,7 @@ using namespace metal;
 
 // The shader's view of the shared record must match the host layout asserted
 // in GlassWeaveShaderTypes.c.
-static_assert(sizeof(GWGlassUniforms) == 1008, "GWGlassUniforms size");
+static_assert(sizeof(GWGlassUniforms) == 1056, "GWGlassUniforms size");
 static_assert(sizeof(GWLightEmitter) == 112, "GWLightEmitter size");
 static_assert(alignof(GWLightEmitter) == 16, "GWLightEmitter alignment");
 static_assert(alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
@@ -568,6 +568,143 @@ static float4 gw_light_emitter(
     return float4(color, body);
 }
 
+// MARK: Shape field and thick lens (GW-22)
+//
+// The thick-lens code exists only in the `optics` pipeline variant: the host
+// builds this function with `gw_optics_constant` true for a panel whose
+// `GlassLens` draws something, and with it unset otherwise, in which case
+// everything below is compiled out and the shader is the one of GW-21, byte
+// for byte (a frozen copy in the tests proves it). The model is mirrored on
+// the CPU by `GlassLensModel` (GlassLensModel.swift).
+
+constant bool gw_optics_constant [[function_constant(0)]];
+constant bool gw_optics = is_function_constant_defined(gw_optics_constant) ? gw_optics_constant : false;
+
+/// What the optics ask of a panel's shape (GlassShapeField.swift documents
+/// the interface; a later shape kind returns the same four things).
+struct GWShapeSample {
+    /// Signed distance to the outline in pixels: negative inside.
+    float distance;
+    /// The unit direction in which `lensDepth` falls (outward).
+    float2 normal;
+    /// Pixels inside the shape, 0 at and outside the outline. C1: the inward
+    /// distance of the rounded rectangle of `lensFieldRadius`, whose
+    /// iso-contours keep a corner radius of at least the bevel width.
+    float lensDepth;
+    /// Radius of the largest circle inside the shape, in pixels.
+    float inscribedRadius;
+};
+
+/// The rounded-rectangle shape field.
+static GWShapeSample gw_shape_rounded_rect(float2 q, constant GWGlassUniforms &uniforms) {
+    GWShapeSample shape;
+    shape.distance = gw_rounded_rect_distance(q, uniforms.panelHalfSize, uniforms.cornerRadius);
+    shape.normal = gw_rounded_rect_normal(q, uniforms.panelHalfSize, uniforms.lensFieldRadius);
+    shape.lensDepth = max(-gw_rounded_rect_distance(q, uniforms.panelHalfSize, uniforms.lensFieldRadius), 0.0);
+    shape.inscribedRadius = min(uniforms.panelHalfSize.x, uniforms.panelHalfSize.y);
+    return shape;
+}
+
+/// The steepest surface slope the optics use (rise over run).
+constant float gw_lens_max_slope = 12.0;
+
+/// A height profile `s(t)` (x) and its slope `s'(t)` (y), `t` in 0...1 the
+/// depth into the bevel over the bevel width: 0 at the outline. `a` and `b`
+/// are the profile's parameters (`GWLensProfile`).
+static float2 gw_lens_profile(uint profile, float t, float a, float b) {
+    t = saturate(t);
+    switch (profile) {
+    case GWLensProfileCircular:
+    case GWLensProfileDome: {
+        const float s = sqrt(max(t * (2.0 - t), 0.0));
+        return float2(s, s > 1e-6 ? (1.0 - t) / s : gw_lens_max_slope * 100.0);
+    }
+    case GWLensProfileSquircle: {
+        const float n = max(a, 1.0);
+        const float u = 1.0 - t;
+        const float inner = max(1.0 - pow(u, n), 0.0);
+        const float s = pow(inner, 1.0 / n);
+        return float2(s, inner > 1e-9 ? pow(u, n - 1.0) * pow(inner, 1.0 / n - 1.0) : gw_lens_max_slope * 100.0);
+    }
+    case GWLensProfileChamfer: {
+        const float knee = 0.7;
+        const float norm = (1.0 + knee) * 0.5;
+        if (t < knee) {
+            return float2(t / norm, 1.0 / norm);
+        }
+        const float u = t - knee;
+        return float2((knee + u - u * u / (2.0 * (1.0 - knee))) / norm, (1.0 - u / (1.0 - knee)) / norm);
+    }
+    case GWLensProfileRing: {
+        const float x = (t - a) / max(b, 1e-6);
+        if (abs(x) >= 1.0) {
+            return float2(0.0);
+        }
+        const float s = sqrt(1.0 - x * x);
+        return float2(s, s > 1e-6 ? -x / (b * s) : (x < 0.0 ? 1.0 : -1.0) * gw_lens_max_slope * 100.0);
+    }
+    default:
+        return float2(0.0);
+    }
+}
+
+/// The glass surface at a pixel: its height in pixels and the gradient of
+/// the height (pixels per pixel, pointing toward the interior).
+struct GWLensField {
+    float height;
+    float2 gradient;
+};
+
+/// The host panel's height field: `h = H * s(lensDepth / bevel)`.
+static GWLensField gw_lens_host(GWShapeSample shape, constant GWGlassUniforms &uniforms) {
+    GWLensField field;
+    field.height = 0.0;
+    field.gradient = float2(0.0);
+    if (uniforms.lensProfile == GWLensProfileRim) {
+        return field;
+    }
+    const float t = uniforms.lensBevel > 0.0 ? saturate(shape.lensDepth / uniforms.lensBevel) : 1.0;
+    const float2 profile = gw_lens_profile(uniforms.lensProfile, t, uniforms.lensProfileA, uniforms.lensProfileB);
+    field.height = uniforms.lensThickness * profile.x;
+    if (t < 1.0) {
+        // The depth falls toward the outline, so the height rises along the
+        // inward direction: against the outward normal.
+        const float rise = clamp(uniforms.lensThickness * profile.y / uniforms.lensBevel, -gw_lens_max_slope, gw_lens_max_slope);
+        field.gradient = -shape.normal * rise;
+    }
+    return field;
+}
+
+/// Where the glass sends the sample for a pixel, as an offset in pixels
+/// (toward the interior for a convex edge): the surface normal
+/// `N = normalize(-gradient, 1)` bends the downward ray with Snell's law,
+/// `T = refract(-z, N, 1 / ior)`, and the ray travels the glass height to the
+/// background: `T.xy / (-T.z) * h`, scaled by `lensOffsetScale` and at most
+/// `lensMaximumOffset` long.
+static float2 gw_lens_offset(GWLensField field, float ior, constant GWGlassUniforms &uniforms) {
+    if (field.height <= 0.0 || all(field.gradient == float2(0.0))) {
+        return float2(0.0);
+    }
+    const float3 normal = normalize(float3(-field.gradient, 1.0));
+    const float3 ray = refract(float3(0.0, 0.0, -1.0), normal, 1.0 / ior);
+    float2 offset = ray.xy / max(-ray.z, 1e-3) * (field.height * uniforms.lensOffsetScale);
+    const float length2 = dot(offset, offset);
+    if (length2 > uniforms.lensMaximumOffset * uniforms.lensMaximumOffset) {
+        offset *= uniforms.lensMaximumOffset * rsqrt(length2);
+    }
+    return offset;
+}
+
+/// The glass color at a pixel under a lens, in linear light.
+static float3 gw_lens_glass(
+    float2 pixel, float2 q, constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
+{
+    const GWShapeSample shape = gw_shape_rounded_rect(q, uniforms);
+    const GWLensField field = gw_lens_host(shape, uniforms);
+    return gw_glass_sample(pixel + gw_lens_offset(field, uniforms.lensIOR, uniforms), uniforms, source);
+}
+
+
 /// One rounded glass panel over the background.
 ///
 /// Inside the rim (`bezelWidth` pixels inward from the outline) the sample
@@ -674,7 +811,13 @@ fragment float4 gw_glass_fragment(
     const float rim = uniforms.bezelWidth > 0.0 ? saturate(1.0 - depth / uniforms.bezelWidth) : 0.0;
     const float2 normal = gw_rounded_rect_normal(q, uniforms.panelHalfSize, uniforms.normalRadius);
     const float displacement = uniforms.maxDisplacement * rim * rim;
-    float3 glass = gw_glass_sample(pixel - normal * displacement, uniforms, source);
+    float3 glass;
+    if (gw_optics && uniforms.lensProfile != GWLensProfileRim) {
+        // The thick lens (GW-22) replaces the rim refraction.
+        glass = gw_lens_glass(pixel, q, uniforms, source);
+    } else {
+        glass = gw_glass_sample(pixel - normal * displacement, uniforms, source);
+    }
 
     glass = mix(glass, uniforms.tint.xyz, uniforms.tint.w);
     const float facing = saturate(dot(normal, gw_light_direction));

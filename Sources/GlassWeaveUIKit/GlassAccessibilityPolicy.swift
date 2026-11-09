@@ -44,6 +44,7 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | Increase Contrast (`accessibilityContrast == .high`) | A glow keeps its rim, evenly lit (directionality 0) as a clearer boundary, and loses its inner glow and center fill, and an interior is removed, so the interior is exactly the glass without a glow and the legibility rule for its tint still holds for text. Its halo (outside the shape, behind no text) and pulse are kept. |
 /// | Reduce Motion | A glow's pulse stops: the rim, inner glow, and halo stay at the pulse's mean level, `1 − pulseDepth / 2` of their opacity. An interior shows its still frame: its speed becomes 0, so it is drawn at interior time 0 whatever the effect time. Nothing animates, so ``GlassSurfaceView`` runs no effect clock. ``GlassSurfaceView`` also reports the setting so the app can stop its source's nonessential motion. |
 /// | Inner light (`GlassLight`) | Reduce Transparency removes it. Increase Contrast removes the body light (it would sit behind text) and keeps only the piping, within ``increasedContrastPipingWidth`` of the outline, a clearer boundary like the glow's rim. Reduce Motion gives the still frame: its speed becomes 0, so it is drawn at phase 0 whatever the effect time. |
+/// | Thick lens (`GlassLens`) | Reduce Transparency removes it (the panel is the opaque surface). Increase Contrast keeps the lens: its samples stay within the source's own colors, so the legibility bound for text still holds. Reduce Motion changes nothing: the lens is static. |
 /// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
     /// The widest rim a glow keeps under Reduce Transparency, in points.
@@ -64,6 +65,7 @@ public enum GlassAccessibilityPolicy {
             presented.parameters.refraction = 0
             presented.parameters.edgeHighlight = 0
             presented.parameters.tint = opaqueSurfaceTint(for: traits)
+            presented.parameters.lens = .none
         }
         presented.parameters.glow = presentedGlow(for: panel.parameters.glow, settings: settings, traits: traits)
         presented.parameters.interior = presentedInterior(for: panel.parameters.interior, settings: settings, traits: traits)

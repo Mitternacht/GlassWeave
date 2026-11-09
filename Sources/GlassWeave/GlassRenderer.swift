@@ -21,8 +21,9 @@ internal import GlassWeaveShaderTypes
 /// Source handling (validation, ordering, leases, defined skips) is the
 /// ``BackgroundRenderer`` contract; this type adds the panel. Like that
 /// renderer, it owns no display loop, never waits for the GPU, and is used
-/// from one isolation domain at a time. Both pipelines are built at
-/// initialization, never in the draw path.
+/// from one isolation domain at a time. Every pipeline (the background, and
+/// the panel's ``PipelineVariant/base`` and ``PipelineVariant/optics``
+/// variants) is built at initialization, never in the draw path.
 public final class GlassRenderer {
     /// The render-target format: ``BackgroundRenderer/outputPixelFormat``.
     public static let outputPixelFormat = BackgroundRenderer.outputPixelFormat
@@ -33,6 +34,29 @@ public final class GlassRenderer {
 
     private let background: BackgroundRenderer
     private let panelPipeline: any MTLRenderPipelineState
+    /// The panel pipeline with the thick-lens code (GW-22), or `nil` when the
+    /// panel library has no such variant (a frozen earlier shader).
+    private let opticsPipeline: (any MTLRenderPipelineState)?
+
+    /// The panel pipeline variants (GW-22), both built at initialization.
+    public enum PipelineVariant: String, Hashable, Sendable {
+        /// The shader without the thick-lens code: exactly the shader of
+        /// GW-21. Draws every panel whose ``GlassParameters/lens`` is
+        /// ``GlassLens/none``.
+        case base
+        /// The shader with the thick-lens code. Draws every panel whose lens
+        /// has a profile other than ``GlassLens/Profile/rim``.
+        case optics
+    }
+
+    /// The variant that drew each panel of the last draw that rendered any,
+    /// in drawing order; empty before one. Panels that draw nothing (empty
+    /// or outside the target) are not listed.
+    public private(set) var drawnVariants: [PipelineVariant] = []
+
+    /// How long initialization spent building the panel pipelines, in
+    /// seconds.
+    public let pipelineCreationSeconds: Double
 
     /// The most panels one draw renders. ``setPanels(_:)`` keeps the first
     /// this many, which bounds the work of a draw: each panel is one quad
@@ -94,13 +118,64 @@ public final class GlassRenderer {
         commandQueue: any MTLCommandQueue, library: any MTLLibrary,
         panelLibrary: any MTLLibrary, panelVertex: String, panelFragment: String
     ) throws {
-        panelPipeline = try BackgroundRenderer.makePipeline(
+        let clock = ContinuousClock()
+        let start = clock.now
+        // A panel library with the function constant has two variants; a
+        // frozen earlier shader has one.
+        let hasOptics = panelLibrary.makeFunction(name: panelFragment)?
+            .functionConstantsDictionary[Self.opticsConstantName] != nil
+        panelPipeline = try Self.makePanelPipeline(
             device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel",
-            vertex: panelVertex, fragment: panelFragment
+            vertex: panelVertex, fragment: panelFragment, optics: hasOptics ? false : nil
         )
+        opticsPipeline = hasOptics ? try Self.makePanelPipeline(
+            device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (optics)",
+            vertex: panelVertex, fragment: panelFragment, optics: true
+        ) : nil
+        let elapsed = clock.now - start
+        pipelineCreationSeconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
         background = try BackgroundRenderer(commandQueue: commandQueue, library: library)
         self.device = commandQueue.device
         self.commandQueue = commandQueue
+    }
+
+    /// The shader's name for the function constant that selects the variant.
+    private static let opticsConstantName = "gw_optics_constant"
+
+    /// Builds one variant of the panel pipeline. `optics` sets the shader's
+    /// function constant; `nil` builds the function as it is (a library
+    /// without the constant).
+    private static func makePanelPipeline(
+        device: any MTLDevice, library: any MTLLibrary, label: String,
+        vertex: String, fragment: String, optics: Bool?
+    ) throws -> any MTLRenderPipelineState {
+        guard let optics else {
+            return try BackgroundRenderer.makePipeline(
+                device: device, library: library, label: label, vertex: vertex, fragment: fragment
+            )
+        }
+        guard let vertexFunction = library.makeFunction(name: vertex) else {
+            throw BackgroundRendererError.missingShaderFunction(vertex)
+        }
+        let constants = MTLFunctionConstantValues()
+        var flag = optics
+        constants.setConstantValue(&flag, type: .bool, index: 0)
+        let fragmentFunction: any MTLFunction
+        do {
+            fragmentFunction = try library.makeFunction(name: fragment, constantValues: constants)
+        } catch {
+            throw BackgroundRendererError.pipelineCreationFailed("\(label): \(error)")
+        }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.label = label
+        descriptor.vertexFunction = vertexFunction
+        descriptor.fragmentFunction = fragmentFunction
+        descriptor.colorAttachments[0].pixelFormat = BackgroundRenderer.outputPixelFormat
+        do {
+            return try device.makeRenderPipelineState(descriptor: descriptor)
+        } catch {
+            throw BackgroundRendererError.pipelineCreationFailed("\(label): \(error)")
+        }
     }
 
     /// Sets the one panel to draw, or `nil` for the background alone. The
@@ -289,11 +364,13 @@ public final class GlassRenderer {
     ) -> BackgroundRenderOutcome {
         let panels = panels
         let effectTime = effectTime
-        return background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline] encoder, frame, backgroundUniforms, targetSize in
+        var variants: [PipelineVariant] = []
+        let outcome = background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline, opticsPipeline] encoder, frame, backgroundUniforms, targetSize in
             // Converted only once a target exists, so the skips that run
             // before (including a zero display scale's zero-size target)
             // never see the scale.
-            var pipelineSet = false
+            var textureSet = false
+            var current: PipelineVariant?
             for panel in panels {
                 let geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime)
                 guard !geometry.isEmpty else { continue }
@@ -303,17 +380,28 @@ public final class GlassRenderer {
                 )
                 let length = MemoryLayout<GWGlassUniforms>.stride
                 let uniformsIndex = Int(GWGlassBindingIndexUniforms.rawValue)
+                // A lens needs the optics variant; a library without one
+                // draws every panel with its only pipeline.
+                let variant: PipelineVariant = geometry.lens != nil && opticsPipeline != nil ? .optics : .base
                 encoder.pushDebugGroup("GlassWeave glass panel")
-                if !pipelineSet {
-                    encoder.setRenderPipelineState(panelPipeline)
+                if current != variant {
+                    encoder.setRenderPipelineState(variant == .optics ? opticsPipeline ?? panelPipeline : panelPipeline)
+                    current = variant
+                }
+                if !textureSet {
                     encoder.setFragmentTexture(frame.texture, index: Int(GWGlassBindingIndexSourceTexture.rawValue))
-                    pipelineSet = true
+                    textureSet = true
                 }
                 encoder.setVertexBytes(&uniforms, length: length, index: uniformsIndex)
                 encoder.setFragmentBytes(&uniforms, length: length, index: uniformsIndex)
                 encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
                 encoder.popDebugGroup()
+                variants.append(variant)
             }
         })
+        if !variants.isEmpty {
+            drawnVariants = variants
+        }
+        return outcome
     }
 }

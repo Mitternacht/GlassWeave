@@ -103,6 +103,7 @@ final class LabViewController: UIViewController {
     /// Opens the material bench and the light-fields demo (GW-21).
     private let benchButton = UIButton(configuration: .bordered())
     private let lightFieldsButton = UIButton(configuration: .bordered())
+    private let lensButton = UIButton(configuration: .bordered())
     /// Whether `-lab.bench` or `-lab.lightFields` has opened its screen yet.
     private var openedBenchAtLaunch = false
     /// The control rows; vertical at accessibility text sizes.
@@ -187,6 +188,9 @@ final class LabViewController: UIViewController {
             if let page = BenchPage.fromBenchArgument {
                 openedBenchAtLaunch = true
                 openBench(.bench, page: page, animated: false)
+            } else if defaults.bool(forKey: "lab.lens") {
+                openedBenchAtLaunch = true
+                openBench(.lens, page: BenchPage.named(defaults.string(forKey: "lab.lensBackdrop")) ?? .dotGrid, animated: false)
             } else if defaults.bool(forKey: "lab.lightFields") {
                 openedBenchAtLaunch = true
                 openBench(.lightFields, page: BenchPage.named(defaults.string(forKey: "lab.lightBackdrop")) ?? .charcoal, animated: false)
@@ -509,6 +513,10 @@ final class LabViewController: UIViewController {
         lightFieldsButton.accessibilityIdentifier = "lab.openLightFields"
         lightFieldsButton.addAction(UIAction { [weak self] _ in self?.openBench(.lightFields, page: .charcoal, animated: true) }, for: .primaryActionTriggered)
         lightFieldsButton.isHidden = benchmark != nil
+        lensButton.configuration?.title = String(localized: "Thick lens")
+        lensButton.accessibilityIdentifier = "lab.openLens"
+        lensButton.addAction(UIAction { [weak self] _ in self?.openBench(.lens, page: .dotGrid, animated: true) }, for: .primaryActionTriggered)
+        lensButton.isHidden = benchmark != nil
 
         let tintRow = Self.row([tintControl, UIView(), Self.caption(String(localized: "Enabled")), enabledSwitch])
         let motionRow = Self.row([pauseButton, UIView(), Self.caption(String(localized: "Frame ID")), overlaySwitch])
@@ -531,7 +539,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, lightFieldsButton, benchButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, lightFieldsButton, lensButton, benchButton, measureButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false

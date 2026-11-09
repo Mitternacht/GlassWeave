@@ -91,6 +91,29 @@ typedef enum GWLightComposite {
     GWLightCompositePaint = 1,
 } GWLightComposite;
 
+/// The height profile of a thick lens (GW-22), stored in
+/// `GWGlassUniforms.lensProfile` and in a lens inlay. 0 is the GW-05 rim:
+/// the shader's original refraction, with no height field. The others are
+/// profiles `s(t)` of a height field `h = H * s(t)`, `t` the depth into the
+/// bevel over the bevel width (0 at the outline, 1 where the bevel ends):
+/// `s(0) = 0`, and `s(1) = 1` except for the ring, which is a bump.
+typedef enum GWLensProfile {
+    /// The GW-05 rim. For an inlay: no inlay.
+    GWLensProfileRim = 0,
+    /// A quarter circle, `s = sqrt(1 - (1 - t)^2)`.
+    GWLensProfileCircular = 1,
+    /// A superellipse, `s = (1 - (1 - t)^n)^(1/n)`, `n` in `profileA`.
+    GWLensProfileSquircle = 2,
+    /// A straight 40 degree face that rounds into the flat top.
+    GWLensProfileChamfer = 3,
+    /// A circular profile whose bevel is the panel's inscribed radius (the
+    /// CPU resolves the bevel; the shader reads it as circular).
+    GWLensProfileDome = 4,
+    /// A bump `sqrt(1 - ((t - c) / w)^2)` around `t = c` (`profileA`) of
+    /// half-width `w` (`profileB`), both as fractions of the bevel.
+    GWLensProfileRing = 5,
+} GWLensProfile;
+
 /// One inner light emitter (GW-21), resolved on the CPU for one draw: angles
 /// become direction vectors, lengths become pixels, and the motion at the
 /// draw's effect time is already applied to the colors and `motion`.
@@ -217,6 +240,24 @@ typedef struct GWLightEmitter {
 ///   reach (0 leaves only the piping).
 /// - `lightEmitters`: the emitters, in drawing order; unused ones are zero.
 ///
+/// Thick lens (GW-22), appended after the GW-21 fields, which keep their
+/// layout. `lensProfile` 0 disables the whole lens (the shader's GW-05 rim
+/// refraction stays); every other lens field is then zero. A panel with no
+/// lens is drawn by the pipeline variant that does not contain the lens code
+/// at all. See docs/glass-optics.md for the math. Lengths are in pixels.
+/// - `lensProfile`: a `GWLensProfile` value.
+/// - `lensThickness`: the glass height `H` at its thickest.
+/// - `lensBevel`: the bevel width, over which the height rises.
+/// - `lensFieldRadius`: corner radius of the rounded rectangle whose inward
+///   distance is the lens depth (a C1 field), `max(cornerRadius, bevel)` but
+///   at most half the shorter side.
+/// - `lensIOR`: index of refraction, 1 to 2.4.
+/// - `lensMaximumOffset`: the longest a sample moves, in pixels.
+/// - `lensOffsetScale`: 0...1, scales every offset; below 1 only when the
+///   lens may not fold (see `GlassLens.allowsFold`).
+/// - `lensProfileA`, `lensProfileB`: the profile's parameters (see
+///   `GWLensProfile`).
+///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
 /// maxDisplacement 76, edgeHighlight 80, explicit padding 84, 88, 92 (set
@@ -234,8 +275,11 @@ typedef struct GWLightEmitter {
 /// interiorSparks 336 (12 × 16 bytes); lightEmitterCount 528,
 /// lightComposite 532, lightCenterFade 536, lightPiping 540,
 /// lightPipingWidth 544, lightBodyScale 548, explicit padding 552, 556 (set
-/// to zero), lightEmitters 560 (4 × 112 bytes).
-/// Size 1008, alignment 16, stride 1008.
+/// to zero), lightEmitters 560 (4 × 112 bytes); lensProfile 1008,
+/// lensThickness 1012, lensBevel 1016, lensFieldRadius 1020, lensIOR 1024,
+/// lensMaximumOffset 1028, lensOffsetScale 1032, lensProfileA 1036,
+/// lensProfileB 1040, explicit padding 1044, 1048, 1052 (set to zero).
+/// Size 1056, alignment 16, stride 1056.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
     simd_float2 targetSize;
@@ -291,6 +335,18 @@ typedef struct GWGlassUniforms {
     float padding7;
     float padding8;
     GWLightEmitter lightEmitters[4];
+    uint32_t lensProfile;
+    float lensThickness;
+    float lensBevel;
+    float lensFieldRadius;
+    float lensIOR;
+    float lensMaximumOffset;
+    float lensOffsetScale;
+    float lensProfileA;
+    float lensProfileB;
+    float padding9;
+    float padding10;
+    float padding11;
 } GWGlassUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

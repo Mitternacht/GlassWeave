@@ -57,9 +57,9 @@ struct ShaderLayoutTests {
     }
 
     @Test func `Host layout of the glass uniforms matches the documented record`() {
-        #expect(MemoryLayout<GWGlassUniforms>.size == 1008)
+        #expect(MemoryLayout<GWGlassUniforms>.size == 1056)
         #expect(MemoryLayout<GWGlassUniforms>.alignment == 16)
-        #expect(MemoryLayout<GWGlassUniforms>.stride == 1008)
+        #expect(MemoryLayout<GWGlassUniforms>.stride == 1056)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.background) == 0)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.targetSize) == 40)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.panelCenter) == 48)
@@ -115,6 +115,17 @@ struct ShaderLayoutTests {
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding7) == 552)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding8) == 556)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lightEmitters) == 560)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensProfile) == 1008)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensThickness) == 1012)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensBevel) == 1016)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensFieldRadius) == 1020)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensIOR) == 1024)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensMaximumOffset) == 1028)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensOffsetScale) == 1032)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensProfileA) == 1036)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.lensProfileB) == 1040)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding9) == 1044)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding11) == 1052)
         #expect(MemoryLayout<GWLightEmitter>.size == 112)
         #expect(MemoryLayout<GWLightEmitter>.alignment == 16)
         #expect(MemoryLayout<GWLightEmitter>.stride == 112)
@@ -218,7 +229,17 @@ struct ShaderLayoutTests {
             lightPipingWidth: 33.5,
             lightBodyScale: 0.5625,
             padding7: -992, padding8: -991,
-            lightEmitters: (Self.emitter(0), Self.emitter(1), Self.emitter(2), Self.emitter(3))
+            lightEmitters: (Self.emitter(0), Self.emitter(1), Self.emitter(2), Self.emitter(3)),
+            lensProfile: 5,
+            lensThickness: 24.5,
+            lensBevel: 18.25,
+            lensFieldRadius: 21.5,
+            lensIOR: 1.625,
+            lensMaximumOffset: 33.75,
+            lensOffsetScale: 0.8125,
+            lensProfileA: 0.4375,
+            lensProfileB: 0.0625,
+            padding9: -990, padding10: -989, padding11: -988
         )
         let expected: [Float] = [
             1.5, -2.25, 3.125, -4.0625, 5.5, -6.75, 0.03125, 0.0625, 7.875, -8.5,
@@ -263,7 +284,7 @@ struct ShaderLayoutTests {
         #expect(readSeeds == [0xdeadbeef] + (0..<4).map { Self.emitter($0).seed })
         let readLayout = Array(UnsafeBufferPointer(start: layout.contents().assumingMemoryBound(to: UInt32.self), count: 63))
         #expect(readLayout == [
-            1008, 16, 0, 40, 48, 56, 64, 68, 72, 76, 80, 96,
+            1056, 16, 0, 40, 48, 56, 64, 68, 72, 76, 80, 96,
             112, 128, 144, 160, 176, 192, 200, 204, 208, 212, 216, 220, 224, 228, 232,
             240, 244,
             256, 272, 288, 304, 308, 312, 316, 320, 324, 328, 332,

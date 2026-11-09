@@ -150,7 +150,14 @@ final class BenchBackground {
     }
 }
 
-/// The material bench and the light-fields demo (GW-21).
+/// The material bench, the light-fields demo (GW-21), and the lens page
+/// (GW-22).
+///
+/// - **Lens** (`-lab.lens YES`, or the lab's "Thick lens" button): the thick
+///   lens of `GlassLens` on a wide pill with an inlaid dome button, a dome
+///   marble, a ring, and a fold pair, over a bench page
+///   (`-lab.lensBackdrop <page>`, default the dot grid, to see the
+///   magnification and the bending; the ribbons show the dispersion).
 ///
 /// - **Bench** (`-lab.bench <page>`): one bench page full screen with a few
 ///   plain glass panels over it, and a control to switch pages, so a look is
@@ -173,6 +180,7 @@ final class MaterialBenchViewController: UIViewController {
     enum Mode {
         case bench
         case lightFields
+        case lens
     }
 
     /// One demo panel: where it goes (in a layout the controller computes),
@@ -208,11 +216,19 @@ final class MaterialBenchViewController: UIViewController {
     init(mode: Mode, page: BenchPage) {
         self.mode = mode
         self.page = page
-        pages = mode == .bench ? BenchPage.allCases : [.charcoal, .ribbons, .paper]
+        switch mode {
+        case .bench: pages = BenchPage.allCases
+        case .lightFields: pages = [.charcoal, .ribbons, .paper]
+        case .lens: pages = [.dotGrid, .checkerboard, .ribbons, .charcoal]
+        }
         pageControl = UISegmentedControl(items: pages.map(\.title))
         stillTime = UserDefaults.standard.object(forKey: "lab.lightTime") == nil
             ? nil : UserDefaults.standard.double(forKey: "lab.lightTime")
-        demos = mode == .bench ? Self.benchDemos : Self.lightDemos(timeOffset: 0)
+        switch mode {
+        case .bench: demos = Self.benchDemos
+        case .lightFields: demos = Self.lightDemos(timeOffset: 0)
+        case .lens: demos = Self.lensDemos
+        }
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -230,6 +246,33 @@ final class MaterialBenchViewController: UIViewController {
         Demo(caption: "Tinted", parameters: GlassParameters(
             cornerRadius: 30, bezelWidth: 18, refraction: 0.7,
             tint: GlassTint(red: 0.3, green: 0.4, blue: 0.9, strength: 0.25)
+        )),
+    ]
+
+    // MARK: Lens demos (GW-22)
+
+    /// The lens page's panels: a thick pill, a dome marble, a ring, and a
+    /// fold pair.
+    private static let lensDemos: [Demo] = [
+        Demo(caption: String(localized: "Thick lens pill: circular bevel, IOR 1.5"), parameters: GlassParameters(
+            cornerRadius: 999, bezelWidth: 34, refraction: 0.6, edgeHighlight: 0.6,
+            lens: GlassLens(profile: .circular, thickness: 34, indexOfRefraction: 1.5, maximumOffset: 80, allowsFold: true)
+        )),
+        Demo(caption: String(localized: "Dome"), parameters: GlassParameters(
+            cornerRadius: 999, bezelWidth: 60, refraction: 0.6, edgeHighlight: 0.6,
+            lens: GlassLens(profile: .dome, thickness: 48, indexOfRefraction: 1.5, maximumOffset: 80)
+        )),
+        Demo(caption: String(localized: "Ring"), parameters: GlassParameters(
+            cornerRadius: 999, bezelWidth: 20, refraction: 0.6, edgeHighlight: 0.6,
+            lens: GlassLens(profile: .ring(center: 13, width: 14), thickness: 26, indexOfRefraction: 1.6, maximumOffset: 80, allowsFold: true)
+        )),
+        Demo(caption: String(localized: "Fold off: magnified, never mirrored"), parameters: GlassParameters(
+            cornerRadius: 28, bezelWidth: 32, refraction: 0.6, edgeHighlight: 0.5,
+            lens: GlassLens(profile: .squircle(exponent: 3), thickness: 44, indexOfRefraction: 1.8, maximumOffset: 120, allowsFold: false)
+        )),
+        Demo(caption: String(localized: "Fold on: the edge mirrors"), parameters: GlassParameters(
+            cornerRadius: 28, bezelWidth: 32, refraction: 0.6, edgeHighlight: 0.5,
+            lens: GlassLens(profile: .squircle(exponent: 3), thickness: 44, indexOfRefraction: 1.8, maximumOffset: 120, allowsFold: true)
         )),
     ]
 
@@ -377,7 +420,11 @@ final class MaterialBenchViewController: UIViewController {
         titleLabel.font = .preferredFont(forTextStyle: .title2)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 0
-        titleLabel.text = mode == .bench ? String(localized: "Material bench") : String(localized: "Light fields")
+        switch mode {
+        case .bench: titleLabel.text = String(localized: "Material bench")
+        case .lightFields: titleLabel.text = String(localized: "Light fields")
+        case .lens: titleLabel.text = String(localized: "Thick lens")
+        }
         titleLabel.accessibilityTraits.insert(.header)
         closeButton.configuration?.title = String(localized: "Close")
         closeButton.accessibilityIdentifier = "bench.close"
@@ -463,6 +510,19 @@ final class MaterialBenchViewController: UIViewController {
             frames.append(CGRect(x: left + side + gap, y: y, width: side, height: side))
             y += side + captionHeight + gap + 10
             frames.append(CGRect(x: left, y: y, width: width, height: min(160, max(safe.maxY - y - 70, 110))))
+        } else if mode == .lens {
+            // The pill, then a dome and a ring, then the fold pair.
+            let pillHeight: CGFloat = 104
+            frames.append(CGRect(x: left, y: y, width: width, height: pillHeight))
+            y += pillHeight + captionHeight + gap + 10
+            let side = min((width - gap) / 2, 130)
+            frames.append(CGRect(x: left, y: y, width: side, height: side))
+            frames.append(CGRect(x: left + width - side, y: y, width: side, height: side))
+            y += side + captionHeight + gap + 10
+            let half = (width - gap) / 2
+            let foldHeight = min(110, max(safe.maxY - y - 90, 80))
+            frames.append(CGRect(x: left, y: y, width: half, height: foldHeight))
+            frames.append(CGRect(x: left + half + gap, y: y, width: half, height: foldHeight))
         } else {
             let pillHeight: CGFloat = 84
             frames.append(CGRect(x: left, y: y, width: width, height: pillHeight))
