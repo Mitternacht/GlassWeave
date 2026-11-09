@@ -68,6 +68,9 @@ typedef enum GWGlassBindingIndex {
     /// Fragment buffer index of `GWFillUniforms`, bound by the fill pipeline
     /// variants only (GW-28).
     GWGlassBindingIndexFill = 2,
+    /// Fragment buffer index of `GWTouchUniforms`, bound by the touch
+    /// pipeline variants only (GW-12).
+    GWGlassBindingIndexTouch = 3,
 } GWGlassBindingIndex;
 
 /// The procedural interior a glass panel draws (GW-19), stored in
@@ -724,5 +727,65 @@ typedef struct GWFillUniforms {
     GWShapeUniforms gel;
     simd_float4 bubbles[16];
 } GWFillUniforms;
+
+/// One touch's state for one draw (GW-12), resolved on the CPU: the shader sees
+/// no time. Positions are target pixels (origin top-left, y down); lengths are
+/// pixels.
+///
+/// - `origin`: where the touch began; the ripple spreads from it.
+/// - `position`: where the finger is now; the finger light and the rim gleam
+///   follow it.
+/// - `light`: the finger light's level 0...1 (its fade in and out applied).
+/// - `lightRadius`: the finger light's radius.
+/// - `ringRadius`, `ringWidth`: the travelling ring's radius and width.
+/// - `ringAmplitude`: the ring's peak displacement of the sampled background
+///   now, in pixels (already bounded by `GlassTouch.maximumRippleDisplacement`).
+/// - `ringStrength`: the ring's strength 0...1, which scales its catch light.
+/// - `gleam`: the rim gleam's level 0...1.
+/// - `rimDistance`: how far inside the outline the finger is, in pixels (0 on
+///   or outside it); the gleam is stronger the closer it is.
+///
+/// Size 48, alignment 8.
+typedef struct GWTouchPoint {
+    simd_float2 origin;
+    simd_float2 position;
+    float light;
+    float lightRadius;
+    float ringRadius;
+    float ringWidth;
+    float ringAmplitude;
+    float ringStrength;
+    float gleam;
+    float rimDistance;
+} GWTouchPoint;
+
+/// The touch response of one panel for one draw (GW-12), bound as its own
+/// fragment buffer (`GWGlassBindingIndexTouch`) to the touch pipeline variants
+/// only, so `GWGlassUniforms` keeps its layout.
+///
+/// - `count`: the touches that drive the panel, 1 or 2.
+/// - `fingerLight`: the finger light's strength 0...1 at level 1.
+/// - `ringShine`: the strength 0...1 of the ring's catch light (one light
+///   direction: the key light).
+/// - `gleamReach`: how far from the outline, in pixels, a finger still
+///   brightens the rim nearest to it.
+/// - `gleamWidth`: the gleam's length along the rim, in pixels.
+/// - `gleamBand`: the gleam's depth inside the outline, in pixels.
+/// - `gleamIntensity`: the gleam's strength 0...1.
+///
+/// Layout in bytes: count 0, fingerLight 4, ringShine 8, gleamReach 12,
+/// gleamWidth 16, gleamBand 20, gleamIntensity 24, padding0 28, points 32 (two
+/// 48-byte records). Size 128, alignment 8, stride 128.
+typedef struct GWTouchUniforms {
+    uint32_t count;
+    float fingerLight;
+    float ringShine;
+    float gleamReach;
+    float gleamWidth;
+    float gleamBand;
+    float gleamIntensity;
+    float padding0;
+    GWTouchPoint points[2];
+} GWTouchUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

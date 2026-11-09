@@ -1060,3 +1060,41 @@ rainbow bending at a clear rim and softening through the frost. Captures
   a grey-teal smudge, a little less than before (3:1 instead of 3.5:1).
 - Not tested: no new test; the frozen-baseline tests still pass because the
   new terms are in the refined path only.
+
+## Touch response (GW-12)
+
+Experimental. The interaction side (observer, pacing, tiers, accessibility) is in
+[interaction](interaction.md#touch-response-gw-12); this is the optics.
+
+**Pipeline.** Function constant 6 (`gw_touch_constant`) builds the `touched`
+variants: the optics, lighting, grounding and shape code (the shape constant set
+for a rounded rectangle or a freeform outline), without frost and fill. The
+touch record `GWTouchUniforms` (128 bytes: a header and two 48-byte
+`GWTouchPoint`s) is its own fragment buffer (index 3), so `GWGlassUniforms` stays
+at 1776 bytes. With the constant unset every line below is compiled out; the
+frozen `GlassBaselineGW12.metal` proves the bytes.
+
+**Ring.** With `d = pixel - origin`, `r = |d|`, the ring's crest at radius `R`
+and width `w`, `x = (r - R) / w` and `g(x) = x exp(1/2 - x^2/2)` (peak 1 at
+`|x| = 1`), the sample position moves by `-(d / r) * A * g(x) * edge`, where `A`
+is the ring's amplitude in pixels (at most `8 pt x ripple`, from the CPU) and
+`edge` runs from 0.35 at the outline to 1 at the bevel's inner edge, so the ring
+flows out through the bevel without fighting the rim's own refraction. The sign
+makes the crest a convex lens (it magnifies). The shifted position goes into
+the lens or rim refraction in place of the pixel; with the constant unset the
+position is the pixel.
+
+**Finger light.** A Gaussian, `exp(-2 (|p - finger| / radius)^2)`, combined over
+touches like light. It adds `(1 - glass) * (finger * (0.3 + 0.9 glass))` per
+channel: the glass's own color lifted toward white, which keeps a colored glass
+colored (white added over it read as a gray fog in the first capture).
+
+**Catch light and gleam.** The ring tilts the surface by `g(x)` along the radial
+direction; the shine is `saturate(dot(g * dir, key light))` times the ring's
+strength times 0.10, white. The gleam is `exp(-(max(|p - finger| - rimDistance, 0)
+/ 7pt)^2)` (how much farther than the nearest rim point the pixel is from the
+finger), times a proximity term that falls from 1 at the rim to 0 at 1.3 finger
+radii, in a band 2.4 points deep inside the outline, times `0.35 + 0.65 facing` so
+the lit side is brighter; `rimDistance` is computed on the CPU from the shape's
+distance field. All three are composited after the inner light and before the
+light model, and the pixels they change are dithered like the glow.

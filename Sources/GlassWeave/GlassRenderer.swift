@@ -81,6 +81,14 @@ public final class GlassRenderer {
     /// fill record bound; the fill code is gated at run time by the record.
     private let filledPipeline: (any MTLRenderPipelineState)?
     private let filledShapedPipeline: (any MTLRenderPipelineState)?
+    /// The panel pipeline with every other variant's code (frost and fill
+    /// excluded) and the touch response code (GW-12), for a rounded rectangle
+    /// and for a freeform shape; `nil` when the panel library has no such
+    /// variant. A panel whose ``GlassParameters/touch`` has something to show
+    /// for a touch that began inside it draws in these, with the touch record
+    /// bound; the touch code is gated at run time by the record.
+    private let touchedPipeline: (any MTLRenderPipelineState)?
+    private let touchedShapedPipeline: (any MTLRenderPipelineState)?
 
     /// The panel pipeline variants (GW-22, GW-23, GW-25, GW-26, GW-24b, GW-28),
     /// all built at initialization.
@@ -119,6 +127,14 @@ public final class GlassRenderer {
         /// the other effects and any shape. A panel with a fill draws no
         /// frost.
         case filled
+        /// The shader with every other variant's code (frost and fill
+        /// excluded) and the touch response code (GW-12), reading the touch
+        /// record. Draws every panel whose ``GlassParameters/touch`` is active
+        /// and has something to show for a touch that began inside the panel
+        /// (see ``GlassRenderer/setTouches(_:)``), with any of the other
+        /// effects and any shape. A panel with frost or a fill draws no touch
+        /// response.
+        case touched
     }
 
     /// How many pre-pass quads (a shadow quad or a caustic quad each) the last
@@ -178,6 +194,25 @@ public final class GlassRenderer {
     /// visible), and tests render chosen instants. Changing it does not
     /// request a draw.
     public private(set) var effectTime: Double = 0
+
+    /// The touches the following draws answer (GW-12), at most
+    /// ``GlassTouch/maximumTouchCount``; empty until set.
+    public private(set) var touches: [GlassTouchPoint] = []
+
+    /// Sets the touches the following draws answer (GW-12): finger positions
+    /// in points in the surface's space (the panels' space) and the effect
+    /// times at which each began and ended. A panel answers the touches that
+    /// began inside its outline, if its ``GlassParameters/touch`` is active; a
+    /// panel with no touch draws exactly as without them, byte for byte.
+    ///
+    /// Only the first ``GlassTouch/maximumTouchCount`` are kept. A non-finite
+    /// value throws ``GlassParameterError/nonFiniteTouch(_:)`` naming its field
+    /// and leaves the touches as they were. Like the effect time, setting them
+    /// does not request a draw. Experimental.
+    public func setTouches(_ touches: [GlassTouchPoint]) throws(GlassParameterError) {
+        for touch in touches { try touch.checked() }
+        self.touches = Array(touches.prefix(GlassTouch.maximumTouchCount))
+    }
 
     /// Sets the effect time for the following draws.
     ///
@@ -244,6 +279,7 @@ public final class GlassRenderer {
         shapeConstant: String = GlassRenderer.shapeConstantName,
         frostConstant: String = GlassRenderer.frostConstantName,
         fillConstant: String = GlassRenderer.fillConstantName,
+        touchConstant: String = GlassRenderer.touchConstantName,
         groundingFunctions: (vertex: String, shadow: String, caustic: String) = (
             GlassRenderer.groundingVertexName, GlassRenderer.groundingShadowName, GlassRenderer.groundingCausticName
         )
@@ -260,6 +296,7 @@ public final class GlassRenderer {
         let hasShape = hasGrounding && constants[shapeConstant] != nil
         let hasFrost = hasShape && constants[frostConstant] != nil
         let hasFill = hasFrost && constants[fillConstant] != nil
+        let hasTouch = hasFill && constants[touchConstant] != nil
         panelPipeline = try Self.makePanelPipeline(
             device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel",
             vertex: panelVertex, fragment: panelFragment, optics: hasOptics ? false : nil, lighting: hasLighting ? false : nil,
@@ -318,6 +355,14 @@ public final class GlassRenderer {
             device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (filled, shaped)",
             vertex: panelVertex, fragment: panelFragment, optics: true, lighting: true, grounding: true, shape: true, fill: true
         ) : nil
+        touchedPipeline = hasTouch ? try Self.makePanelPipeline(
+            device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (touched)",
+            vertex: panelVertex, fragment: panelFragment, optics: true, lighting: true, grounding: true, shape: false, touch: true
+        ) : nil
+        touchedShapedPipeline = hasTouch ? try Self.makePanelPipeline(
+            device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (touched, shaped)",
+            vertex: panelVertex, fragment: panelFragment, optics: true, lighting: true, grounding: true, shape: true, touch: true
+        ) : nil
         let placeholder = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: 1, height: 1, mipmapped: false)
         placeholder.usage = .shaderRead
         placeholder.storageMode = .private
@@ -343,6 +388,8 @@ public final class GlassRenderer {
     static let frostConstantName = "gw_frost_constant"
     /// The shader's name for the function constant that adds the fill code.
     static let fillConstantName = "gw_fill_constant"
+    /// The shader's name for the function constant that adds the touch code.
+    static let touchConstantName = "gw_touch_constant"
     static let groundingVertexName = "gw_grounding_vertex"
     static let groundingShadowName = "gw_grounding_shadow_fragment"
     static let groundingCausticName = "gw_grounding_caustic_fragment"
@@ -354,7 +401,7 @@ public final class GlassRenderer {
     private static func makePanelPipeline(
         device: any MTLDevice, library: any MTLLibrary, label: String,
         vertex: String, fragment: String, optics: Bool?, lighting: Bool? = nil, grounding: Bool? = nil,
-        shape: Bool? = nil, frost: Bool? = nil, fill: Bool? = nil
+        shape: Bool? = nil, frost: Bool? = nil, fill: Bool? = nil, touch: Bool? = nil
     ) throws -> any MTLRenderPipelineState {
         guard let optics else {
             return try BackgroundRenderer.makePipeline(
@@ -381,6 +428,9 @@ public final class GlassRenderer {
         }
         if var fillFlag = fill {
             constants.setConstantValue(&fillFlag, type: .bool, index: 5)
+        }
+        if var touchFlag = touch {
+            constants.setConstantValue(&touchFlag, type: .bool, index: 6)
         }
         let fragmentFunction: any MTLFunction
         do {
@@ -684,13 +734,14 @@ public final class GlassRenderer {
         let panels = panels
         let effectTime = effectTime
         let lightOffset = offsetOfLight
+        let touches = touches
         var variants: [PipelineVariant] = []
         var groundingDraws = 0
         // The frost the panels ask for (GW-24b), or the diagnostic request;
         // Reduce Transparency presents any frost as none.
         let frostSlot = FrostDrawSlot()
         let frostSuppressed = isFrostSuppressed
-        let outcome = background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, preRender: frostPreRender(request: panelFrostRequest() ?? frostRequest, displayScale: displayScale, slot: frostSlot), overlay: { [panelPipeline, opticsPipeline, lightingPipeline, groundedPipeline, shadowPipeline, causticPipeline, shapedPipeline, shapedShadowPipeline, shapedCausticPipeline, frostedPipeline, frostedShapedPipeline, frostPlaceholder, filledPipeline, filledShapedPipeline] encoder, frame, backgroundUniforms, targetSize in
+        let outcome = background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, preRender: frostPreRender(request: panelFrostRequest() ?? frostRequest, displayScale: displayScale, slot: frostSlot), overlay: { [panelPipeline, opticsPipeline, lightingPipeline, groundedPipeline, shadowPipeline, causticPipeline, shapedPipeline, shapedShadowPipeline, shapedCausticPipeline, frostedPipeline, frostedShapedPipeline, frostPlaceholder, filledPipeline, filledShapedPipeline, touchedPipeline, touchedShapedPipeline] encoder, frame, backgroundUniforms, targetSize in
             // Converted only once a target exists, so the skips that run
             // before (including a zero display scale's zero-size target)
             // never see the scale.
@@ -700,9 +751,10 @@ public final class GlassRenderer {
             let uniformsIndex = Int(GWGlassBindingIndexUniforms.rawValue)
             let geometries = panels
                 .map { panel -> GlassPanelGeometry in
-                    var geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime, lightOffset: lightOffset)
+                    var geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime, lightOffset: lightOffset, touches: touches)
                     if frostSuppressed || frostedPipeline == nil { geometry.frost = nil }
                     if filledPipeline == nil { geometry.fill = nil }
+                    if touchedPipeline == nil { geometry.touch = nil }
                     return geometry
                 }
                 .filter { !$0.isEmpty }
@@ -745,6 +797,8 @@ public final class GlassRenderer {
                     ? .filled
                     : geometry.frost != nil
                     ? .frosted
+                    : geometry.touch != nil
+                    ? .touched
                     : geometry.shape != nil && shapedPipeline != nil
                     ? .shaped
                     : (geometry.grounding != nil && groundedPipeline != nil
@@ -759,7 +813,7 @@ public final class GlassRenderer {
                     case .lighting: encoder.setRenderPipelineState(lightingPipeline ?? panelPipeline)
                     case .grounded: encoder.setRenderPipelineState(groundedPipeline ?? panelPipeline)
                     case .shaped: encoder.setRenderPipelineState(shapedPipeline ?? panelPipeline)
-                    case .frosted, .filled: break
+                    case .frosted, .filled, .touched: break
                     }
                     current = variant
                 }
@@ -772,6 +826,14 @@ public final class GlassRenderer {
                 // pipelines of the one variant, with the fill record bound.
                 if variant == .filled, let pipeline = geometry.shape != nil ? filledShapedPipeline : filledPipeline {
                     encoder.setRenderPipelineState(pipeline)
+                }
+                // A touched rounded rectangle and a touched freeform shape are two
+                // pipelines of the one variant, with the touch record bound.
+                if variant == .touched, let pipeline = geometry.shape != nil ? touchedShapedPipeline : touchedPipeline {
+                    encoder.setRenderPipelineState(pipeline)
+                }
+                if variant == .touched, var record = geometry.touchRecord {
+                    encoder.setFragmentBytes(&record, length: MemoryLayout<GWTouchUniforms>.stride, index: Int(GWGlassBindingIndexTouch.rawValue))
                 }
                 if variant == .filled, var record = geometry.fillRecord {
                     encoder.setFragmentBytes(&record, length: MemoryLayout<GWFillUniforms>.stride, index: Int(GWGlassBindingIndexFill.rawValue))

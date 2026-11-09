@@ -235,13 +235,23 @@ Checkpoint D evidence (2026-11-08): the consumer check exercises `NativeGlassVie
 **Dependencies:** GW-10. **Scope:** Medium, five files.
 
 **Acceptance criteria:**
-- [ ] A touch drives a deterministic ripple with a finite duration and a bounded optical displacement.
-- [ ] Gesture observation preserves the native button's tap/cancellation behavior and respects Reduce Motion.
-- [ ] The effect settles back to on-demand rendering and has measured incremental CPU/GPU cost.
+- [ ] A touch drives a deterministic ripple with a finite duration and a bounded optical displacement. (Built and captured: `GlassTouch.state(of:at:)` is a pure function with a finite ring and a displacement of at most `ripple x 8` points by construction. Fast pass: not tested; no controlled-clock test of the bounds.)
+- [ ] Gesture observation preserves the native button's tap/cancellation behavior and respects Reduce Motion. (`GlassTouchObserver` never recognizes, never cancels or delays, allows simultaneous recognition; Reduce Motion drops the ring and the fades in `GlassAccessibilityPolicy.presentedTouch`. Fast pass: not tested; no tap, drag or cancel check on a device or in a UI test.)
+- [ ] The effect settles back to on-demand rendering and has measured incremental CPU/GPU cost. (Settling observed in the lab, see Evidence; fast pass: not tested, no cost measurement, combined M5 run at the end.)
+
+Added in the beyond-native round (the proposal's Later item 2):
+- [x] Off is the default and byte-identical to the previous output: `GlassBaselineGW12Tests` (7 cases: base, optics, lighting, grounded, shaped, frosted; also with an active style and no touch) against the frozen `GlassBaselineGW12.metal`; the control (an active touch draws in the `touched` variant and differs) passes. Mac and iPhone 18 Pro simulator.
+- [x] The record grows append-only: `GWTouchUniforms` (128 bytes) and `GWTouchPoint` (48) with size and offset asserts in C and MSL, the size in the test; `GWGlassUniforms` is unchanged at 1776 bytes.
+- [x] A "Touch" lab page (`-lab.touch YES`, a menu button) with a clear pill with a native button, a round button, an `UIGlassEffect` twin, a pinned test touch (`-lab.touch.pin`), and a status line (taps, touches, submissions after settle).
+- [x] Quality tiers and the accessibility policy rows are implemented in code (balanced: no ring; minimal: off; Reduce Transparency: off; Increase Contrast: no ring, no gleam; Reduce Motion: no ring, no fades). Fast pass: not tested (no accessibility or tier tests, by instruction).
+- [ ] Two simultaneous touches. Implemented (tracker and record hold two); fast pass: not tested, only one live touch and two pinned ones were looked at.
+- [ ] Frost and fill panels answer a touch. Not done: those variants carry no touch code (documented limit).
 
 **Verification:** Swift Testing with a controlled clock; device tap/drag/cancel checks; compare captures and metrics with the GW-09 baseline.
 
 **Likely files:** `Sources/GlassWeave/RippleState.swift`, `Sources/GlassWeave/Shaders/Glass.metal`, `Sources/GlassWeaveUIKit/GlassSurfaceView.swift`, `Tests/GlassWeaveTests/RippleStateTests.swift`, `Examples/GlassWeaveLab/LabViewController.swift`.
+
+**Evidence (2026-11-09):** Core: `GlassTouch`, `GlassTouchPoint`, `GlassTouchState` (`Sources/GlassWeave/GlassTouch.swift`), `GlassTouchModel.swift`, `GlassParameters.touch`, `GlassRenderer.setTouches(_:)` and the `touched` pipeline variants (function constant 6), the `Glass.metal` touch code, `GWTouchUniforms` in the shared header. UIKit: `GlassTouchObserver`, `GlassTouchTracker`, and `GlassSurfaceView.beginTouch/moveTouch/endTouch/cancelTouch/pinTouch`, with the interaction and the effect clock (it stops when the touch settles). Lab: `TouchBenchViewController` (page, twin, status line, pinned touches, `-lab.touch.auto`) and one menu button. Notes: [interaction](../docs/interaction.md) and [glass-optics](../docs/glass-optics.md#touch-response-gw-12). The Xcode MCP bridge could not open a workspace, so everything used `xcodebuild` (own derived-data folder). One safety test, `GlassBaselineGW12Tests` (7 cases): passed on My Mac and on the iPhone 18 Pro simulator. Package scheme counts from `xcresulttool`: My Mac 206 passed and 1 failed (`FrameLifecycleTests` "Teardown keeps in-flight resources...", a GPU command-buffer timeout under load that the hand-over already lists; the suite rerun alone passed, 3 of 3); iPhone 18 Pro simulator 288 passed and 1 failed (the same test, same cause; rerun alone passed, 3 of 3). No lab UI test was added or run. Captures (iPhone 18 Pro simulator, pinned synthetic touch, tuned three rounds, [interaction](../docs/interaction.md#tuning-record)): [orbs](../docs/evidence/captures/gw-12-touch-orbs-iphone18pro-sim.png), [stage](../docs/evidence/captures/gw-12-touch-stage-iphone18pro-sim.png), [grid](../docs/evidence/captures/gw-12-touch-grid-ring-iphone18pro-sim.png), [settled after a tap through the surface API: 55 frames submitted, `after settle +0`, `clock off`](../docs/evidence/captures/gw-12-touch-settled-iphone18pro-sim.png). Limits: the `UIGlassEffect` twin is shown idle (its pressed state was not captured); the observer was never driven by a real touch; no cost measurement; frost and fill panels draw no response; simulator only.
 
 ## GW-13: Merge two custom surfaces
 

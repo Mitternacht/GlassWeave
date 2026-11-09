@@ -88,7 +88,11 @@ import UIKit
 /// The surface is decorative: neither it nor its Metal view is an
 /// accessibility element (its accessibility elements are hidden), and it
 /// does not take touches, so native content placed above it keeps its
-/// behavior and VoiceOver reaches only that content.
+/// behavior and VoiceOver reaches only that content. An app that wants the
+/// glass to answer a finger (GW-12, ``GlassTouch``) attaches a
+/// ``GlassTouchObserver`` to the stage or any ancestor view; it forwards the
+/// touches through ``beginTouch(id:at:)`` and the methods after it without
+/// changing how any native control behaves.
 ///
 /// Accessibility settings (``accessibilitySettings``) change what is drawn
 /// as ``GlassAccessibilityPolicy`` documents: under Reduce Transparency the
@@ -218,6 +222,14 @@ public final class GlassSurfaceView: UIView {
 
     /// The panels as the app set them, after the normalization rule.
     private var requestedPanels: [GlassPanel] = []
+
+    // MARK: Touch state (GW-12)
+
+    /// The touches being answered, on the effect clock.
+    private var touchTracker = GlassTouchTracker()
+    /// Frozen touches for captures and previews: where, how long ago the touch
+    /// began, and how long it was held (`nil` while still down).
+    private var pinnedTouches: [(origin: CGPoint, position: CGPoint, age: Double, held: Double?)] = []
 
     let scheduler = FrameScheduler(isVisible: false)
     private let metalView: MTKView
@@ -403,6 +415,7 @@ public final class GlassSurfaceView: UIView {
             try? renderer.setPanels(presented)
             scheduleFrame()
         }
+        reconcileTouches()
         updateEffectClock()
     }
 
@@ -555,6 +568,123 @@ public final class GlassSurfaceView: UIView {
         }
     }
 
+    // MARK: Touch response (GW-12, experimental)
+
+    /// The touch styles of the panels as drawn: the ones that can draw a
+    /// response, after the quality tier and the accessibility policy.
+    private var presentedTouchStyles: [GlassTouch] {
+        renderer.panels.map(\.parameters.touch).filter(\.isActive)
+    }
+
+    /// The number of touches the surface is answering now: fingers down, and
+    /// ones whose light or ring has not finished.
+    public var activeTouchCount: Int {
+        touchTracker.count
+    }
+
+    /// A finger touched down at `point`, in this view's coordinate space
+    /// (points). Experimental.
+    ///
+    /// The surface answers a touch only if it began inside a panel whose
+    /// presented ``GlassParameters/touch`` can draw something (off by default,
+    /// off under Reduce Transparency and at the minimal quality tier). Then it
+    /// opens an interaction (``beginInteraction()``: the display's interaction
+    /// rates), runs the effect clock while the ring or a fade moves, and closes
+    /// the interaction when the response has settled, after which it draws no
+    /// further frame. Up to two touches are answered at once; a third is
+    /// ignored. `id` names the touch in the calls that follow; reusing the id
+    /// of a touch that is down replaces it. A ``GlassTouchObserver`` makes
+    /// these calls for the app.
+    public func beginTouch(id: Int, at point: CGPoint) {
+        guard point.x.isFinite, point.y.isFinite else { return }
+        let styles = presentedTouchStyles
+        guard !styles.isEmpty,
+              renderer.panels.contains(where: { $0.parameters.touch.isActive && $0.shapeBounds.contains(point) })
+        else { return }
+        let replaced = touchTracker.entries.contains { $0.id == id }
+        guard touchTracker.begin(id: id, at: point, time: effectClock.time) else { return }
+        if !replaced { beginInteraction() }
+        touchesChanged()
+    }
+
+    /// The finger of touch `id` moved to `point`, in this view's coordinate
+    /// space. The finger light and the rim gleam follow it; the ring keeps
+    /// spreading from where the touch began. Ignored for an unknown touch.
+    public func moveTouch(id: Int, to point: CGPoint) {
+        guard point.x.isFinite, point.y.isFinite, touchTracker.move(id: id, to: point) else { return }
+        scheduleFrame()
+    }
+
+    /// The finger of touch `id` lifted. The light and the gleam fade over
+    /// ``GlassTouch/fadeOut``; the ring finishes its travel. Ignored for an
+    /// unknown touch.
+    public func endTouch(id: Int) {
+        guard touchTracker.end(id: id, time: effectClock.time) else { return }
+        touchesChanged()
+    }
+
+    /// Touch `id` was cancelled by the system or by another gesture. The
+    /// response ends as for ``endTouch(id:)``. Ignored for an unknown touch.
+    public func cancelTouch(id: Int) {
+        endTouch(id: id)
+    }
+
+    /// Shows a frozen touch for captures and previews (experimental): one that
+    /// began `age` seconds ago at `point` (in this view's space), and, with
+    /// `heldFor`, lifted that many seconds after it began (`nil` keeps it
+    /// down). It is drawn as the response is at that age and never moves, opens
+    /// no interaction and runs no clock; ``clearPinnedTouches()`` removes it.
+    /// It follows the same rules as a real touch: it needs a panel with a touch
+    /// style that contains `point`, and tiers and accessibility settings change
+    /// what it shows. At most two are kept.
+    public func pinTouch(at point: CGPoint, age: Double, heldFor: Double? = nil) {
+        guard point.x.isFinite, point.y.isFinite, age.isFinite, heldFor?.isFinite ?? true else { return }
+        pinnedTouches.append((point, point, max(age, 0), heldFor.map { max($0, 0) }))
+        pinnedTouches = Array(pinnedTouches.suffix(GlassTouch.maximumTouchCount))
+        scheduleFrame()
+    }
+
+    /// Removes the touches ``pinTouch(at:age:heldFor:)`` pinned.
+    public func clearPinnedTouches() {
+        guard !pinnedTouches.isEmpty else { return }
+        pinnedTouches.removeAll()
+        scheduleFrame()
+    }
+
+    /// Every touch the next draw answers, at effect time `time`: the live ones
+    /// and the pinned ones (which are always `age` old).
+    private func touchPoints(at time: Double) -> [GlassTouchPoint] {
+        let pinned = pinnedTouches.map { pin -> GlassTouchPoint in
+            let began = time - pin.age
+            return GlassTouchPoint(origin: pin.origin, position: pin.position, beganAt: began, endedAt: pin.held.map { began + $0 })
+        }
+        return Array((touchTracker.points + pinned).prefix(GlassTouch.maximumTouchCount))
+    }
+
+    /// A touch began, moved to a new phase or ended: settle what is done,
+    /// draw, and start or stop the clock.
+    private func touchesChanged() {
+        settleTouches()
+        scheduleFrame()
+        updateEffectClock()
+    }
+
+    /// Removes the touches whose response is over (closing the interaction each
+    /// opened), at the effect clock's time.
+    private func settleTouches() {
+        let styles = presentedTouchStyles
+        let removed = touchTracker.removeSettled(styles: styles, time: effectClock.time)
+        for _ in 0..<removed { endInteraction() }
+    }
+
+    /// Drops every touch when no presented panel can answer one any more
+    /// (Reduce Transparency, the minimal tier, a new set of panels).
+    private func reconcileTouches() {
+        guard !touchTracker.isEmpty, presentedTouchStyles.isEmpty else { return }
+        let removed = touchTracker.removeAll()
+        for _ in 0..<removed { endInteraction() }
+    }
+
     // MARK: Effect clock
 
     /// Effect time in seconds, advanced by the model time between display
@@ -593,6 +723,8 @@ public final class GlassSurfaceView: UIView {
     private var wantsEffectClock: Bool {
         guard !isEffectClockPaused, isVisible, renderer.currentFrame != nil || frameProducer != nil else { return false }
         let scale = Double(traitCollection.displayScale)
+        // A touch whose ring or fade is still moving also runs the clock (GW-12).
+        if touchTracker.isAnimating(styles: presentedTouchStyles, time: effectClock.time) { return true }
         return renderer.panels.contains { panel in
             panel.parameters.isAnimated
                 && panel.reachesTarget(pixelWidth: pixelSize.width, pixelHeight: pixelSize.height, displayScale: scale)
@@ -640,6 +772,19 @@ public final class GlassSurfaceView: UIView {
     func effectTick(modelTime: Double) {
         guard effectClockRunning else { return }
         effectClock.advance(toModelTime: modelTime)
+        // A touch whose response is over leaves, closing its interaction; the
+        // frame requested below is the last one that shows it (GW-12).
+        settleTouches()
+        guard wantsEffectClock else {
+            // Nothing moves any more (a settled touch, a finger held after its
+            // ring): this frame is the last of the clock, which stops now so no
+            // further tick draws. The link itself is removed outside its own
+            // callback.
+            effectClockRunning = false
+            requestFrame()
+            Task { @MainActor [weak self] in self?.updateEffectClock() }
+            return
+        }
         requestFrame()
     }
 
@@ -922,6 +1067,7 @@ public final class GlassSurfaceView: UIView {
         let scale = traitCollection.displayScale
         // The effect clock's time is always finite.
         try? renderer.setEffectTime(effectClock.time)
+        try? renderer.setTouches(touchPoints(at: effectClock.time))
         let outcome: BackgroundRenderOutcome?
         if let frameProducer {
             do {

@@ -19,6 +19,7 @@ import Foundation
 /// | Interaction rate | 120 Hz | 60 Hz | 60 Hz |
 /// | Interior speed | as set | at most 1 | 0 (a still frame) |
 /// | Fill (GW-28) | as set | at most 2 sheets and 8 bubbles | flat: no sheets, no bubbles, no waves |
+/// | Touch response (GW-12) | as set | finger light and gleam, no ring | off |
 ///
 /// Features that GlassWeave does not have yet are tier *hooks* and are not
 /// implemented: the planned frost levels, dispersion taps, lighting model and
@@ -91,12 +92,23 @@ public enum GlassQuality: Int, CaseIterable, Comparable, Hashable, Sendable {
         return reduced
     }
 
+    /// The touch response to draw at this tier for `touch` (GW-12): unchanged at
+    /// ``full``, without the ring at ``balanced``, none at ``minimal``.
+    public func reduced(_ touch: GlassTouch) -> GlassTouch {
+        switch self {
+        case .full: touch
+        case .balanced: touch.withoutRipple
+        case .minimal: .none
+        }
+    }
+
     /// `panel` as drawn at this tier (before the accessibility policy).
     public func reduced(_ panel: GlassPanel) -> GlassPanel {
         guard self != .full else { return panel }
         var reduced = panel
         reduced.parameters.interior = self.reduced(panel.parameters.interior)
         reduced.parameters.fill = self.reduced(panel.parameters.fill)
+        reduced.parameters.touch = self.reduced(panel.parameters.touch)
         return reduced
     }
 }

@@ -50,6 +50,7 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | Shape (`GlassShape`) | Reduce Transparency and Increase Contrast keep the shape: the opaque surface and the contrasting rim follow its outline. Reduce Motion stills a blob's wobble: its speed becomes 0, so it is drawn at wobble time 0 whatever the effect time (a still, slightly irregular outline). |
 /// | Frost (`GlassFrost`) | Reduce Transparency presents the frost as none, its scrim included: the body is the opaque surface, no pyramid is built and the existing ones are released. Increase Contrast keeps the blur (it is static, and its colors stay the source's own) and raises a legibility scrim to at least ``increasedContrastScrimRatio`` (7:1) where one is set; the lens dispersion it would otherwise show at the bevel is removed by the lens row. Reduce Motion changes nothing: frost is static. |
 /// | Fill (`GlassFill`) | Reduce Transparency presents a flat, opaque fill: one color, with no emission ramp, contour sheets, wall line, bubbles, or waves (``GlassFill/opaque``). Increase Contrast keeps the fill as it is; put no text over a fill, because the sheets and the bubbles sit behind it (the fill has no legibility bound). Reduce Motion stills it: the bubbles stop (speed 0), the waves stop, and a gel's wobble stops, so it is drawn at effect time 0 whatever the effect time. A level fill's slosh is the app's own spring (``GlassFillSlosh``): an app that honors Reduce Motion does not nudge it. |
+/// | Touch (`GlassTouch`) | Reduce Transparency removes it (the opaque surface answers a touch only through the native control above it). Increase Contrast removes the ring and the rim gleam, which are decoration that would move or sparkle behind text, and keeps the finger light as the state of the touch. Reduce Motion removes the ring and the fades: the finger light and the gleam show while the finger is down and are gone when it lifts, so nothing animates and ``GlassSurfaceView`` runs no effect clock for it. |
 /// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
     /// The widest rim a glow keeps under Reduce Transparency, in points.
@@ -98,6 +99,32 @@ public enum GlassAccessibilityPolicy {
         presented.parameters.shape = presentedShape(for: panel.parameters.shape, settings: settings)
         presented.parameters.frost = presentedFrost(for: panel.parameters.frost, settings: settings, traits: traits)
         presented.parameters.fill = presentedFill(for: panel.parameters.fill, settings: settings)
+        presented.parameters.touch = presentedTouch(for: panel.parameters.touch, settings: settings, traits: traits)
+        return presented
+    }
+
+    /// The touch response to draw for `touch` under `settings` and `traits`
+    /// (GW-12): none under Reduce Transparency; without the ring and the gleam
+    /// under Increase Contrast; without the ring and the fades (a static finger
+    /// light and gleam, shown while the finger is down) under Reduce Motion. A
+    /// response that draws nothing is kept as it is.
+    static func presentedTouch(
+        for touch: GlassTouch,
+        settings: GlassAccessibilitySettings,
+        traits: UITraitCollection
+    ) -> GlassTouch {
+        guard touch.isActive else { return touch }
+        if settings.reduceTransparency {
+            return .none
+        }
+        var presented = touch
+        if traits.accessibilityContrast == .high {
+            presented.ripple = 0
+            presented.gleam = 0
+        }
+        if settings.reduceMotion {
+            presented = presented.withoutMotion
+        }
         return presented
     }
 

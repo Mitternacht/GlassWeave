@@ -57,6 +57,11 @@ struct GlassPanelGeometry: Equatable {
     /// GlassFillModel.swift). The uploaded record is ``fillRecord``; the
     /// shader reads it as its own buffer, so ``GWGlassUniforms`` is unchanged.
     var fill: GlassFillModel? = nil
+    /// The touch response at the effect time the geometry was built for, or
+    /// `nil` when no touch that began inside the outline shows anything (GW-12;
+    /// the model is in GlassTouchModel.swift). The uploaded record is
+    /// ``touchRecord``; a panel with frost or a fill draws no response.
+    var touch: GlassTouchModel? = nil
     /// Pixels per point, as the geometry was built for.
     var displayScale: Double
 
@@ -104,7 +109,13 @@ struct GlassPanelGeometry: Equatable {
     ///     level and the interior's phase.
     ///   - lightOffset: The azimuth and elevation, in degrees, added to the
     ///     lights (``GlassRenderer/setLightOffset(azimuth:elevation:)``).
-    init(panel: GlassPanel, displayScale: Double, effectTime: Double = 0, lightOffset: GlassLightOffset = GlassLightOffset()) {
+    ///   - touches: The touches to answer (GW-12), in the surface's points and
+    ///     on the effect clock; the panel answers those that began inside its
+    ///     outline, if its ``GlassParameters/touch`` is active.
+    init(
+        panel: GlassPanel, displayScale: Double, effectTime: Double = 0, lightOffset: GlassLightOffset = GlassLightOffset(),
+        touches: [GlassTouchPoint] = []
+    ) {
         precondition(displayScale.isFinite && displayScale > 0, "The display scale must be finite and positive")
         let frame = panel.frame
         let parameters = panel.parameters
@@ -155,6 +166,13 @@ struct GlassPanelGeometry: Equatable {
         // where the shell is. A panel with a fill draws no frost.
         fill = GlassFillModel(parameters.fill, frame: frame, displayScale: displayScale, effectTime: effectTime, geometry: self)
         if fill != nil { frost = nil }
+        // The touch response is resolved after the shape: it asks where the
+        // outline is. Frost and fill variants carry no touch code.
+        if frost == nil, fill == nil {
+            touch = GlassTouchModel(
+                style: parameters.touch, touches: touches, effectTime: effectTime, displayScale: displayScale, geometry: self
+            )
+        }
     }
 
     /// Converts a normalized glow, or returns `nil` when it draws nothing.
@@ -366,6 +384,11 @@ struct GlassPanelGeometry: Equatable {
     /// The fill record for the draw (GW-28), or `nil` when the panel has none.
     var fillRecord: GWFillUniforms? {
         fill?.record
+    }
+
+    /// The touch record for the draw (GW-12), or `nil` when the panel has none.
+    var touchRecord: GWTouchUniforms? {
+        touch?.record
     }
 
     /// The record the panel pass reads.

@@ -49,6 +49,7 @@ public struct GlassTint: Hashable, Sendable {
 /// | ``frost`` | see ``GlassFrost`` | see ``GlassFrost`` | A blur that varies over the shape, grain, and a text-legibility scrim; ``GlassFrost/none`` (the default) is the clear glass. Experimental. |
 /// | ``grounding`` | see ``GlassGrounding`` | see ``GlassGrounding`` | Depth cues for light pages: a drop shadow, a contact shadow, an inner shadow, and a colored caustic, all away from the key light; ``GlassGrounding/none`` (the default) draws nothing. Experimental. |
 /// | ``fill`` | see ``GlassFill`` | see ``GlassFill`` | A luminous liquid or gel held inside the glass, seen through the shell; ``GlassFill/none`` (the default) draws nothing. A panel with a fill draws no frost. Experimental. |
+/// | ``touch`` | see ``GlassTouch`` | see ``GlassTouch`` | How the glass answers a finger: a soft finger light, a restrained travelling ring that bends the backdrop a little, and a rim gleam; ``GlassTouch/none`` (the default) draws nothing. Needs the touches forwarded (``GlassRenderer/setTouches(_:)``). Experimental. |
 ///
 /// **Normalization rule.** When a renderer accepts parameters, a non-finite
 /// value (NaN or infinity) anywhere is rejected with
@@ -57,7 +58,7 @@ public struct GlassTint: Hashable, Sendable {
 /// value: negative lengths become zero, lengths longer than half the
 /// panel's shorter side become that half, and coefficients and tint
 /// components are clamped to 0...1. ``GlassGlow``, ``GlassInterior``,
-/// ``GlassLight``, ``GlassLens``, ``GlassLighting``, ``GlassGrounding``, ``GlassShape``, and ``GlassFill`` document the same rule for their fields. The renderer reports the values it actually uses through
+/// ``GlassLight``, ``GlassLens``, ``GlassLighting``, ``GlassGrounding``, ``GlassShape``, ``GlassFill``, and ``GlassTouch`` document the same rule for their fields. The renderer reports the values it actually uses through
 /// ``GlassRenderer/panel``.
 public struct GlassParameters: Hashable, Sendable {
     /// Outline corner radius, in points.
@@ -104,6 +105,11 @@ public struct GlassParameters: Hashable, Sendable {
     /// shell, drawn by its own pipeline variant; ``GlassFill/none`` for none.
     /// A panel with a fill draws no frost. Experimental.
     public var fill: GlassFill
+    /// How the glass answers a finger (GW-12): a finger light, a travelling
+    /// ring and a rim gleam, drawn by a pipeline variant of their own only
+    /// while a touch that began inside the panel has something to show;
+    /// ``GlassTouch/none`` for none. Experimental.
+    public var touch: GlassTouch
 
     /// The most edge illumination can brighten the outline: this fraction of
     /// the way from the glass color to white, at ``edgeHighlight`` 1.
@@ -123,7 +129,8 @@ public struct GlassParameters: Hashable, Sendable {
         grounding: GlassGrounding = .none,
         shape: GlassShape = .roundedRectangle,
         frost: GlassFrost = .none,
-        fill: GlassFill = .none
+        fill: GlassFill = .none,
+        touch: GlassTouch = .none
     ) {
         self.cornerRadius = cornerRadius
         self.bezelWidth = bezelWidth
@@ -139,6 +146,7 @@ public struct GlassParameters: Hashable, Sendable {
         self.shape = shape
         self.frost = frost
         self.fill = fill
+        self.touch = touch
     }
 
     /// Whether a host must keep drawing new frames for this panel's glow
@@ -241,8 +249,14 @@ public enum GlassParameterError: Error, Hashable, Sendable, CustomStringConverti
     /// (GW-28).
     case nonFiniteFill(GlassFill.Field)
 
+    /// A value of a ``GlassTouch`` or a ``GlassTouchPoint`` is NaN or infinite
+    /// (GW-12).
+    case nonFiniteTouch(GlassTouch.Field)
+
     public var description: String {
         switch self {
+        case let .nonFiniteTouch(field):
+            "The glass touch parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case let .nonFiniteFill(field):
             "The glass fill parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case let .nonFiniteFrost(field):
@@ -287,6 +301,7 @@ extension GlassParameters {
         let grounding = try grounding.normalized(maximumLength: maximumLength)
         let shape = try shape.normalized()
         let fill = try fill.normalized(maximumLength: maximumLength)
+        let touch = try touch.normalized()
         let frost: GlassFrost
         do {
             frost = try self.frost.normalized()
@@ -314,7 +329,8 @@ extension GlassParameters {
             grounding: grounding,
             shape: shape,
             frost: frost,
-            fill: fill
+            fill: fill,
+            touch: touch
         )
     }
 }

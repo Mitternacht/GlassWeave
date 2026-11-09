@@ -23,6 +23,9 @@ static_assert(sizeof(GWFrostPanelUniforms) == 128, "GWFrostPanelUniforms size");
 static_assert(alignof(GWFrostPanelUniforms) == 8, "GWFrostPanelUniforms alignment");
 static_assert(sizeof(GWFillUniforms) == 784, "GWFillUniforms size");
 static_assert(alignof(GWFillUniforms) == 16, "GWFillUniforms alignment");
+static_assert(sizeof(GWTouchPoint) == 48, "GWTouchPoint size");
+static_assert(sizeof(GWTouchUniforms) == 128, "GWTouchUniforms size");
+static_assert(alignof(GWTouchUniforms) == 8, "GWTouchUniforms alignment");
 
 // The optical model below is mirrored on the CPU by `GlassPanelGeometry`
 // (GlassPanelGeometry.swift); tests compare the two pixel by pixel. Change
@@ -2174,6 +2177,98 @@ static float3 gw_fill_apply(
     return result;
 }
 
+// MARK: Touch response (GW-12)
+//
+// A soft finger light that follows the touch, one ring that travels out from
+// where the touch began and bends the backdrop a little, and a gleam on the
+// outline nearest the finger. The code exists only in the touch pipeline
+// variants: the host builds this function with `gw_touch_constant` (function
+// constant 6) true for a panel with something to show for a touch that began
+// inside it, and with it unset otherwise, in which case everything below is
+// compiled out and the shader is the one before GW-12, byte for byte (a frozen
+// copy in the tests proves it). A `GWTouchUniforms` record is bound only for
+// those variants. The time is resolved on the CPU (`GlassTouch.state`): the
+// record holds positions, radii and levels.
+constant bool gw_touch_constant [[function_constant(6)]];
+constant bool gw_touched = is_function_constant_defined(gw_touch_constant) ? gw_touch_constant : false;
+
+/// How the rings move the background sample at `pixel`: a bump travelling
+/// outward is a thin lens, so the sample moves along the ring's slope,
+/// `-dir * amplitude * g(x)` with `g(x) = x exp(1/2 - x^2/2)` (peak 1 at
+/// |x| = 1, so the shift never exceeds `ringAmplitude`) and `x` the distance
+/// from the ring's crest in ring widths. The crest magnifies. Near the outline
+/// the ring is softer, where the rim's own refraction already works.
+static float2 gw_touch_offset(float2 pixel, float depth, constant GWGlassUniforms &uniforms, constant GWTouchUniforms &touch) {
+    float2 offset = float2(0.0);
+    const float edge = mix(0.35, 1.0, smoothstep(0.0, max(uniforms.bezelWidth, 1.0), depth));
+    for (uint i = 0u; i < min(touch.count, 2u); ++i) {
+        constant GWTouchPoint &point = touch.points[i];
+        if (point.ringAmplitude > 0.0) {
+            const float2 d = pixel - point.origin;
+            const float r = length(d);
+            const float x = (r - point.ringRadius) / point.ringWidth;
+            if (abs(x) < 4.0) {
+                const float g = x * exp(0.5 - 0.5 * x * x);
+                offset -= (d / max(r, 1e-3)) * (point.ringAmplitude * g * edge);
+            }
+        }
+    }
+    return offset;
+}
+
+/// The finger light at `pixel`: a soft pool (one Gaussian) around each
+/// finger, combined like light, scaled by the style's strength.
+static float gw_touch_light(float2 pixel, constant GWTouchUniforms &touch) {
+    float level = 0.0;
+    for (uint i = 0u; i < min(touch.count, 2u); ++i) {
+        constant GWTouchPoint &point = touch.points[i];
+        const float x = length(pixel - point.position) / max(point.lightRadius, 1.0);
+        if (point.light > 0.0 && x < 2.5) {
+            const float profile = exp(-2.0 * x * x);
+            level = 1.0 - (1.0 - level) * (1.0 - point.light * profile);
+        }
+    }
+    return level * touch.fingerLight;
+}
+
+/// The ring's catch light: the ring's slope tilts the surface (`g(x)` along
+/// the radial direction), and the side that faces the one light is brighter.
+static float gw_touch_ring_light(float2 pixel, float2 lightDirection, constant GWTouchUniforms &touch) {
+    float shine = 0.0;
+    for (uint i = 0u; i < min(touch.count, 2u); ++i) {
+        constant GWTouchPoint &point = touch.points[i];
+        if (point.ringStrength > 0.0) {
+            const float2 d = pixel - point.origin;
+            const float r = length(d);
+            const float x = (r - point.ringRadius) / point.ringWidth;
+            if (abs(x) < 4.0) {
+                const float g = x * exp(0.5 - 0.5 * x * x);
+                shine += saturate(dot(g * d / max(r, 1e-3), lightDirection)) * point.ringStrength;
+            }
+        }
+    }
+    return min(shine, 1.0) * touch.ringShine;
+}
+
+/// The rim gleam at `pixel`, `depth` pixels inside the outline: a thin line on
+/// the outline that is brightest at the point nearest the finger and fades along
+/// the rim (`s - rimDistance` is how much farther than the nearest rim point
+/// the pixel is from the finger), stronger the closer the finger is to the rim,
+/// and brighter on the side that faces the light (`facing`).
+static float gw_touch_gleam(float2 pixel, float depth, float facing, constant GWTouchUniforms &touch) {
+    float level = 0.0;
+    for (uint i = 0u; i < min(touch.count, 2u); ++i) {
+        constant GWTouchPoint &point = touch.points[i];
+        if (point.gleam > 0.0) {
+            const float along = max(length(pixel - point.position) - point.rimDistance, 0.0) / max(touch.gleamWidth, 1.0);
+            const float near = 1.0 - smoothstep(0.0, max(touch.gleamReach, 1.0), point.rimDistance);
+            level = max(level, point.gleam * near * exp(-along * along));
+        }
+    }
+    const float band = 1.0 - smoothstep(0.0, max(touch.gleamBand, 1.0), depth);
+    return level * band * (0.35 + 0.65 * facing) * touch.gleamIntensity;
+}
+
 /// One rounded glass panel over the background.
 ///
 /// Inside the rim (`bezelWidth` pixels inward from the outline) the sample
@@ -2259,7 +2354,8 @@ fragment float4 gw_glass_fragment(
     texture2d<float, access::sample> source [[texture(GWGlassBindingIndexSourceTexture)]],
     constant GWFrostPanelUniforms &frost [[buffer(GWGlassBindingIndexFrost), function_constant(gw_frosted)]],
     texture2d<float, access::sample> pyramid [[texture(GWGlassBindingIndexFrostPyramid), function_constant(gw_frosted)]],
-    constant GWFillUniforms &fill [[buffer(GWGlassBindingIndexFill), function_constant(gw_filled)]])
+    constant GWFillUniforms &fill [[buffer(GWGlassBindingIndexFill), function_constant(gw_filled)]],
+    constant GWTouchUniforms &touch [[buffer(GWGlassBindingIndexTouch), function_constant(gw_touched)]])
 {
     const float2 pixel = in.position.xy;
     const float2 q = pixel - uniforms.panelCenter;
@@ -2310,6 +2406,11 @@ fragment float4 gw_glass_fragment(
     const float rim = uniforms.bezelWidth > 0.0 ? saturate(1.0 - depth / uniforms.bezelWidth) : 0.0;
     const float2 normal = gw_panel_normal(q, uniforms.normalRadius, uniforms);
     const float displacement = uniforms.maxDisplacement * rim * rim;
+    // A travelling ring bends the backdrop the glass shows (GW-12).
+    float2 samplePixel = pixel;
+    if (gw_touched) {
+        samplePixel += gw_touch_offset(pixel, depth, uniforms, touch);
+    }
     float3 glass;
     // Frost (GW-24b): how much of the pyramid this pixel shows.
     GWFrostPixel frostPixel;
@@ -2332,9 +2433,9 @@ fragment float4 gw_glass_fragment(
         glass = gw_frost_grade(glass, pixel, frostPixel, frost);
     } else if (gw_optics && gw_lens_active(uniforms)) {
         // The thick lens (GW-22) replaces the rim refraction.
-        glass = gw_lens_glass(pixel, q, normal, displacement, uniforms, source);
+        glass = gw_lens_glass(samplePixel, q, normal, displacement, uniforms, source);
     } else {
-        glass = gw_glass_sample(pixel - normal * displacement, uniforms, source);
+        glass = gw_glass_sample(samplePixel - normal * displacement, uniforms, source);
     }
 
     glass = mix(glass, uniforms.tint.xyz, uniforms.tint.w);
@@ -2417,6 +2518,24 @@ fragment float4 gw_glass_fragment(
         }
     }
 
+    // The touch response (GW-12): the finger's light, the ring's catch light and
+    // the rim gleam, over everything below, under the light model.
+    float touchAlpha = 0.0;
+    if (gw_touched) {
+        const float finger = gw_touch_light(pixel, touch);
+        const float gleam = gw_touch_gleam(pixel, depth, facing, touch);
+        const float shine = gw_touch_ring_light(pixel, edgeLight, touch);
+        touchAlpha = 1.0 - (1.0 - finger) * (1.0 - gleam) * (1.0 - shine);
+        if (touchAlpha > 0.0) {
+            // The finger lifts the glass's own color toward white (a glass that
+            // passes more light, not a gray fog laid over it); the gleam and the
+            // ring's catch light are white.
+            glass = glass + (1.0 - glass) * (finger * (0.3 + 0.9 * glass));
+            const float white = 1.0 - (1.0 - gleam) * (1.0 - shine);
+            glass = glass + (1.0 - glass) * white;
+        }
+    }
+
     // The light model (GW-23), over everything below, inside its band.
     float lightingAlpha = 0.0;
     if (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone) {
@@ -2449,7 +2568,7 @@ fragment float4 gw_glass_fragment(
             frostTouched = frostTouched || changed;
             causticScrimmed = true;
         }
-        if (glowAlpha > 0.0 || interiorAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || any(caustic > 0.0) || frostTouched || fillAlpha > 0.0) {
+        if (glowAlpha > 0.0 || interiorAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || any(caustic > 0.0) || frostTouched || fillAlpha > 0.0 || touchAlpha > 0.0) {
             const uint2 cell = uint2(pixel) & 3u;
             encodedGlass += ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0;
         }
@@ -2457,7 +2576,7 @@ fragment float4 gw_glass_fragment(
         return float4(encodedGlass * coverage, coverage);
     }
     float3 encoded = gw_glass_encode_srgb(mix(outside, glass, coverage));
-    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || frostTouched || fillAlpha > 0.0) {
+    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || frostTouched || fillAlpha > 0.0 || touchAlpha > 0.0) {
         const uint2 cell = uint2(pixel) & 3u;
         encoded = saturate(encoded + ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0);
     }
