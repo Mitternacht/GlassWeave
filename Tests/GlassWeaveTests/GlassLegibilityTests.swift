@@ -63,6 +63,72 @@ struct GlassLegibilityTests {
         #expect(Self.lightTint.minimumStrength(forContrast: 1, againstTextLuminance: 0.5) == 0)
     }
 
+    /// Tints outside the documented ranges, each paired with what the
+    /// renderer's normalization makes of it.
+    static let outOfRangeTints: [GlassTint] = [
+        GlassTint(red: 0.97, green: 0.98, blue: 1.0, strength: 1.01),
+        GlassTint(red: 0.08, green: 0.09, blue: 0.12, strength: 7),
+        GlassTint(red: 0.97, green: 0.98, blue: 1.0, strength: -0.2),
+        GlassTint(red: 1.2, green: -0.3, blue: 0.5, strength: 0.6),
+        GlassTint(red: -1, green: 2, blue: 1.5, strength: 1.5),
+    ]
+
+    @Test(arguments: GlassLegibilityTests.outOfRangeTints)
+    func `Out-of-range tints are judged as the renderer clamps them`(tint: GlassTint) throws {
+        // The tint the renderer would draw, from its own normalization rule.
+        let drawn = try GlassParameters(tint: tint).normalized(maximumLength: 10).tint
+        #expect(drawn != tint)
+        #expect(tint.relativeLuminance == drawn.relativeLuminance)
+        #expect(tint.interiorLuminanceRange == drawn.interiorLuminanceRange)
+        #expect(tint.interiorLuminanceRange.lowerBound >= 0 && tint.interiorLuminanceRange.upperBound <= 1)
+        for text in [0.0, 0.25, 1.0] {
+            #expect(tint.worstCaseContrast(againstTextLuminance: text) == drawn.worstCaseContrast(againstTextLuminance: text))
+            #expect(tint.minimumStrength(forContrast: 4.5, againstTextLuminance: text) == drawn.minimumStrength(forContrast: 4.5, againstTextLuminance: text))
+        }
+    }
+
+    @Test func `A strength just above one answers like full strength`() {
+        // An app adding a margin to a computed minimum must get an answer,
+        // not a crash: this tint used to trap forming the luminance range.
+        let overshoot = GlassTint(red: 0.97, green: 0.98, blue: 1, strength: 1.01)
+        var full = overshoot
+        full.strength = 1
+        #expect(overshoot.interiorLuminanceRange == full.relativeLuminance...full.relativeLuminance)
+        #expect(overshoot.worstCaseContrast(againstTextLuminance: 0) == full.worstCaseContrast(againstTextLuminance: 0))
+        #expect(overshoot.worstCaseContrast(againstTextLuminance: 0) > 19)
+    }
+
+    @Test func `Luminances outside zero to one are clamped`() {
+        #expect(GlassTint.contrastRatio(-0.05, 1) == 21)
+        #expect(GlassTint.contrastRatio(0, 3) == 21)
+        #expect(GlassTint.relativeLuminance(red: 1.4, green: 1.4, blue: 1.4) == 1)
+        #expect(GlassTint.relativeLuminance(red: -0.2, green: -0.2, blue: -0.2) == 0)
+        #expect(Self.lightTint.worstCaseContrast(againstTextLuminance: -1) == Self.lightTint.worstCaseContrast(againstTextLuminance: 0))
+        #expect(Self.darkTint.minimumStrength(forContrast: 4.5, againstTextLuminance: 1.5) == Self.darkTint.minimumStrength(forContrast: 4.5, againstTextLuminance: 1))
+    }
+
+    #if os(macOS)
+    // Exit tests run in a child process; Swift Testing offers them on macOS.
+    @Test func `A non-finite input stops with a message that names it`() async throws {
+        let strength = try await #require(processExitsWith: .failure, observing: [\.standardErrorContent]) {
+            _ = GlassTint(red: 1, green: 1, blue: 1, strength: .nan).worstCaseContrast(againstTextLuminance: 0)
+        }
+        #expect(String(decoding: strength.standardErrorContent, as: UTF8.self).contains("the strength is nan"))
+        let red = try await #require(processExitsWith: .failure, observing: [\.standardErrorContent]) {
+            _ = GlassTint(red: .infinity, green: 1, blue: 1, strength: 0.5).interiorLuminanceRange
+        }
+        #expect(String(decoding: red.standardErrorContent, as: UTF8.self).contains("the red is inf"))
+        let text = try await #require(processExitsWith: .failure, observing: [\.standardErrorContent]) {
+            _ = GlassTint(red: 0.97, green: 0.98, blue: 1, strength: 0.45).worstCaseContrast(againstTextLuminance: .nan)
+        }
+        #expect(String(decoding: text.standardErrorContent, as: UTF8.self).contains("the text luminance is nan"))
+        let ratio = try await #require(processExitsWith: .failure, observing: [\.standardErrorContent]) {
+            _ = GlassTint(red: 0.97, green: 0.98, blue: 1, strength: 0.45).minimumStrength(forContrast: .nan, againstTextLuminance: 0)
+        }
+        #expect(String(decoding: ratio.standardErrorContent, as: UTF8.self).contains("the contrast ratio is nan"))
+    }
+    #endif
+
     /// Renders the panel over a black and a white half and measures the
     /// interior on both: the extremes of any background.
     @Test(.timeLimit(.minutes(1)), arguments: [(GlassLegibilityTests.lightTint, 0.0, 4.5), (GlassLegibilityTests.darkTint, 1.0, 4.5), (GlassLegibilityTests.darkTint, 1.0, 7.0)])
