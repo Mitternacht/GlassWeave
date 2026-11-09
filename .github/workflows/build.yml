@@ -99,5 +99,11 @@ jobs:
       - name: Build package tests (iOS Simulator)
         run: xcodebuild build-for-testing -workspace Examples/GlassWeave.xcworkspace -scheme GlassWeave -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
 
+      # GW-10: a separate package resolves this commit by git URL and runs
+      # its public-API tests (custom mode on macOS; the UIKit tests need a
+      # simulator and run locally).
+      - name: Clean-consumer check (macOS)
+        run: scripts/consumer_check.sh HEAD 'platform=macOS'
+
       - name: Build laboratory app and UI tests (iOS Simulator Debug)
         run: xcodebuild build-for-testing -workspace Examples/GlassWeave.xcworkspace -scheme GlassWeaveLab -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO

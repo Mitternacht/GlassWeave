@@ -60,12 +60,29 @@ Benchmark (GW-09): launch with `-lab.benchmark baseline`, `native`, `custom`,
 the moving background alone, mode 2 with the native reference, mode 3 with
 the custom panel too; mode 4 freezes the source; mode 5 runs 100 seeded
 hide/show and resize cycles (`-lab.benchmark.seed <number>`) between two
-settled allocation measurements. The frame-ID strip starts off, the surface's
+settled allocation measurements. In a benchmark the stage fills the whole
+screen and the controls sit above it on an opaque backdrop (scenario
+version 2). The frame-ID strip starts off, the surface's
 renderer records `RenderMetrics`, Reset restarts the measurement window,
 Settle and measure stops the clock and reports allocated bytes, and the
 diagnostics (refreshed once a second) add the workload, the metrics
 percentiles and counts, and Metal allocations. The iOS Simulator reports no
 allocation sizes.
+
+## Clean consumer
+
+`ConsumerCheck` is a separate package that depends on GlassWeave as an
+outside project would: by a git URL at one revision, through the public
+`GlassWeave` and `GlassWeaveUIKit` products only (no `@testable import`).
+Its tests draw a fully tinted panel over the consumer's own produced
+background offscreen and read it back (custom mode), put a working button in
+`NativeGlassView` (native mode), and give `GlassSurfaceView` a producer and a
+panel. Its manifest takes the URL and revision from `GLASSWEAVE_URL` and
+`GLASSWEAVE_REVISION`; `scripts/consumer_check.sh [revision] [destination]...`
+copies it to a temporary directory, points it at this clone, checks that
+SwiftPM pins exactly that revision and nothing else, and runs the tests with
+Metal API Validation (default destination `platform=macOS`; the UIKit tests
+need an iOS Simulator destination). It is not part of the workspace.
 
 Nothing here is evidence of physical device performance. The remaining work
 and its acceptance gates are listed in [the task checklist](../tasks/todo.md).
