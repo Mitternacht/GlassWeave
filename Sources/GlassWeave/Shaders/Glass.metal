@@ -1881,8 +1881,8 @@ static float3 gw_fill_apply(
             const float shade = 1.0 + 0.14 * facing * saturate(2.0 * (1.0 - s));
             // The deepest part of a thick body glows hotter: a luminous core.
             const float core = smoothstep(0.8 * domeRadius, 1.9 * domeRadius, bodyDepth);
-            const float lum = (0.16 + 0.84 * (1.0 - exp(-3.5 * h))) * (0.93 + 0.14 * fine) * surfaceFade * shade * (1.0 + 0.32 * core);
-            const float t = saturate(h * h * (0.50 + 0.50 * heatNoise) + 0.36 * core);
+            const float lum = (0.16 + 0.84 * (1.0 - exp(-3.5 * h))) * (0.96 + 0.08 * fine) * surfaceFade * shade * (1.0 + 0.32 * core);
+            const float t = saturate(h * h * (0.76 + 0.24 * heatNoise) + 0.36 * core);
             liquid = glass * transmittance;
             const float3 emitted = gw_fill_ramp(t, fill) * (lum * fill.absorption.w);
             liquid = liquid + (1.0 - liquid) * saturate(emitted);
