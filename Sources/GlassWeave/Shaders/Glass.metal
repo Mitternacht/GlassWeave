@@ -1,5 +1,6 @@
 #include <metal_stdlib>
 #include "../../GlassWeaveShaderTypes/include/GlassWeaveShaderTypes.h"
+#include "GlassFrost.h"
 
 using namespace metal;
 
@@ -18,6 +19,8 @@ static_assert(alignof(GWLensInlay) == 16, "GWLensInlay alignment");
 static_assert(sizeof(GWLightEmitter) == 112, "GWLightEmitter size");
 static_assert(alignof(GWLightEmitter) == 16, "GWLightEmitter alignment");
 static_assert(alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
+static_assert(sizeof(GWFrostPanelUniforms) == 128, "GWFrostPanelUniforms size");
+static_assert(alignof(GWFrostPanelUniforms) == 8, "GWFrostPanelUniforms alignment");
 
 // The optical model below is mirrored on the CPU by `GlassPanelGeometry`
 // (GlassPanelGeometry.swift); tests compare the two pixel by pixel. Change
@@ -1032,6 +1035,196 @@ static float3 gw_lens_glass(
     return color;
 }
 
+// MARK: Frost (GW-24b)
+//
+// A blur that varies over the glass, read from the pyramid of filtered
+// backgrounds that GW-24a builds (Frost.metal; GlassFrost.h reads it). The code
+// exists only in the frost pipeline variants: the host builds this function
+// with `gw_frost_constant` (function constant 4) true for a panel whose
+// `GlassFrost` is active, and with it unset otherwise, in which case
+// everything below is compiled out and the shader is the one before GW-24b,
+// byte for byte (a frozen copy in the tests proves it). The pyramid and a
+// `GWFrostPanelUniforms` record are bound only for those variants.
+//
+// The blur radius sigma (destination pixels) comes from the profile at the
+// pixel (and optionally the lens thickness there), and sets a level of
+// detail, LOD = log2(sigma / sigma0) between the pyramid's levels
+// (`gw_frost_lod`). One position is read by two levels of the pyramid, each
+// reconstructed with a four-fetch cubic B-spline, at the lens-refracted
+// position; with dispersion, each wavelength is one trilinear tap at the
+// shared LOD. Below sigma0 (the finest level's own blur, 1.32 px) the weight
+// ramps from the single-sample path to the pyramid, so a clear region is the
+// unfrosted shader's exact sample and there is no seam.
+
+constant bool gw_frost_constant [[function_constant(4)]];
+constant bool gw_frosted = is_function_constant_defined(gw_frost_constant) ? gw_frost_constant : false;
+
+/// How much of the pyramid a pixel shows: its blur radius, the level of
+/// detail, and the weight (0...1) of the pyramid against the unfrosted sample.
+struct GWFrostPixel {
+    float sigma;
+    float lod;
+    float weight;
+};
+
+/// The frost at a pixel `depth` inside the outline and `relativeY` below the
+/// shape's center; `heightFraction` is the glass height over the thickest
+/// height (1 without a lens), for the thickness term.
+static GWFrostPixel gw_frost_pixel(float depth, float relativeY, float heightFraction, constant GWFrostPanelUniforms &frost) {
+    GWFrostPixel pixel;
+    pixel.sigma = 0.0;
+    pixel.lod = 0.0;
+    pixel.weight = 0.0;
+    if ((frost.flags & GWFrostFlagSampling) == 0u) {
+        return pixel;
+    }
+    float sigma = gw_frost_sigma_at(frost.profile, depth, relativeY);
+    sigma *= (1.0 - frost.thickness) + frost.thickness * heightFraction;
+    pixel.sigma = sigma;
+    pixel.weight = saturate(sigma / gw_frost_level_sigma(0u));
+    pixel.lod = gw_frost_lod(sigma, frost.profile.layout.levelCount);
+    return pixel;
+}
+
+/// The glass color at `position` (target pixels), in linear light: the
+/// source's single sample, or the pyramid's two levels blended by the cubic
+/// B-spline, or a mix of the two while the blur is below sigma0.
+static float3 gw_frost_color(
+    float2 position, GWFrostPixel frostPixel, constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source,
+    constant GWFrostPanelUniforms &frost, texture2d<float, access::sample> pyramid)
+{
+    if (frostPixel.weight <= 0.0) {
+        return gw_glass_sample(position, uniforms, source);
+    }
+    const float3 blurred = gw_frost_sample(pyramid, frost.profile.layout, position, frostPixel.lod);
+    if (frostPixel.weight >= 1.0) {
+        return blurred;
+    }
+    return mix(gw_glass_sample(position, uniforms, source), blurred, frostPixel.weight);
+}
+
+/// One dispersion tap: a single trilinear fetch at the shared level of detail.
+static float3 gw_frost_color_tap(
+    float2 position, GWFrostPixel frostPixel, constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source,
+    constant GWFrostPanelUniforms &frost, texture2d<float, access::sample> pyramid)
+{
+    if (frostPixel.weight <= 0.0) {
+        return gw_glass_sample(position, uniforms, source);
+    }
+    const float3 blurred = gw_frost_tap(pyramid, frost.profile.layout, position, frostPixel.lod);
+    if (frostPixel.weight >= 1.0) {
+        return blurred;
+    }
+    return mix(gw_glass_sample(position, uniforms, source), blurred, frostPixel.weight);
+}
+
+/// `gw_lens_glass` with the pyramid in place of the single sample: the same
+/// rays and wavelengths, the same fallbacks, a frosted color for each. Without
+/// dispersion the one position reads the B-spline; with it, every wavelength
+/// is one tap at the shared level of detail (three taps, or six blended).
+static float3 gw_lens_glass_frosted(
+    float2 pixel, float2 q, float2 rimNormal, float rimDisplacement, GWFrostPixel frostPixel,
+    constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source,
+    constant GWFrostPanelUniforms &frost, texture2d<float, access::sample> pyramid)
+{
+    const GWShapeSample shape = gw_shape_sample(q, uniforms);
+    GWLensField field = gw_lens_host(shape, uniforms);
+    gw_lens_add_inlays(q, uniforms, field);
+    const float2 rim = uniforms.lensProfile == GWLensProfileRim ? -rimNormal * rimDisplacement : float2(0.0);
+    const float ior = uniforms.lensIOR;
+    const float2 center = rim + gw_lens_offset(field, ior, uniforms);
+    if (uniforms.lensTapCount == 0u || uniforms.lensDispersion <= 0.0) {
+        return gw_frost_color(pixel + center, frostPixel, uniforms, source, frost, pyramid);
+    }
+    const float spread = uniforms.lensDispersion * gw_lens_ior_spread;
+    const float rimSpread = uniforms.lensDispersion * gw_lens_rim_spread;
+    const float2 red = rim * (1.0 - rimSpread) + gw_lens_offset(field, max(ior - spread, 1.0), uniforms);
+    const float2 blue = rim * (1.0 + rimSpread) + gw_lens_offset(field, ior + spread, uniforms);
+    const float2 separation = blue - red;
+    if (dot(separation, separation) < gw_lens_min_separation * gw_lens_min_separation) {
+        return gw_frost_color(pixel + center, frostPixel, uniforms, source, frost, pyramid);
+    }
+    if (uniforms.lensTapCount == 3u) {
+        return float3(gw_frost_color_tap(pixel + red, frostPixel, uniforms, source, frost, pyramid).r,
+                      gw_frost_color_tap(pixel + center, frostPixel, uniforms, source, frost, pyramid).g,
+                      gw_frost_color_tap(pixel + blue, frostPixel, uniforms, source, frost, pyramid).b);
+    }
+    float3 color = float3(0.0);
+    for (uint tap = 0u; tap < 6u; ++tap) {
+        const float x = gw_lens_tap_x[tap];
+        const float2 offset = rim * (1.0 + x * rimSpread) + gw_lens_offset(field, max(ior + x * spread, 1.0), uniforms);
+        color += gw_lens_tap_weight[tap] * gw_frost_color_tap(pixel + offset, frostPixel, uniforms, source, frost, pyramid);
+    }
+    return color;
+}
+
+/// The relative luminance weights of linear sRGB (WCAG 2).
+constant float3 gw_frost_luma = float3(0.2126, 0.7152, 0.0722);
+
+/// The frosted color's grade and grain, weighted by how much of the pyramid
+/// the pixel shows: saturation and brightness in linear light (saturation
+/// about the pixel's own luminance), and a static, multiplicative grain
+/// (about +-4 % of the color at full strength, one pixel in size).
+static float3 gw_frost_grade(float3 color, float2 pixel, GWFrostPixel frostPixel, constant GWFrostPanelUniforms &frost) {
+    const float luminance = dot(color, gw_frost_luma);
+    const float3 graded = mix(float3(luminance), color, frost.saturation) * frost.brightness;
+    color = mix(color, graded, frostPixel.weight);
+    if (frost.profile.grain > 0.0) {
+        uint2 cell = uint2(pixel);
+        uint h = cell.x * 1664525u + cell.y * 1013904223u + 374761393u;
+        h ^= h >> 15; h *= 2246822519u; h ^= h >> 13; h *= 3266489917u; h ^= h >> 16;
+        const float noise = float(h & 0xFFFFu) * (1.0 / 65535.0) - 0.5;
+        color *= 1.0 + noise * 0.08 * frost.profile.grain * frostPixel.weight;
+    }
+    return max(color, 0.0);
+}
+
+/// A luminance `x` limited to `limit` without a corner: unchanged up to 60 %
+/// of the limit, then an exponential approach that stays below it. Never above
+/// `limit`, so the contrast it guarantees is met with room to spare.
+static float gw_frost_soft_limit(float x, float limit) {
+    const float knee = 0.6 * limit;
+    if (x <= knee) { return x; }
+    const float headroom = max(limit - knee, 1e-4);
+    return knee + headroom * (1.0 - exp(-(x - knee) / headroom));
+}
+
+/// The legibility scrim (GW-24b): inside the text rectangle (and fading out
+/// over `scrimFeather` pixels beyond it) the glass is darkened, for light
+/// text, or lightened, for dark text, by the least that gives the text
+/// `scrimRatio` (WCAG 2 contrast) against it. A pixel that already has the
+/// ratio is untouched; the others are scaled in luminance (darkening scales
+/// the color, lightening mixes toward white), so hue is kept. It runs on the
+/// final linear color, after every light term. `touched` is set where the color
+/// changed.
+static float3 gw_frost_scrim(float3 color, float2 pixel, constant GWFrostPanelUniforms &frost, thread bool &touched) {
+    const float2 d = abs(pixel - frost.scrimCenter) - frost.scrimHalfSize;
+    const float outside = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+    const float weight = 1.0 - smoothstep(0.0, max(frost.scrimFeather, 1e-3), outside);
+    if (weight <= 0.0) { return color; }
+    const float luminance = dot(color, gw_frost_luma);
+    const float text = frost.scrimTextLuminance;
+    float3 result = color;
+    // Text lighter than the midpoint of the contrast scale gets a darker
+    // glass; darker text, a lighter one.
+    if (text > 0.179) {
+        const float limit = max((text + 0.05) / frost.scrimRatio - 0.05, 0.0);
+        const float limited = gw_frost_soft_limit(luminance, limit);
+        if (limited < luminance) {
+            result = color * (limited / max(luminance, 1e-6));
+        }
+    } else {
+        const float floorLuminance = min(frost.scrimRatio * (text + 0.05) - 0.05, 1.0);
+        const float limited = 1.0 - gw_frost_soft_limit(1.0 - luminance, max(1.0 - floorLuminance, 0.0));
+        if (limited > luminance) {
+            result = color + (1.0 - color) * ((limited - luminance) / max(1.0 - luminance, 1e-6));
+        }
+    }
+    result = mix(color, result, weight);
+    touched = any(result != color);
+    return result;
+}
+
 // MARK: Light model (GW-23)
 //
 // One movable light (docs/glass-optics.md): a Fresnel outline, a specular
@@ -1601,7 +1794,9 @@ fragment float4 gw_grounding_caustic_fragment(
 fragment float4 gw_glass_fragment(
     GWGlassVertexOut in [[stage_in]],
     constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]],
-    texture2d<float, access::sample> source [[texture(GWGlassBindingIndexSourceTexture)]])
+    texture2d<float, access::sample> source [[texture(GWGlassBindingIndexSourceTexture)]],
+    constant GWFrostPanelUniforms &frost [[buffer(GWGlassBindingIndexFrost), function_constant(gw_frosted)]],
+    texture2d<float, access::sample> pyramid [[texture(GWGlassBindingIndexFrostPyramid), function_constant(gw_frosted)]])
 {
     const float2 pixel = in.position.xy;
     const float2 q = pixel - uniforms.panelCenter;
@@ -1653,7 +1848,26 @@ fragment float4 gw_glass_fragment(
     const float2 normal = gw_panel_normal(q, uniforms.normalRadius, uniforms);
     const float displacement = uniforms.maxDisplacement * rim * rim;
     float3 glass;
-    if (gw_optics && gw_lens_active(uniforms)) {
+    // Frost (GW-24b): how much of the pyramid this pixel shows.
+    GWFrostPixel frostPixel;
+    frostPixel.sigma = 0.0;
+    frostPixel.lod = 0.0;
+    frostPixel.weight = 0.0;
+    if (gw_frosted) {
+        float heightFraction = 1.0;
+        if (frost.thickness > 0.0 && gw_optics && uniforms.lensProfile != GWLensProfileRim && uniforms.lensThickness > 0.0) {
+            heightFraction = saturate(gw_lens_host(gw_shape_sample(q, uniforms), uniforms).height / uniforms.lensThickness);
+        }
+        frostPixel = gw_frost_pixel(depth, q.y, heightFraction, frost);
+    }
+    if (gw_frosted && frostPixel.weight > 0.0) {
+        if (gw_optics && gw_lens_active(uniforms)) {
+            glass = gw_lens_glass_frosted(pixel, q, normal, displacement, frostPixel, uniforms, source, frost, pyramid);
+        } else {
+            glass = gw_frost_color(pixel - normal * displacement, frostPixel, uniforms, source, frost, pyramid);
+        }
+        glass = gw_frost_grade(glass, pixel, frostPixel, frost);
+    } else if (gw_optics && gw_lens_active(uniforms)) {
         // The thick lens (GW-22) replaces the rim refraction.
         glass = gw_lens_glass(pixel, q, normal, displacement, uniforms, source);
     } else {
@@ -1740,19 +1954,41 @@ fragment float4 gw_glass_fragment(
         glass = gw_light_model(glass, q, depth, uniforms, lightingAlpha);
     }
 
+    // The legibility scrim (GW-24b) is the last stage before the dither and the
+    // encode, after every light term. Under a grounded caustic, which is added
+    // to the encoded color, it runs after the caustic.
+    bool frostTouched = gw_frosted && frostPixel.weight > 0.0;
+    bool scrimmed = false;
+    if (gw_frosted && (frost.flags & GWFrostFlagScrim) != 0u) {
+        const bool caustic = grounded && haloAlpha <= 0.0 && sparkAlpha <= 0.0 && (uniforms.grounding.flags & GWGroundingFlagCaustic) != 0u;
+        if (!caustic) {
+            bool changed = false;
+            glass = gw_frost_scrim(glass, pixel, frost, changed);
+            frostTouched = frostTouched || changed;
+            scrimmed = true;
+        }
+    }
     if (grounded && haloAlpha <= 0.0 && sparkAlpha <= 0.0) {
         // Composited over the target by premultiplied alpha (see above).
         float3 encodedGlass = gw_glass_encode_srgb(glass);
         const float3 caustic = (uniforms.grounding.flags & GWGroundingFlagCaustic) != 0u ? gw_grounding_caustic(pixel, uniforms) : float3(0.0);
-        if (glowAlpha > 0.0 || interiorAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || any(caustic > 0.0)) {
+        bool causticScrimmed = false;
+        if (gw_frosted && !scrimmed && (frost.flags & GWFrostFlagScrim) != 0u) {
+            bool changed = false;
+            const float3 lit = gw_glass_decode_srgb(saturate(encodedGlass + caustic));
+            encodedGlass = gw_glass_encode_srgb(gw_frost_scrim(lit, pixel, frost, changed));
+            frostTouched = frostTouched || changed;
+            causticScrimmed = true;
+        }
+        if (glowAlpha > 0.0 || interiorAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || any(caustic > 0.0) || frostTouched) {
             const uint2 cell = uint2(pixel) & 3u;
             encodedGlass += ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0;
         }
-        encodedGlass = saturate(encodedGlass + caustic);
+        encodedGlass = causticScrimmed ? saturate(encodedGlass) : saturate(encodedGlass + caustic);
         return float4(encodedGlass * coverage, coverage);
     }
     float3 encoded = gw_glass_encode_srgb(mix(outside, glass, coverage));
-    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0) {
+    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || frostTouched) {
         const uint2 cell = uint2(pixel) & 3u;
         encoded = saturate(encoded + ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0);
     }

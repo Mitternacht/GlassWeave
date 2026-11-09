@@ -89,12 +89,47 @@ static inline float3 gw_frost_sample(
     return metal::mix(a, gw_frost_bspline(pyramid, upper, uv), clamped - float(lower));
 }
 
+/// One trilinear fetch of the pyramid at a destination-pixel position and a
+/// level of detail: a single tap, for the dispersion paths that read the
+/// pyramid several times per pixel at the one shared level of detail (GW-24b).
+/// The levels are exact halves of each other, so the hardware's mip filter
+/// blends the two around `lod`.
+static inline float3 gw_frost_tap(
+    metal::texture2d<float> pyramid, GWFrostPyramidLayout layout, float2 position, float lod)
+{
+    constexpr metal::sampler trilinear(
+        metal::filter::linear, metal::mip_filter::linear, metal::address::clamp_to_edge);
+    const float2 uv = (position - layout.regionOrigin) / layout.coverSize;
+    const float top = float(layout.levelCount - 1);
+    return pyramid.sample(trilinear, uv, metal::level(metal::clamp(lod, 0.0, top))).rgb;
+}
+
 /// How far a pixel is inside a rounded rectangle, in pixels (negative
 /// outside). `p` is relative to the rectangle's center.
 static inline float gw_frost_depth(float2 p, float2 halfSize, float cornerRadius) {
     const float radius = metal::min(cornerRadius, metal::min(halfSize.x, halfSize.y));
     const float2 q = metal::abs(p) - halfSize + radius;
     return radius - (metal::length(metal::max(q, 0.0)) + metal::min(metal::max(q.x, q.y), 0.0));
+}
+
+/// The same blur radius from a pixel's depth inside the shape (pixels, zero
+/// outside) and its height `relativeY` below the shape's center, for shapes
+/// that are not rounded rectangles (GW-24b): the glass shader passes its own
+/// shape field's depth. The vertical ramp uses the profile's `panelHalfSize.y`.
+static inline float gw_frost_sigma_at(GWFrostProfileUniforms frost, float depth, float relativeY) {
+    const float ramp = metal::smoothstep(0.0, metal::max(frost.transition, 1.0), depth);
+    switch (frost.profile) {
+    case GWFrostProfileClearCenter:
+        return frost.sigma * (1.0 - ramp);
+    case GWFrostProfileClearRim:
+        return frost.sigma * ramp;
+    case GWFrostProfileVerticalRamp: {
+        const float t = metal::saturate(relativeY / metal::max(2.0 * frost.panelHalfSize.y, 1.0) + 0.5);
+        return frost.sigma * metal::mix(frost.rampTop, frost.rampBottom, t);
+    }
+    default:
+        return frost.sigma;
+    }
 }
 
 /// The blur standard deviation, in destination pixels, at `pixel` for a
@@ -104,20 +139,7 @@ static inline float gw_frost_depth(float2 p, float2 halfSize, float cornerRadius
 /// (fractions of `sigma`) from the shape's top edge to its bottom edge.
 static inline float gw_frost_sigma(GWFrostProfileUniforms frost, float2 pixel) {
     const float2 relative = pixel - frost.panelCenter;
-    const float depth = gw_frost_depth(relative, frost.panelHalfSize, frost.cornerRadius);
-    const float ramp = metal::smoothstep(0.0, metal::max(frost.transition, 1.0), depth);
-    switch (frost.profile) {
-    case GWFrostProfileClearCenter:
-        return frost.sigma * (1.0 - ramp);
-    case GWFrostProfileClearRim:
-        return frost.sigma * ramp;
-    case GWFrostProfileVerticalRamp: {
-        const float t = metal::saturate(relative.y / metal::max(2.0 * frost.panelHalfSize.y, 1.0) + 0.5);
-        return frost.sigma * metal::mix(frost.rampTop, frost.rampBottom, t);
-    }
-    default:
-        return frost.sigma;
-    }
+    return gw_frost_sigma_at(frost, gw_frost_depth(relative, frost.panelHalfSize, frost.cornerRadius), relative.y);
 }
 
 #endif // GLASSWEAVE_GLASS_FROST_H

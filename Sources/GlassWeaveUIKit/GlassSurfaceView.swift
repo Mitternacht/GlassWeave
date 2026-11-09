@@ -392,9 +392,10 @@ public final class GlassSurfaceView: UIView {
         let presented = requestedPanels.map {
             GlassAccessibilityPolicy.presentedPanel(for: tier.reduced($0), settings: accessibilitySettings, traits: traitCollection)
         }
-        // Reduce Transparency presents any frost as none: its body is opaque,
-        // so no pyramid is built. Increase Contrast and Reduce Motion leave
-        // the frost as it is (it is static and has no text scrim yet).
+        // Reduce Transparency presents any frost as none (the policy row also
+        // clears each panel's own frost): its body is opaque, so no pyramid is
+        // built. Increase Contrast raises a legibility scrim to 7:1; Reduce
+        // Motion leaves the frost as it is (it is static).
         renderer.isFrostSuppressed = accessibilitySettings.reduceTransparency
         if presented != renderer.panels {
             // A presented panel derives from a normalized one and keeps every

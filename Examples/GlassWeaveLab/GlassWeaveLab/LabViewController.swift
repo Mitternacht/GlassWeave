@@ -113,6 +113,8 @@ final class LabViewController: UIViewController {
     /// Open GW-27's presentation screen and GW-24a's frost pyramid screen.
     private let presentationButton = UIButton(configuration: .bordered())
     private let frostButton = UIButton(configuration: .bordered())
+    /// Opens the frosted glass page (GW-24b).
+    private let frostGlassButton = UIButton(configuration: .bordered())
     /// Whether `-lab.bench` or `-lab.lightFields` has opened its screen yet.
     private var openedBenchAtLaunch = false
     /// Whether `-lab.versus YES` has opened the Apple vs GlassWeave screen yet.
@@ -202,6 +204,9 @@ final class LabViewController: UIViewController {
             } else if defaults.bool(forKey: "lab.compare") {
                 openedBenchAtLaunch = true
                 openBench(.compare, page: BenchPage.named(defaults.string(forKey: "lab.compareBackdrop")) ?? .charcoal, animated: false)
+            } else if defaults.bool(forKey: "lab.frostBench") {
+                openedBenchAtLaunch = true
+                openBench(.frost, page: .prism, animated: false)
             } else if defaults.bool(forKey: "lab.shapes") {
                 openedBenchAtLaunch = true
                 openShapes(page: BenchPage.named(defaults.string(forKey: "lab.shapesBackdrop")) ?? .charcoal, animated: false)
@@ -583,6 +588,10 @@ final class LabViewController: UIViewController {
             LabPageHostViewController.presentFrost(from: self, animated: true)
         }, for: .primaryActionTriggered)
         frostButton.isHidden = benchmark != nil
+        frostGlassButton.configuration?.title = String(localized: "Frosted glass")
+        frostGlassButton.accessibilityIdentifier = "lab.openFrostGlass"
+        frostGlassButton.addAction(UIAction { [weak self] _ in self?.openBench(.frost, page: .prism, animated: true) }, for: .primaryActionTriggered)
+        frostGlassButton.isHidden = benchmark != nil
 
         let tintRow = Self.row([tintControl, UIView(), Self.caption(String(localized: "Enabled")), enabledSwitch])
         let motionRow = Self.row([pauseButton, UIView(), Self.caption(String(localized: "Frame ID")), overlaySwitch])
@@ -605,7 +614,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, compareButton, presentationButton, frostButton, benchButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, compareButton, presentationButton, frostButton, frostGlassButton, benchButton, measureButton])
        stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false

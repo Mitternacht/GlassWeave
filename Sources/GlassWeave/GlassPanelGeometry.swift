@@ -48,6 +48,12 @@ struct GlassPanelGeometry: Equatable {
     /// rectangle (GW-26; the model is in GlassShape.swift). With a shape,
     /// ``center`` and ``halfSize`` are the outline's bounding box.
     var shape: GlassShapeModel?
+    /// The frost (a blur, a scrim, or both), or `nil` for the clear glass
+    /// (GW-24b; the model is in GlassFrost.swift). The pyramid it samples is
+    /// the draw's, so the uploaded record is built by ``frostRecord(layout:)``.
+    var frost: GlassFrost?
+    /// Pixels per point, as the geometry was built for.
+    var displayScale: Double
 
     /// A visible ``GlassGlow`` converted to target pixels and linear light.
     struct Glow: Equatable {
@@ -97,6 +103,8 @@ struct GlassPanelGeometry: Equatable {
         precondition(displayScale.isFinite && displayScale > 0, "The display scale must be finite and positive")
         let frame = panel.frame
         let parameters = panel.parameters
+        self.displayScale = displayScale
+        frost = parameters.frost.isActive ? parameters.frost : nil
         let shapeModel = GlassShapeModel(parameters.shape, frame: frame, displayScale: displayScale, effectTime: effectTime)
         shape = shapeModel
         center = shapeModel?.center ?? SIMD2(Double(frame.midX), Double(frame.midY)) * displayScale
@@ -336,6 +344,15 @@ struct GlassPanelGeometry: Equatable {
     }
 
     // MARK: Upload
+
+    /// The frost record for the draw (GW-24b): `layout` is the pyramid built
+    /// for the draw, or `nil` when none was (the scrim alone draws).
+    func frostRecord(layout: GWFrostPyramidLayout?) -> GWFrostPanelUniforms? {
+        frost?.panelUniforms(
+            panelCenter: SIMD2<Float>(center), panelHalfSize: SIMD2<Float>(halfSize), cornerRadius: Float(cornerRadius),
+            displayScale: displayScale, layout: layout
+        )
+    }
 
     /// The record the panel pass reads.
     func uniforms(background: GWBackgroundUniforms, targetWidth: Int, targetHeight: Int) -> GWGlassUniforms {

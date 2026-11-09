@@ -29,6 +29,10 @@ enum BenchPage: Int, CaseIterable {
     /// Warm paper with a graph grid and printed dots (GW-25), for the
     /// depth cues of light mode: shadows and colored caustics.
     case paperDesk
+    /// A dusk page with two soft rainbow arcs, colored glows and small
+    /// lights (GW-24b), for frost: the blur, the dispersion at the bevel and
+    /// the color behind the glass all show.
+    case prism
 
     /// The name used on the command line and in accessibility identifiers.
     var identifier: String {
@@ -41,6 +45,7 @@ enum BenchPage: Int, CaseIterable {
         case .orbs: "orbs"
         case .chrome: "chrome"
         case .paperDesk: "paperdesk"
+        case .prism: "prism"
         }
     }
 
@@ -54,6 +59,7 @@ enum BenchPage: Int, CaseIterable {
         case .orbs: String(localized: "Orbs")
         case .chrome: String(localized: "Chrome")
         case .paperDesk: String(localized: "Paper desk")
+        case .prism: String(localized: "Prism")
         }
     }
 
@@ -202,6 +208,8 @@ final class MaterialBenchViewController: UIViewController {
         /// Native `UIGlassEffect` beside GlassWeave's glass on one backdrop
         /// (REFINE): `-lab.compare YES`, `-lab.compareBackdrop <page>`.
         case compare
+        /// Frosted glass over the prism page (GW-24b): `-lab.frostBench YES`.
+        case frost
     }
 
     /// One demo panel: where it goes (in a layout the controller computes),
@@ -210,6 +218,8 @@ final class MaterialBenchViewController: UIViewController {
         var caption: String
         var parameters: GlassParameters
         var frame = CGRect.zero
+        /// The frost page's label panel: its text rectangle gets the scrim.
+        var hasLabel = false
     }
 
     private struct Rendering {
@@ -232,6 +242,19 @@ final class MaterialBenchViewController: UIViewController {
     private var columnLabels: [UILabel] = []
     private let timeLabel = UILabel()
     private let diagnosticsLabel = UILabel()
+    /// The frost page's label on the card, the switch that turns its scrim
+    /// on and off, and the counters it reports (GW-24b).
+    private let headlineLabel = UILabel()
+    private let sublineLabel = UILabel()
+    private let scrimSwitch = UISwitch()
+    private let scrimCaption = UILabel()
+    private var scrimRect = CGRect.zero
+    private let frostMetrics = RenderMetrics()
+    /// `-lab.frostNative YES` swaps the frost page's three panels for Apple's
+    /// `UIGlassEffect` in the same frames, so a capture of each shows ours and
+    /// the native glass over the same backdrop.
+    private let frostNative = UserDefaults.standard.bool(forKey: "lab.frostNative")
+    private var frostNativeViews: [UIVisualEffectView] = []
     /// The moment `-lab.lightTime` freezes the light at, or `nil` to flow.
     private let stillTime: Double?
 
@@ -239,12 +262,13 @@ final class MaterialBenchViewController: UIViewController {
         self.mode = mode
         self.page = page
         switch mode {
-        case .bench: pages = BenchPage.allCases.filter { $0 != .chrome && $0 != .paperDesk }
+        case .bench: pages = BenchPage.allCases.filter { $0 != .chrome && $0 != .paperDesk && $0 != .prism }
         case .lightFields: pages = [.charcoal, .ribbons, .paper]
         case .lens: pages = [.orbs, .dotGrid, .checkerboard, .ribbons]
         case .chrome: pages = [.chrome]
         case .paper: pages = [.paperDesk]
         case .compare: pages = [.charcoal, .orbs, .paper]
+        case .frost: pages = [.prism]
         }
         pageControl = UISegmentedControl(items: pages.map(\.title))
         stillTime = UserDefaults.standard.object(forKey: "lab.lightTime") == nil
@@ -256,6 +280,7 @@ final class MaterialBenchViewController: UIViewController {
         case .chrome: demos = Self.chromeDemos
         case .paper: demos = Self.paperDemos
         case .compare: demos = Self.compareDemos(dark: page.isDark)
+        case .frost: demos = Self.frostDemos
         }
         super.init(nibName: nil, bundle: nil)
     }
@@ -329,6 +354,41 @@ final class MaterialBenchViewController: UIViewController {
             lens.lens.allowsFold = true
             return lens
         }()),
+    ]
+
+    // MARK: Frost demos (GW-24b)
+
+    /// The frost page's panels: a frosted capsule over a rainbow arc (a calm
+    /// blur with grain, dispersion at the bevel only and a thin Fresnel rim), the
+    /// thick lens pill with a lightly frosted body that follows the glass
+    /// thickness (clear at the edge) and pooled light, and a card with a large
+    /// white label whose contrast the scrim guarantees.
+    private static let frostDemos: [Demo] = [
+        Demo(caption: String(localized: "Frosted capsule: calm blur and grain, a clear bevel with dispersion, thin rim"), parameters: {
+            var capsule = RefinedLook.panel(corner: 999, bezel: 30, dark: true)
+            capsule.refraction = 1
+            capsule.tint = GlassTint(red: 0.85, green: 0.88, blue: 1, strength: 0.05)
+            capsule.lens = GlassLens(profile: .rim, dispersion: 1, dispersionTaps: .sixTap)
+            capsule.lighting.fresnel = 0.9
+            capsule.frost = GlassFrost(profile: .clearRim, sigma: 7, transition: 24, grain: 0.35, saturation: 1.15, brightness: 1.03)
+            return capsule
+        }()),
+        Demo(caption: String(localized: "Lens pill: a lightly frosted body that follows the glass thickness, a clear edge, pooled light"), parameters: {
+            var pill = RefinedLook.lens(bezel: 40, thickness: 34, dark: true)
+            pill.light = pooledLight()
+            pill.lens.dispersionTaps = .sixTap
+            pill.lens.dispersion = 0.45
+            pill.lens.inlays = [GlassLens.Inlay(radius: 40, height: 14, profile: .dome, rimLine: 0.25)]
+            pill.tint = GlassTint(red: 0.8, green: 0.85, blue: 1, strength: 0.03)
+            pill.frost = GlassFrost(profile: .uniform, sigma: 4.5, grain: 0.2, thickness: 1, saturation: 1.2, brightness: 1.05)
+            return pill
+        }()),
+        Demo(caption: String(localized: "White label on frosted glass: the scrim keeps 4.5 to 1"), parameters: {
+            var card = RefinedLook.panel(corner: 34, bezel: 20, dark: true)
+            card.tint = GlassTint(red: 0.8, green: 0.85, blue: 1, strength: 0.04)
+            card.frost = GlassFrost(profile: .uniform, sigma: 7, grain: 0.25, saturation: 1.1)
+            return card
+        }(), hasLabel: true),
     ]
 
     // MARK: Compare demos (REFINE)
@@ -503,6 +563,10 @@ final class MaterialBenchViewController: UIViewController {
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
         applyPage()
+        if mode == .frost {
+            // The counters settle after the first frames.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.updateDiagnostics() }
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -532,6 +596,7 @@ final class MaterialBenchViewController: UIViewController {
             ])
             let background = try BenchBackground(device: device)
             rendering = .success(Rendering(surface: surface, background: background))
+            if mode == .frost { surface.renderer.metrics = frostMetrics }
             surface.visibilityHandler = { [weak self] visible in
                 if !visible { self?.currentBackground?.trim() }
             }
@@ -586,6 +651,7 @@ final class MaterialBenchViewController: UIViewController {
         case .chrome: titleLabel.text = String(localized: "Chrome and light")
         case .paper: titleLabel.text = String(localized: "Paper desk")
         case .compare: titleLabel.text = String(localized: "Apple vs GlassWeave")
+        case .frost: titleLabel.text = String(localized: "Frosted glass")
         }
         titleLabel.accessibilityTraits.insert(.header)
         closeButton.configuration?.title = String(localized: "Close")
@@ -645,6 +711,41 @@ final class MaterialBenchViewController: UIViewController {
         diagnosticsLabel.accessibilityIdentifier = "bench.diagnostics"
         view.addSubview(pageControl)
         view.addSubview(closeButton)
+        if mode == .frost {
+            pageControl.isHidden = true
+            headlineLabel.text = String(localized: "Frosted glass")
+            headlineLabel.font = .systemFont(ofSize: 36, weight: .semibold)
+            headlineLabel.textColor = .white
+            headlineLabel.adjustsFontSizeToFitWidth = true
+            sublineLabel.text = String(localized: "Legible over any color behind it")
+            sublineLabel.font = .systemFont(ofSize: 17, weight: .regular)
+            sublineLabel.textColor = .white
+            sublineLabel.adjustsFontSizeToFitWidth = true
+            scrimCaption.text = String(localized: "Scrim 4.5 to 1")
+            scrimCaption.font = .preferredFont(forTextStyle: .footnote)
+            scrimCaption.textColor = .white
+            scrimCaption.isAccessibilityElement = false
+            // `-lab.frostNoText YES` hides the label, so a capture shows (and a
+            // pixel measurement reads) the glass the scrim shapes.
+            headlineLabel.isHidden = UserDefaults.standard.bool(forKey: "lab.frostNoText")
+            sublineLabel.isHidden = headlineLabel.isHidden
+            scrimSwitch.isOn = !UserDefaults.standard.bool(forKey: "lab.scrimOff")
+            scrimSwitch.accessibilityIdentifier = "bench.scrim"
+            scrimSwitch.accessibilityLabel = String(localized: "Legibility scrim")
+            scrimSwitch.addAction(UIAction { [weak self] _ in self?.applyPanels() }, for: .valueChanged)
+            if frostNative {
+                for index in demos.indices {
+                    let native = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+                    native.cornerConfiguration = index == 2 ? .corners(radius: .fixed(34)) : .capsule()
+                    native.overrideUserInterfaceStyle = .dark
+                    native.isUserInteractionEnabled = false
+                    native.isAccessibilityElement = false
+                    view.addSubview(native)
+                    frostNativeViews.append(native)
+                }
+            }
+            for item in [headlineLabel, sublineLabel, scrimCaption, scrimSwitch] as [UIView] { view.addSubview(item) }
+        }
         if mode == .chrome || mode == .paper {
             pageControl.isHidden = true
             diagnosticsLabel.isHidden = true
@@ -750,6 +851,19 @@ final class MaterialBenchViewController: UIViewController {
             frames.append(CGRect(x: rowLeft + button + 8, y: rowTop, width: row - button - 8, height: button))
             let marble = min(row * 0.55, 210)
             frames.append(CGRect(x: bounds.midX - marble / 2, y: rowTop + button + 80, width: marble, height: marble))
+        } else if mode == .frost {
+            // Each panel sits on its part of the prism page, by the page's
+            // own formulas: the capsule over the upper arc's crown, the pill
+            // between the arcs, the card over the lower arc's crown.
+            let bounds = view.bounds
+            let unit = min(bounds.width, 560)
+            let capsuleWidth = min(width, 340)
+            let capsuleCenter = bounds.height * 0.40 - unit * 0.42
+            frames.append(CGRect(x: bounds.midX - capsuleWidth / 2, y: capsuleCenter - 46, width: capsuleWidth, height: 92))
+            let pillHeight: CGFloat = 104
+            frames.append(CGRect(x: left, y: bounds.height * 0.50 - pillHeight / 2, width: width, height: pillHeight))
+            let cardCenter = bounds.height * 0.92 - unit * 0.38
+            frames.append(CGRect(x: left, y: cardCenter - 72, width: width, height: 144))
         } else if mode == .compare {
             // Two columns of the same four frames: Apple's glass on the left,
             // GlassWeave's on the right. One caption under each pair.
@@ -808,11 +922,21 @@ final class MaterialBenchViewController: UIViewController {
             )
         }
         diagnosticsLabel.frame = CGRect(x: left, y: safe.maxY - 36, width: width, height: 32)
+        if mode == .frost, let card = demos.last?.frame {
+            headlineLabel.frame = CGRect(x: card.minX + 28, y: card.minY + 26, width: card.width - 56, height: 46)
+            sublineLabel.frame = CGRect(x: card.minX + 28, y: card.minY + 76, width: card.width - 56, height: 26)
+            scrimRect = headlineLabel.frame.union(sublineLabel.frame).insetBy(dx: -6, dy: -4)
+            let switchSize = scrimSwitch.intrinsicContentSize
+            scrimSwitch.frame = CGRect(x: left + width - switchSize.width, y: safe.maxY - 78, width: switchSize.width, height: switchSize.height)
+            scrimCaption.sizeToFit()
+            scrimCaption.frame.origin = CGPoint(x: scrimSwitch.frame.minX - scrimCaption.frame.width - 10, y: scrimSwitch.frame.midY - scrimCaption.frame.height / 2)
+        }
         // Hug the text, so the scrim is no wider than it.
         for label in [titleLabel, diagnosticsLabel] + captionLabels {
             let fitted = label.sizeThatFits(CGSize(width: label.frame.width, height: .greatestFiniteMagnitude))
             label.frame.size = CGSize(width: min(fitted.width + 14, label.frame.width), height: min(fitted.height + 6, label.frame.height))
         }
+        for (native, demo) in zip(frostNativeViews, demos) { native.frame = demo.frame }
         applyPanels()
         applyLightOffset()
         updateDiagnostics()
@@ -830,6 +954,13 @@ final class MaterialBenchViewController: UIViewController {
         let panels = demos.map { demo -> GlassPanel in
             var parameters = demo.parameters
             parameters.light.timeOffset = base
+            // `-lab.frostOff YES` draws the same panels without frost, for
+            // comparison.
+            if mode == .frost, UserDefaults.standard.bool(forKey: "lab.frostOff") { parameters.frost = .none }
+            // The card's scrim guarantees its label 4.5 to 1.
+            if demo.hasLabel, scrimSwitch.isOn {
+                parameters.frost = parameters.frost.legibility(text: .white, contrast: 4.5, rect: scrimRect, feather: 28)
+            }
             // An inlaid dome button sits at the panel's right end.
             for index in parameters.lens.inlays.indices {
                 parameters.lens.inlays[index].x = demo.frame.width / 2 - parameters.lens.inlays[index].radius - 10
@@ -846,7 +977,7 @@ final class MaterialBenchViewController: UIViewController {
             }
             return GlassPanel(frame: demo.frame, parameters: parameters)
         }
-        try? surface?.setPanels(panels)
+        try? surface?.setPanels(frostNative ? [] : panels)
     }
 
     private func updateDiagnostics() {
@@ -856,6 +987,16 @@ final class MaterialBenchViewController: UIViewController {
         }
         let settings = surface.accessibilitySettings
         var text = "\(page.identifier)"
+        if mode == .frost {
+            // Under Reduce Transparency the card is the system's opaque
+            // surface, so its label uses the system label color.
+            let opaque = settings.reduceTransparency
+            headlineLabel.textColor = opaque ? .label : .white
+            sublineLabel.textColor = opaque ? .label : .white
+            let counts = frostMetrics.counts
+            text += " | pyramid builds=\(counts.pyramidBuilds) reuses=\(counts.pyramidReuses) | frost memory \(surface.renderer.frostMemoryBytes) bytes"
+            text += " | scrim \(scrimSwitch.isOn ? "on" : "off")"
+        }
         if mode == .lightFields {
             text += " | light: \(surface.presentedPanels.filter { $0.parameters.light.isVisible }.count)/\(demos.count) drawn"
             text += settings.reduceMotion ? " | still" : (stillTime == nil ? " | flowing" : " | t=\(stillTime ?? 0)s")

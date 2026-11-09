@@ -161,4 +161,53 @@ typedef struct GWFrostAtlasUniforms {
     uint32_t padding0;
 } GWFrostAtlasUniforms;
 
+/// Which parts of `GWFrostPanelUniforms` a draw uses (stored in its `flags`).
+typedef enum GWFrostFlag {
+    /// The pyramid is bound and the glass samples it (the blur is on).
+    GWFrostFlagSampling = 1,
+    /// The legibility scrim is on (GW-24b).
+    GWFrostFlagScrim = 2,
+} GWFrostFlag;
+
+/// Everything one frosted panel's draw reads besides `GWGlassUniforms`
+/// (GW-24b): the blur's profile and the pyramid's layout, the grade, and the
+/// legibility scrim. It travels in its own fragment buffer
+/// (`GWGlassBindingIndexFrost`), next to the pyramid texture
+/// (`GWGlassBindingIndexFrostPyramid`), so `GWGlassUniforms` keeps its layout
+/// and the frost variants are the only pipelines that read either.
+///
+/// - `profile`: the blur radius over the shape and the pyramid layout
+///   (`GWFrostProfileUniforms`); its `grain` is the static grain amplitude.
+/// - `thickness`: how much the blur follows the glass thickness, 0...1: the
+///   radius is scaled by `1 - thickness + thickness * h / lensThickness`.
+/// - `saturation`, `brightness`: the grade of the frosted color, in linear
+///   light, 1 for none.
+/// - `scrimRatio`: the contrast ratio the scrim guarantees, already including
+///   the 1.03 margin; 1 or less when there is no scrim.
+/// - `scrimTextLuminance`: the text's WCAG relative luminance, 0...1.
+/// - `scrimFeather`: pixels beyond the rect over which the scrim fades out.
+/// - `scrimCenter`, `scrimHalfSize`: the text rectangle, in destination
+///   pixels.
+/// - `flags`: `GWFrostFlag` bits.
+///
+/// Layout in bytes: profile 0 (72 bytes), thickness 72, saturation 76,
+/// brightness 80, scrimRatio 84, scrimTextLuminance 88, scrimFeather 92,
+/// scrimCenter 96, scrimHalfSize 104, flags 112, explicit padding 116, 120
+/// and 124 (set to zero). Size 128, alignment 8, stride 128.
+typedef struct GWFrostPanelUniforms {
+    GWFrostProfileUniforms profile;
+    float thickness;
+    float saturation;
+    float brightness;
+    float scrimRatio;
+    float scrimTextLuminance;
+    float scrimFeather;
+    simd_float2 scrimCenter;
+    simd_float2 scrimHalfSize;
+    uint32_t flags;
+    uint32_t padding0;
+    uint32_t padding1;
+    uint32_t padding2;
+} GWFrostPanelUniforms;
+
 #endif // GLASSWEAVE_FROST_TYPES_H

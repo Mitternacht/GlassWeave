@@ -64,6 +64,16 @@ public final class GlassRenderer {
     private let shapedPipeline: (any MTLRenderPipelineState)?
     private let shapedShadowPipeline: (any MTLRenderPipelineState)?
     private let shapedCausticPipeline: (any MTLRenderPipelineState)?
+    /// The panel pipeline with every other variant's code and the frost code
+    /// (GW-24b), for a rounded rectangle and for a freeform shape; `nil` when
+    /// the panel library has no such variant. A panel with an active
+    /// ``GlassParameters/frost`` draws in these, with the pyramid and the
+    /// frost record bound; the frost code is gated at run time by the record.
+    private let frostedPipeline: (any MTLRenderPipelineState)?
+    private let frostedShapedPipeline: (any MTLRenderPipelineState)?
+    /// A 1 x 1 stand-in for the pyramid, bound when a frosted panel draws
+    /// only its scrim (the frost variant declares the texture).
+    private let frostPlaceholder: (any MTLTexture)?
 
     /// The panel pipeline variants (GW-22, GW-23, GW-25, GW-26), all built at
     /// initialization.
@@ -89,6 +99,13 @@ public final class GlassRenderer {
         /// ``GlassParameters/shape`` is not ``GlassShape/roundedRectangle``,
         /// with any of the other effects.
         case shaped
+        /// The shader with every other variant's code and the frost code
+        /// (GW-24b), reading the frost pyramid and the legibility scrim.
+        /// Draws every panel whose ``GlassParameters/frost`` is active
+        /// (blurs or has a scrim), with any of the other effects and any
+        /// shape. Reduce Transparency presents frost as none, so it draws
+        /// none of it.
+        case frosted
     }
 
     /// How many pre-pass quads (a shadow quad or a caustic quad each) the last
@@ -212,6 +229,7 @@ public final class GlassRenderer {
         lightingConstant: String = GlassRenderer.lightingConstantName,
         groundingConstant: String = GlassRenderer.groundingConstantName,
         shapeConstant: String = GlassRenderer.shapeConstantName,
+        frostConstant: String = GlassRenderer.frostConstantName,
         groundingFunctions: (vertex: String, shadow: String, caustic: String) = (
             GlassRenderer.groundingVertexName, GlassRenderer.groundingShadowName, GlassRenderer.groundingCausticName
         )
@@ -226,6 +244,7 @@ public final class GlassRenderer {
         let hasGrounding = hasLighting && constants[groundingConstant] != nil
             && panelLibrary.makeFunction(name: groundingFunctions.vertex) != nil
         let hasShape = hasGrounding && constants[shapeConstant] != nil
+        let hasFrost = hasShape && constants[frostConstant] != nil
         panelPipeline = try Self.makePanelPipeline(
             device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel",
             vertex: panelVertex, fragment: panelFragment, optics: hasOptics ? false : nil, lighting: hasLighting ? false : nil,
@@ -268,6 +287,18 @@ public final class GlassRenderer {
             device: commandQueue.device, library: panelLibrary, label: "GlassWeave grounding caustic (shaped)",
             vertex: groundingFunctions.vertex, fragment: groundingFunctions.caustic, multiply: false, shape: true
         ) : nil
+        frostedPipeline = hasFrost ? try Self.makePanelPipeline(
+            device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (frosted)",
+            vertex: panelVertex, fragment: panelFragment, optics: true, lighting: true, grounding: true, shape: false, frost: true
+        ) : nil
+        frostedShapedPipeline = hasFrost ? try Self.makePanelPipeline(
+            device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (frosted, shaped)",
+            vertex: panelVertex, fragment: panelFragment, optics: true, lighting: true, grounding: true, shape: true, frost: true
+        ) : nil
+        let placeholder = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: 1, height: 1, mipmapped: false)
+        placeholder.usage = .shaderRead
+        placeholder.storageMode = .private
+        frostPlaceholder = hasFrost ? commandQueue.device.makeTexture(descriptor: placeholder) : nil
         let elapsed = clock.now - start
         pipelineCreationSeconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
         background = try BackgroundRenderer(commandQueue: commandQueue, library: library)
@@ -285,6 +316,8 @@ public final class GlassRenderer {
     /// The shader's name for the function constant that adds the freeform
     /// shapes.
     static let shapeConstantName = "gw_shape_constant"
+    /// The shader's name for the function constant that adds the frost code.
+    static let frostConstantName = "gw_frost_constant"
     static let groundingVertexName = "gw_grounding_vertex"
     static let groundingShadowName = "gw_grounding_shadow_fragment"
     static let groundingCausticName = "gw_grounding_caustic_fragment"
@@ -296,7 +329,7 @@ public final class GlassRenderer {
     private static func makePanelPipeline(
         device: any MTLDevice, library: any MTLLibrary, label: String,
         vertex: String, fragment: String, optics: Bool?, lighting: Bool? = nil, grounding: Bool? = nil,
-        shape: Bool? = nil
+        shape: Bool? = nil, frost: Bool? = nil
     ) throws -> any MTLRenderPipelineState {
         guard let optics else {
             return try BackgroundRenderer.makePipeline(
@@ -317,6 +350,9 @@ public final class GlassRenderer {
         }
         if var shapeFlag = shape {
             constants.setConstantValue(&shapeFlag, type: .bool, index: 3)
+        }
+        if var frostFlag = frost {
+            constants.setConstantValue(&frostFlag, type: .bool, index: 4)
         }
         let fragmentFunction: any MTLFunction
         do {
@@ -622,7 +658,11 @@ public final class GlassRenderer {
         let lightOffset = offsetOfLight
         var variants: [PipelineVariant] = []
         var groundingDraws = 0
-        let outcome = background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, preRender: frostPreRender(displayScale: displayScale), overlay: { [panelPipeline, opticsPipeline, lightingPipeline, groundedPipeline, shadowPipeline, causticPipeline, shapedPipeline, shapedShadowPipeline, shapedCausticPipeline] encoder, frame, backgroundUniforms, targetSize in
+        // The frost the panels ask for (GW-24b), or the diagnostic request;
+        // Reduce Transparency presents any frost as none.
+        let frostSlot = FrostDrawSlot()
+        let frostSuppressed = isFrostSuppressed
+        let outcome = background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, preRender: frostPreRender(request: panelFrostRequest() ?? frostRequest, displayScale: displayScale, slot: frostSlot), overlay: { [panelPipeline, opticsPipeline, lightingPipeline, groundedPipeline, shadowPipeline, causticPipeline, shapedPipeline, shapedShadowPipeline, shapedCausticPipeline, frostedPipeline, frostedShapedPipeline, frostPlaceholder] encoder, frame, backgroundUniforms, targetSize in
             // Converted only once a target exists, so the skips that run
             // before (including a zero display scale's zero-size target)
             // never see the scale.
@@ -631,7 +671,11 @@ public final class GlassRenderer {
             let length = MemoryLayout<GWGlassUniforms>.stride
             let uniformsIndex = Int(GWGlassBindingIndexUniforms.rawValue)
             let geometries = panels
-                .map { GlassPanelGeometry(panel: $0, displayScale: displayScale, effectTime: effectTime, lightOffset: lightOffset) }
+                .map { panel -> GlassPanelGeometry in
+                    var geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime, lightOffset: lightOffset)
+                    if frostSuppressed || frostedPipeline == nil { geometry.frost = nil }
+                    return geometry
+                }
                 .filter { !$0.isEmpty }
             // The grounding pre-pass (GW-25): every grounded panel's shadows
             // and caustic, before any body.
@@ -668,7 +712,9 @@ public final class GlassRenderer {
                 // A lens needs the optics variant and the light model the
                 // lighting variant; a library without one draws every panel
                 // with its only pipeline.
-                let variant: PipelineVariant = geometry.shape != nil && shapedPipeline != nil
+                let variant: PipelineVariant = geometry.frost != nil
+                    ? .frosted
+                    : geometry.shape != nil && shapedPipeline != nil
                     ? .shaped
                     : (geometry.grounding != nil && groundedPipeline != nil
                         ? .grounded
@@ -682,8 +728,20 @@ public final class GlassRenderer {
                     case .lighting: encoder.setRenderPipelineState(lightingPipeline ?? panelPipeline)
                     case .grounded: encoder.setRenderPipelineState(groundedPipeline ?? panelPipeline)
                     case .shaped: encoder.setRenderPipelineState(shapedPipeline ?? panelPipeline)
+                    case .frosted: break
                     }
                     current = variant
+                }
+                // A frosted rounded rectangle and a frosted freeform shape are
+                // two pipelines of the one variant.
+                if variant == .frosted, let pipeline = geometry.shape != nil ? frostedShapedPipeline : frostedPipeline {
+                    encoder.setRenderPipelineState(pipeline)
+                }
+                if variant == .frosted, var record = geometry.frostRecord(layout: frostSlot.pyramid?.layout) {
+                    encoder.setFragmentBytes(&record, length: MemoryLayout<GWFrostPanelUniforms>.stride, index: Int(GWGlassBindingIndexFrost.rawValue))
+                    encoder.setFragmentTexture(
+                        frostSlot.pyramid?.texture ?? frostPlaceholder, index: Int(GWGlassBindingIndexFrostPyramid.rawValue)
+                    )
                 }
                 if !textureSet {
                     encoder.setFragmentTexture(frame.texture, index: Int(GWGlassBindingIndexSourceTexture.rawValue))

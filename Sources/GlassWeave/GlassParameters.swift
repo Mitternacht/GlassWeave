@@ -46,6 +46,7 @@ public struct GlassTint: Hashable, Sendable {
 /// | ``light`` | see ``GlassLight`` | see ``GlassLight`` | Up to four emitters of colored light inside the glass (a band along an edge, an arc, an orb, or a four-corner field), over the interior; ``GlassLight/none`` (the default) draws nothing. Experimental. |
 /// | ``lens`` | see ``GlassLens`` | see ``GlassLens`` | The glass as a solid: a height profile, thickness, and index of refraction that magnify and bend what is behind it, optional chromatic dispersion, and inlaid domes; ``GlassLens/none`` (the default) keeps the original rim refraction. Experimental. |
 /// | ``lighting`` | see ``GlassLighting`` | see ``GlassLighting`` | One movable light: a Fresnel outline, a specular streak, studio reflections on the rim, a chrome or prismatic finish, and bloom; ``GlassLighting/legacy`` (the default) keeps the original edge highlight. Experimental. |
+/// | ``frost`` | see ``GlassFrost`` | see ``GlassFrost`` | A blur that varies over the shape, grain, and a text-legibility scrim; ``GlassFrost/none`` (the default) is the clear glass. Experimental. |
 /// | ``grounding`` | see ``GlassGrounding`` | see ``GlassGrounding`` | Depth cues for light pages: a drop shadow, a contact shadow, an inner shadow, and a colored caustic, all away from the key light; ``GlassGrounding/none`` (the default) draws nothing. Experimental. |
 ///
 /// **Normalization rule.** When a renderer accepts parameters, a non-finite
@@ -94,6 +95,10 @@ public struct GlassParameters: Hashable, Sendable {
     /// rounded rectangle, or an ellipse, a squircle, or a smooth blob that
     /// every effect follows. Experimental.
     public var shape: GlassShape
+    /// How blurred the glass is (GW-24b): ``GlassFrost/none`` for the clear
+    /// glass it has always been, or a blur that varies over the shape, with an
+    /// optional text-legibility scrim. Experimental.
+    public var frost: GlassFrost
 
     /// The most edge illumination can brighten the outline: this fraction of
     /// the way from the glass color to white, at ``edgeHighlight`` 1.
@@ -111,7 +116,8 @@ public struct GlassParameters: Hashable, Sendable {
         lens: GlassLens = .none,
         lighting: GlassLighting = .legacy,
         grounding: GlassGrounding = .none,
-        shape: GlassShape = .roundedRectangle
+        shape: GlassShape = .roundedRectangle,
+        frost: GlassFrost = .none
     ) {
         self.cornerRadius = cornerRadius
         self.bezelWidth = bezelWidth
@@ -125,6 +131,7 @@ public struct GlassParameters: Hashable, Sendable {
         self.lighting = lighting
         self.grounding = grounding
         self.shape = shape
+        self.frost = frost
     }
 
     /// Whether a host must keep drawing new frames for this panel's glow
@@ -219,8 +226,13 @@ public enum GlassParameterError: Error, Hashable, Sendable, CustomStringConverti
     /// A value of a ``GlassShape`` is NaN or infinite (GW-26).
     case nonFiniteShape(GlassShape.Field)
 
+    /// A value of a ``GlassFrost`` is NaN or infinite (GW-24b).
+    case nonFiniteFrost(GlassFrostError.Field)
+
     public var description: String {
         switch self {
+        case let .nonFiniteFrost(field):
+            "The glass frost parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case let .nonFiniteShape(field):
             "The glass shape parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case let .nonFiniteGrounding(field):
@@ -260,6 +272,14 @@ extension GlassParameters {
         let lighting = try lighting.normalized(maximumLength: maximumLength)
         let grounding = try grounding.normalized(maximumLength: maximumLength)
         let shape = try shape.normalized()
+        let frost: GlassFrost
+        do {
+            frost = try self.frost.normalized()
+        } catch {
+            switch error {
+            case let .nonFinite(field): throw .nonFiniteFrost(field)
+            }
+        }
         let length = { (value: Double) in min(max(value, 0), maximumLength) }
         let unit = { (value: Double) in min(max(value, 0), 1) }
         return GlassParameters(
@@ -277,7 +297,8 @@ extension GlassParameters {
             lens: lens,
             lighting: lighting,
             grounding: grounding,
-            shape: shape
+            shape: shape,
+            frost: frost
         )
     }
 }

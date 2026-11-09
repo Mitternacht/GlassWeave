@@ -57,3 +57,18 @@ _Static_assert(offsetof(GWFrostAtlasUniforms, levelTiles) == 80, "atlas levelTil
 _Static_assert(offsetof(GWFrostAtlasUniforms, profileTiles) == 84, "atlas profileTiles offset");
 _Static_assert(offsetof(GWFrostAtlasUniforms, columns) == 88, "atlas columns offset");
 _Static_assert(GWFrostProfileUniform == 0 && GWFrostProfileClearCenter == 1 && GWFrostProfileClearRim == 2 && GWFrostProfileVerticalRamp == 3, "GWFrostProfile values");
+
+_Static_assert(sizeof(GWFrostPanelUniforms) == 128, "GWFrostPanelUniforms size");
+_Static_assert(_Alignof(GWFrostPanelUniforms) == 8, "GWFrostPanelUniforms alignment");
+_Static_assert(offsetof(GWFrostPanelUniforms, profile) == 0, "panel profile offset");
+_Static_assert(offsetof(GWFrostPanelUniforms, thickness) == 72, "panel thickness offset");
+_Static_assert(offsetof(GWFrostPanelUniforms, saturation) == 76, "panel saturation offset");
+_Static_assert(offsetof(GWFrostPanelUniforms, brightness) == 80, "panel brightness offset");
+_Static_assert(offsetof(GWFrostPanelUniforms, scrimRatio) == 84, "panel scrimRatio offset");
+_Static_assert(offsetof(GWFrostPanelUniforms, scrimTextLuminance) == 88, "panel scrimTextLuminance offset");
+_Static_assert(offsetof(GWFrostPanelUniforms, scrimFeather) == 92, "panel scrimFeather offset");
+_Static_assert(offsetof(GWFrostPanelUniforms, scrimCenter) == 96, "panel scrimCenter offset");
+_Static_assert(offsetof(GWFrostPanelUniforms, scrimHalfSize) == 104, "panel scrimHalfSize offset");
+_Static_assert(offsetof(GWFrostPanelUniforms, flags) == 112, "panel flags offset");
+_Static_assert(offsetof(GWFrostPanelUniforms, padding2) == 124, "panel padding2 offset");
+_Static_assert(GWFrostFlagSampling == 1 && GWFrostFlagScrim == 2, "GWFrostFlag values");

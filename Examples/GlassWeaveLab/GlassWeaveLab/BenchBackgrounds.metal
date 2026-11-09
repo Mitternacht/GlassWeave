@@ -10,7 +10,7 @@ using namespace metal;
 // `bgra8Unorm_srgb` view of the same texture.
 //
 // Parameters (`constant float4 *`, one block):
-//   x pixels per point, y page (0...7), z width in points, w height in points
+//   x pixels per point, y page (0...8), z width in points, w height in points
 //
 // Pages: 0 dot grid, 1 checkerboard, 2 color ribbons, 3 charcoal stage,
 // 4 light paper, 5 orbs (GW-22: soft shaded spheres on a dusk gradient, an
@@ -19,7 +19,10 @@ using namespace metal;
 // backdrops for the light model, all original: a pale studio plate for a
 // chrome ring, the orbs for a lens pill, and black with glowing orange liquid
 // for a dark dome), 7 paper desk (GW-25: warm paper with a graph grid and
-// printed colored dots, for shadows and caustics).
+// printed colored dots, for shadows and caustics), 8 prism (GW-24b: an original
+// backdrop for frost: a dusk page with two soft rainbow arcs, colored glows and
+// a sparse field of small lights, so a frosted panel's blur, its dispersion at
+// the bevel, and the color behind it all show).
 
 struct BenchVertexOut {
     float4 position [[position]];
@@ -146,6 +149,52 @@ static float3 bench_paper_desk_color(float2 p, float2 size, float pixel) {
     return color;
 }
 
+/// The seven bands of a rainbow arc (page 8), outer to inner, in sRGB-encoded
+/// values: red, orange, yellow, green, cyan, blue, violet.
+constant float3 bench_rainbow_colors[7] = {
+    float3(0.96, 0.27, 0.32), float3(1.00, 0.58, 0.22), float3(1.00, 0.86, 0.34), float3(0.36, 0.86, 0.48),
+    float3(0.26, 0.78, 0.96), float3(0.36, 0.42, 0.96), float3(0.68, 0.36, 0.92),
+};
+
+/// One rainbow arc of page 8: soft bands between the radii `inner` and `outer`
+/// (points) around `center`, fading into the ground below the center's height.
+/// Returns the color and the arc's opacity.
+static float4 bench_rainbow(float2 p, float2 center, float inner, float outer) {
+    const float r = length(p - center);
+    const float t = saturate((outer - r) / max(outer - inner, 1.0)) * 6.0;
+    const uint band = min(uint(t), 5u);
+    const float3 color = mix(bench_rainbow_colors[band], bench_rainbow_colors[band + 1u], smoothstep(0.25, 0.75, t - float(band)));
+    const float edge = smoothstep(inner - 3.0, inner + 3.0, r) * (1.0 - smoothstep(outer - 3.0, outer + 3.0, r));
+    const float ground = 1.0 - smoothstep(center.y - 70.0, center.y, p.y);
+    return float4(color, edge * ground);
+}
+
+/// The prism page (page 8): a dusk gradient, a warm and a cool glow, two
+/// rainbow arcs (one over the top third, one over the bottom), and a sparse
+/// field of small lights that a lens magnifies. `unit` is the content width
+/// the lab's panels use; the lab places its panels over the arcs by the same
+/// formulas (MaterialBenchViewController).
+static float3 bench_prism_color(float2 p, float2 size, float pixel) {
+    const float unit = min(size.x, 560.0);
+    const float v = saturate(p.y / max(size.y, 1.0));
+    float3 color = mix(float3(0.030, 0.036, 0.095), float3(0.105, 0.060, 0.150), v);
+    const float2 warm = (p - float2(size.x * 0.12, size.y * 0.50)) / (unit * 0.55);
+    const float2 cool = (p - float2(size.x * 0.90, size.y * 0.56)) / (unit * 0.60);
+    color += float3(0.62, 0.20, 0.34) * 0.55 * exp(-dot(warm, warm) * 1.3);
+    color += float3(0.14, 0.34, 0.72) * 0.60 * exp(-dot(cool, cool) * 1.3);
+    const float4 upper = bench_rainbow(p, float2(size.x * 0.5, size.y * 0.40), unit * 0.34, unit * 0.50);
+    color = mix(color, upper.xyz, upper.w * 0.96);
+    const float4 lower = bench_rainbow(p, float2(size.x * 0.5, size.y * 0.92), unit * 0.30, unit * 0.46);
+    color = mix(color, lower.xyz, lower.w * 0.96);
+    // Small lights: one in about every third 30-point cell, soft-edged.
+    const float2 cell = floor(p / 30.0);
+    const float2 jitter = (float2(bench_hash(cell + 2.3), bench_hash(cell + 8.1)) - 0.5) * 18.0;
+    const float2 local = p - (cell + 0.5) * 30.0 - jitter;
+    const float lit = step(0.66, bench_hash(cell + 4.9)) * bench_fill(length(local) - (1.1 + 1.3 * bench_hash(cell + 6.2)), pixel);
+    color = mix(color, float3(0.92, 0.94, 1.0), lit * 0.55 * (1.0 - 0.8 * (upper.w + lower.w)));
+    return color;
+}
+
 /// Black with glowing orange liquid (page 6, bottom): a few smooth blobs of
 /// molten color, bright at their cores and edges, a faint halo around them
 /// on black, and small bubbles. `center` is the middle of the region.
@@ -237,6 +286,10 @@ fragment float4 bench_background_fragment(
     }
     case 7: {
         color = bench_paper_desk_color(p, size, pixel);
+        break;
+    }
+    case 8: {
+        color = bench_prism_color(p, size, pixel);
         break;
     }
     case 6: {

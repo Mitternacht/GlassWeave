@@ -48,6 +48,7 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | Light model (`GlassLighting`) | Reduce Transparency keeps a thin, crisp rim: the Fresnel outline as a contrasting hairline within ``reducedTransparencyRimWidth`` of the outline, with no reflections, specular streak, rim light, chrome or prismatic finish, or bloom (the panel is the opaque surface). Increase Contrast removes the reflections, the specular streak, the rim light, the finish, and the bloom: only the Fresnel outline in the bevel band remains, as a contrasting hairline (evenly lit) that is a clearer boundary. Reduce Motion changes nothing: the light moves only when the app moves it. |
 /// | Grounding (`GlassGrounding`) | Reduce Transparency keeps the drop and contact shadows (they ground the opaque surface) and removes the caustic and the inner shadow. Increase Contrast keeps only the contact shadow, at least ``increasedContrastContactOpacity`` dark and ``increasedContrastContactWidth`` points wide, a clearer boundary; the drop shadow, the inner shadow, and the caustic are removed. Reduce Motion changes nothing: grounding is static. |
 /// | Shape (`GlassShape`) | Reduce Transparency and Increase Contrast keep the shape: the opaque surface and the contrasting rim follow its outline. Reduce Motion stills a blob's wobble: its speed becomes 0, so it is drawn at wobble time 0 whatever the effect time (a still, slightly irregular outline). |
+/// | Frost (`GlassFrost`) | Reduce Transparency presents the frost as none, its scrim included: the body is the opaque surface, no pyramid is built and the existing ones are released. Increase Contrast keeps the blur (it is static, and its colors stay the source's own) and raises a legibility scrim to at least ``increasedContrastScrimRatio`` (7:1) where one is set; the lens dispersion it would otherwise show at the bevel is removed by the lens row. Reduce Motion changes nothing: frost is static. |
 /// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
     /// The widest rim a glow keeps under Reduce Transparency, in points.
@@ -63,6 +64,10 @@ public enum GlassAccessibilityPolicy {
     /// The least width, in points, the contact shadow has under Increase
     /// Contrast.
     public static let increasedContrastContactWidth = 1.5
+
+    /// The contrast ratio a legibility scrim guarantees at least, under
+    /// Increase Contrast (WCAG 2 level AAA for normal text).
+    public static let increasedContrastScrimRatio = 7.0
 
     /// The panel to draw for `panel` under `settings`, resolved for `traits`.
     public static func presentedPanel(
@@ -90,6 +95,27 @@ public enum GlassAccessibilityPolicy {
             for: panel.parameters.light, bezelWidth: panel.parameters.bezelWidth, settings: settings, traits: traits
         )
         presented.parameters.shape = presentedShape(for: panel.parameters.shape, settings: settings)
+        presented.parameters.frost = presentedFrost(for: panel.parameters.frost, settings: settings, traits: traits)
+        return presented
+    }
+
+    /// The frost to draw for `frost` under `settings` and `traits` (GW-24b):
+    /// none under Reduce Transparency (the body is opaque, so there is nothing
+    /// to see through and no pyramid is built); under Increase Contrast the
+    /// same frost with its scrim, where it has one, at least
+    /// ``increasedContrastScrimRatio``. Reduce Motion changes nothing.
+    static func presentedFrost(
+        for frost: GlassFrost,
+        settings: GlassAccessibilitySettings,
+        traits: UITraitCollection
+    ) -> GlassFrost {
+        if settings.reduceTransparency {
+            return .none
+        }
+        guard traits.accessibilityContrast == .high, var scrim = frost.scrim else { return frost }
+        scrim.contrast = max(scrim.contrast, increasedContrastScrimRatio)
+        var presented = frost
+        presented.scrim = scrim
         return presented
     }
 

@@ -2,12 +2,12 @@ import CoreGraphics
 import Metal
 internal import GlassWeaveShaderTypes
 
-/// Frost infrastructure (GW-24a): the pyramid of filtered backgrounds that
-/// the glass shader will sample for a blur that varies over a shape.
+/// Frost (GW-24a, GW-24b): the pyramid of filtered backgrounds that the glass
+/// shader samples for a blur that varies over a shape.
 ///
-/// **Experimental.** This round builds, caches and measures the pyramid; the
-/// glass shader does not read it yet, so requesting frost costs the pyramid
-/// and changes no pixel on screen. See `docs/frost.md`.
+/// **Experimental.** A panel's ``GlassParameters/frost`` asks for a pyramid
+/// (built once per source frame and region) and the ``GlassRenderer/PipelineVariant/frosted``
+/// pipeline samples it. See `docs/frost.md`.
 extension GlassRenderer {
     /// The bytes of frost pyramids the renderer owns now: the computed size
     /// of each pyramid (every level at 8 bytes a texel). Zero until a frost
@@ -55,10 +55,33 @@ extension GlassRenderer {
         return await frostPyramids.atlasImage(pyramid, frost: frost, tileHeight: tileHeight, columns: columns)
     }
 
-    /// The preparation a draw does for the current request, or `nil` when
-    /// there is no frost (the draw then runs exactly as it did before).
-    func frostPreRender(displayScale: Double) -> BackgroundRenderer.PreRender? {
-        guard let request = frostRequest, !isFrostSuppressed else { return nil }
+    /// The pyramid the panels' own frosts ask for (GW-24b), or `nil` when no
+    /// panel blurs: the union of the blurring panels' frames, the largest blur
+    /// among them, and a margin that covers the longest refraction offset
+    /// (with dispersion's spread) any of them has. A static panel over a
+    /// static source asks for the same pyramid every draw, so it is built once.
+    func panelFrostRequest() -> FrostRequest? {
+        guard !isFrostSuppressed else { return nil }
+        var sigma = 0.0
+        var margin = 0.0
+        var region: CGRect?
+        for panel in panels where !panel.parameters.frost.isNone {
+            let parameters = panel.parameters
+            sigma = max(sigma, parameters.frost.sigma)
+            var reach = parameters.refraction * parameters.bezelWidth / 2
+            if parameters.lens.profile != .rim || !parameters.lens.inlays.isEmpty { reach = max(reach, parameters.lens.maximumOffset) }
+            margin = max(margin, reach * 1.4 + 2)
+            region = region.map { $0.union(panel.frame) } ?? panel.frame
+        }
+        guard sigma > 0, let region else { return nil }
+        return FrostRequest(frost: GlassFrost(sigma: sigma), region: region, margin: margin)
+    }
+
+    /// The preparation a draw does for `request`, or `nil` when there is no
+    /// frost (the draw then runs exactly as it did before). The pyramid the
+    /// draw's command buffer reads is put in `slot` for the overlay to bind.
+    func frostPreRender(request: FrostRequest?, displayScale: Double, slot: FrostDrawSlot) -> BackgroundRenderer.PreRender? {
+        guard let request, !isFrostSuppressed else { return nil }
         let ring = frostPyramids
         func key(_ frame: BackgroundFrame, _ size: (width: Int, height: Int)) -> FrostCacheKey? {
             request.plan(displayScale: displayScale, targetSize: size).map {
@@ -70,9 +93,20 @@ extension GlassRenderer {
             // not a reason to skip.
             admit: { frame, size in key(frame, size).map(ring.canServe) ?? true },
             encode: { commandBuffer, frame, background, size in
-                guard let key = key(frame, size) else { return true }
-                return ring.encode(key: key, frame: frame, source: background, into: commandBuffer)
+                guard let key = key(frame, size) else {
+                    slot.pyramid = nil
+                    return true
+                }
+                let encoded = ring.encode(key: key, frame: frame, source: background, into: commandBuffer)
+                slot.pyramid = encoded ? ring.current : nil
+                return encoded
             }
         )
     }
+}
+
+/// Where a draw's pre-render step leaves the pyramid it encoded, for the
+/// overlay of the same draw to bind (GW-24b).
+final class FrostDrawSlot {
+    var pyramid: FrostPyramid?
 }

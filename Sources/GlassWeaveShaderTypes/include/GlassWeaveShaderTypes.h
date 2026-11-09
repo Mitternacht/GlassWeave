@@ -59,6 +59,12 @@ typedef enum GWGlassBindingIndex {
     GWGlassBindingIndexUniforms = 0,
     /// Fragment texture index of the source texture.
     GWGlassBindingIndexSourceTexture = 0,
+    /// Fragment buffer index of `GWFrostPanelUniforms`, bound by the frost
+    /// pipeline variants only (GW-24b).
+    GWGlassBindingIndexFrost = 1,
+    /// Fragment texture index of the frost pyramid, bound by the frost
+    /// pipeline variants only (GW-24b).
+    GWGlassBindingIndexFrostPyramid = 1,
 } GWGlassBindingIndex;
 
 /// The procedural interior a glass panel draws (GW-19), stored in
