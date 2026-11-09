@@ -35,22 +35,47 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | Setting | Behavior |
 /// | --- | --- |
 /// | VoiceOver | The surface is decorative: it and its Metal view expose no accessibility elements, so VoiceOver reaches only the native content placed above it. |
-/// | Reduce Transparency | The panel keeps its frame and corner radius but becomes an opaque surface: no refraction, no edge illumination, and a tint of ``opaqueSurfaceTint(for:)`` at full strength. Native content on it keeps its behavior. |
+/// | Reduce Transparency | The panel keeps its frame and corner radius but becomes an opaque surface: no refraction, no edge illumination, and a tint of ``opaqueSurfaceTint(for:)`` at full strength. A glow keeps only its rim, as a crisp, evenly lit band at most ``reducedTransparencyRimWidth`` wide; its inner glow and center fill are removed, so the body is exactly the opaque surface. Native content on it keeps its behavior. |
+/// | Increase Contrast (`accessibilityContrast == .high`) | A glow keeps its rim, evenly lit (directionality 0) as a clearer boundary, and loses its inner glow and center fill, so the interior is exactly the glass without a glow and the legibility rule for its tint still holds for text. |
 /// | Reduce Motion | Nothing changes in the panel, which never moves on its own; ``GlassSurfaceView`` reports the setting so the app can stop its source's nonessential motion. |
 /// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
+    /// The widest rim a glow keeps under Reduce Transparency, in points.
+    public static let reducedTransparencyRimWidth = 2.0
+
     /// The panel to draw for `panel` under `settings`, resolved for `traits`.
     public static func presentedPanel(
         for panel: GlassPanel,
         settings: GlassAccessibilitySettings,
         traits: UITraitCollection
     ) -> GlassPanel {
-        guard settings.reduceTransparency else { return panel }
-        var opaque = panel
-        opaque.parameters.refraction = 0
-        opaque.parameters.edgeHighlight = 0
-        opaque.parameters.tint = opaqueSurfaceTint(for: traits)
-        return opaque
+        var presented = panel
+        if settings.reduceTransparency {
+            presented.parameters.refraction = 0
+            presented.parameters.edgeHighlight = 0
+            presented.parameters.tint = opaqueSurfaceTint(for: traits)
+            presented.parameters.glow = rimOnly(panel.parameters.glow, maximumWidth: reducedTransparencyRimWidth)
+        } else if traits.accessibilityContrast == .high {
+            presented.parameters.glow = rimOnly(panel.parameters.glow, maximumWidth: nil)
+        }
+        return presented
+    }
+
+    /// A glow reduced to its rim, evenly lit, with no inner glow or center
+    /// fill. With `maximumWidth`, the rim's whole extent (width plus
+    /// softness) becomes a crisp band of at most that width. A glow without
+    /// colors stays ``GlassGlow/none``.
+    private static func rimOnly(_ glow: GlassGlow, maximumWidth: Double?) -> GlassGlow {
+        guard !glow.colors.isEmpty else { return glow }
+        var reduced = glow
+        reduced.innerGlowIntensity = 0
+        reduced.centerOpacity = 0
+        reduced.directionality = 0
+        if let maximumWidth {
+            reduced.rimWidth = min(glow.rimWidth + glow.rimSoftness, maximumWidth)
+            reduced.rimSoftness = 0
+        }
+        return reduced
     }
 
     /// The opaque surface under Reduce Transparency: the system's
@@ -63,6 +88,22 @@ public enum GlassAccessibilityPolicy {
         color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         let unit = { (value: CGFloat) in min(max(Double(value), 0), 1) }
         return GlassTint(red: unit(red), green: unit(green), blue: unit(blue), strength: 1)
+    }
+}
+
+extension GlassGlow.ColorStop {
+    /// A glow color from a UIKit color, resolved for `traits` (so dynamic
+    /// colors follow light, dark, and Increase Contrast) and read as sRGB
+    /// components. Alpha is ignored: the glow's intensities set its opacity.
+    /// An extended-range component outside 0...1 is kept here and clamped
+    /// by the normalization rule when a renderer accepts the glow. Returns
+    /// `nil` for a color with no RGB components, such as a pattern color.
+    public init?(_ color: UIColor, angle: Double = 0, traits: UITraitCollection) {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        guard color.resolvedColor(with: traits).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return nil
+        }
+        self.init(red: Double(red), green: Double(green), blue: Double(blue), angle: angle)
     }
 }
 #endif
