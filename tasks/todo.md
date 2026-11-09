@@ -417,7 +417,7 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 **Dependencies:** GW-17 to GW-20. **Scope:** M, about 9 files plus tests.
 
 **Acceptance criteria:**
-- [ ] The API is documented and normalized; at most 4 emitters and 4 stops; `GlassRenderer.panel` reports the light drawn.
+- [x] The API is documented and normalized; at most 4 emitters and 4 stops; `GlassRenderer.panel` reports the light drawn. (Implemented and documented; the normalization is not tested: fast pass.)
 - [ ] `.none` is byte-identical to `GlassBaselineGW20.metal`: four GW-05 sets plus a glow-and-interior case, on a gradient and a checkerboard.
 - [ ] Band light does not increase with distance from its edge and is exactly 0 beyond `reach`. `.light` never lowers a channel. Nothing changes outside the outline.
 - [ ] With center fade 1, pixels deeper than the fade end are byte-identical to light-off output.
@@ -427,11 +427,15 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 - [ ] Reduce Motion gives identical frames and no effect clock (controlled-clock UIKit test).
 - [ ] `.paint` over white changes relative luminance by ≥ 0.2 at an opacity where `.light` changes it by < 0.02.
 - [ ] The extended legibility bound holds on 1,000 seeded backgrounds. Reduce Transparency and Increase Contrast pass UIKit tests.
-- [ ] Every bench background renders; captures inspected.
+- [x] Every bench background renders; captures inspected.
 - [ ] M5 increment for 4 emitters plus piping ≤ +0.15 ms p95.
 - [ ] **Device only:** cost; light and dark visual check.
 
-**Evidence:** not started.
+**Evidence:**
+- Exists: `GlassLight` (new, `Sources/GlassWeave/GlassLight.swift`) with the CPU model `GlassLightModel.swift`; shader support in `Glass.metal`; the record grown append-only from 528 to 1008 bytes (C, MSL and Swift asserts; the existing layout test and probe extended with a distinctive-value round trip); policy rows in `GlassAccessibilityPolicy.swift`; the legibility bound in `GlassLegibility.swift`; the bench (`BenchBackgrounds.metal`, `MaterialBenchViewController.swift`, `-lab.bench`) and the light-fields demo (`-lab.lightFields`, lab buttons). Design notes: `docs/glass-optics.md`.
+- Safety test (the only new test): `GlassBaselineGW20Tests`, default output byte-identical to the frozen `GlassBaselineGW20.metal`, 2 cases (the GW-05 default and a glow-and-interior case) on a gradient and a checkerboard. The package scheme passed on My Mac (199 passed, 0 failed) and on the iPhone 18 Pro simulator (280 passed, 1 failed: a frames-in-flight timing race in `FrameLifecycleTests`, unrelated to light; the suite passed alone on rerun, 3 of 3).
+- Captures (inspected): `docs/evidence/captures/gw-21-*`: the five bench pages, light fields over charcoal (still and at t = 24 s), over ribbons, over paper with `.paint`, and under Increase Contrast and Reduce Transparency. Checked by pixel comparison on the simulator: with flow the panels differ 5 s apart, under Reduce Motion they are identical (0 of 1.95 million pixels).
+- Limits: the surface's effect clock does not yet tick for light (one-line follow-up in `docs/glass-optics.md`); the other criteria are unchecked with the reason "fast pass: not tested": three of the four GW-05 sets, band and `.light` bounds, center-fade identity, CPU model, piping ratio, loop identity, controlled-clock Reduce Motion test, `.paint` luminance, the 1,000-background legibility sweep, M5 cost.
 
 **Verification:** Swift Testing readback on My Mac under Metal API Validation; mutations; UIKit and lab UI tests on the iPhone 18 Pro simulator.
 

@@ -100,6 +100,11 @@ final class LabViewController: UIViewController {
     private let galleryButton = UIButton(configuration: .bordered())
     /// Whether `-lab.gallery YES` has opened the gallery yet.
     private var openedGalleryAtLaunch = false
+    /// Opens the material bench and the light-fields demo (GW-21).
+    private let benchButton = UIButton(configuration: .bordered())
+    private let lightFieldsButton = UIButton(configuration: .bordered())
+    /// Whether `-lab.bench` or `-lab.lightFields` has opened its screen yet.
+    private var openedBenchAtLaunch = false
     /// The control rows; vertical at accessibility text sizes.
     private var controlRows: [UIStackView] = []
     /// At accessibility text sizes the custom panel takes the stage's full
@@ -175,6 +180,27 @@ final class LabViewController: UIViewController {
             openedGalleryAtLaunch = true
             openGallery(animated: false)
         }
+        // `-lab.bench <page>` or `-lab.lightFields YES` opens GW-21's screens
+        // once, at launch.
+        if !openedBenchAtLaunch {
+            let defaults = UserDefaults.standard
+            if let page = BenchPage.fromBenchArgument {
+                openedBenchAtLaunch = true
+                openBench(.bench, page: page, animated: false)
+            } else if defaults.bool(forKey: "lab.lightFields") {
+                openedBenchAtLaunch = true
+                openBench(.lightFields, page: BenchPage.named(defaults.string(forKey: "lab.lightBackdrop")) ?? .charcoal, animated: false)
+            }
+        }
+    }
+
+    /// Presents the material bench or the light-fields demo (GW-21) over the
+    /// whole window.
+    private func openBench(_ mode: MaterialBenchViewController.Mode, page: BenchPage, animated: Bool) {
+        guard presentedViewController == nil else { return }
+        let bench = MaterialBenchViewController(mode: mode, page: page)
+        bench.modalPresentationStyle = .fullScreen
+        present(bench, animated: animated)
     }
 
     /// Presents the glow gallery (GW-20) over the whole window. While it is
@@ -475,6 +501,15 @@ final class LabViewController: UIViewController {
         galleryButton.addAction(UIAction { [weak self] _ in self?.openGallery(animated: true) }, for: .primaryActionTriggered)
         galleryButton.isHidden = benchmark != nil
 
+        benchButton.configuration?.title = String(localized: "Material bench")
+        benchButton.accessibilityIdentifier = "lab.openBench"
+        benchButton.addAction(UIAction { [weak self] _ in self?.openBench(.bench, page: .dotGrid, animated: true) }, for: .primaryActionTriggered)
+        benchButton.isHidden = benchmark != nil
+        lightFieldsButton.configuration?.title = String(localized: "Light fields")
+        lightFieldsButton.accessibilityIdentifier = "lab.openLightFields"
+        lightFieldsButton.addAction(UIAction { [weak self] _ in self?.openBench(.lightFields, page: .charcoal, animated: true) }, for: .primaryActionTriggered)
+        lightFieldsButton.isHidden = benchmark != nil
+
         let tintRow = Self.row([tintControl, UIView(), Self.caption(String(localized: "Enabled")), enabledSwitch])
         let motionRow = Self.row([pauseButton, UIView(), Self.caption(String(localized: "Frame ID")), overlaySwitch])
         // The still pattern has no clock and no frame-ID strip.
@@ -496,7 +531,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, lightFieldsButton, benchButton, measureButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false

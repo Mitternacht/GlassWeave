@@ -13,7 +13,7 @@ _Static_assert(offsetof(GWBackgroundUniforms, uvOrigin) == 16, "uvOrigin offset"
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMin) == 24, "sampleClampMin offset");
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMax) == 32, "sampleClampMax offset");
 
-_Static_assert(sizeof(GWGlassUniforms) == 528, "GWGlassUniforms size");
+_Static_assert(sizeof(GWGlassUniforms) == 1008, "GWGlassUniforms size");
 _Static_assert(_Alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 _Static_assert(offsetof(GWGlassUniforms, background) == 0, "background offset");
 _Static_assert(offsetof(GWGlassUniforms, targetSize) == 40, "targetSize offset");
@@ -58,3 +58,27 @@ _Static_assert(offsetof(GWGlassUniforms, interiorPixelsPerPoint) == 328, "interi
 _Static_assert(offsetof(GWGlassUniforms, padding6) == 332, "padding6 offset");
 _Static_assert(offsetof(GWGlassUniforms, interiorSparks) == 336, "interiorSparks offset");
 _Static_assert(GWInteriorEffectNone == 0 && GWInteriorEffectEnergy == 1 && GWInteriorEffectRays == 2 && GWInteriorEffectEmbers == 3, "GWInteriorEffect values");
+_Static_assert(offsetof(GWGlassUniforms, lightEmitterCount) == 528, "lightEmitterCount offset");
+_Static_assert(offsetof(GWGlassUniforms, lightComposite) == 532, "lightComposite offset");
+_Static_assert(offsetof(GWGlassUniforms, lightCenterFade) == 536, "lightCenterFade offset");
+_Static_assert(offsetof(GWGlassUniforms, lightPiping) == 540, "lightPiping offset");
+_Static_assert(offsetof(GWGlassUniforms, lightPipingWidth) == 544, "lightPipingWidth offset");
+_Static_assert(offsetof(GWGlassUniforms, lightBodyScale) == 548, "lightBodyScale offset");
+_Static_assert(offsetof(GWGlassUniforms, padding7) == 552, "padding7 offset");
+_Static_assert(offsetof(GWGlassUniforms, padding8) == 556, "padding8 offset");
+_Static_assert(offsetof(GWGlassUniforms, lightEmitters) == 560, "lightEmitters offset");
+
+_Static_assert(sizeof(GWLightEmitter) == 112, "GWLightEmitter size");
+_Static_assert(_Alignof(GWLightEmitter) == 16, "GWLightEmitter alignment");
+_Static_assert(offsetof(GWLightEmitter, color0) == 0, "color0 offset");
+_Static_assert(offsetof(GWLightEmitter, color1) == 16, "color1 offset");
+_Static_assert(offsetof(GWLightEmitter, color2) == 32, "color2 offset");
+_Static_assert(offsetof(GWLightEmitter, color3) == 48, "color3 offset");
+_Static_assert(offsetof(GWLightEmitter, shape) == 64, "shape offset");
+_Static_assert(offsetof(GWLightEmitter, motion) == 80, "motion offset");
+_Static_assert(offsetof(GWLightEmitter, kind) == 96, "kind offset");
+_Static_assert(offsetof(GWLightEmitter, colorCount) == 100, "colorCount offset");
+_Static_assert(offsetof(GWLightEmitter, intensity) == 104, "intensity offset");
+_Static_assert(offsetof(GWLightEmitter, seed) == 108, "seed offset");
+_Static_assert(GWLightKindNone == 0 && GWLightKindBand == 1 && GWLightKindArc == 2 && GWLightKindPoint == 3 && GWLightKindField == 4, "GWLightKind values");
+_Static_assert(GWLightCompositeLight == 0 && GWLightCompositePaint == 1, "GWLightComposite values");

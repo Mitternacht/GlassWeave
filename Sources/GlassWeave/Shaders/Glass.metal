@@ -5,7 +5,9 @@ using namespace metal;
 
 // The shader's view of the shared record must match the host layout asserted
 // in GlassWeaveShaderTypes.c.
-static_assert(sizeof(GWGlassUniforms) == 528, "GWGlassUniforms size");
+static_assert(sizeof(GWGlassUniforms) == 1008, "GWGlassUniforms size");
+static_assert(sizeof(GWLightEmitter) == 112, "GWLightEmitter size");
+static_assert(alignof(GWLightEmitter) == 16, "GWLightEmitter alignment");
 static_assert(alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 
 // The optical model below is mirrored on the CPU by `GlassPanelGeometry`
@@ -432,6 +434,140 @@ static float3 gw_interior_ramp(float e, constant GWGlassUniforms &uniforms) {
     return e < 0.5 ? c0 + (c1 - c0) * (e * 2.0) : c1 + (c2 - c1) * (e * 2.0 - 1.0);
 }
 
+// MARK: Inner light (GW-21)
+//
+// Colored light inside the glass (docs/glass-optics.md). The CPU resolves
+// every emitter for the draw (`GlassPanelGeometry.Light`): directions,
+// pixel lengths, the palette's flow and hue drift, and the drift offset, all
+// at the draw's effect time, so the shader sees no time. Every emitter is
+// evaluated in panel unit space, `u = q / panelHalfSize` (the panel scaled
+// to a square), so a band or an arc means the same for any panel shape. With
+// no emitters (`lightEmitterCount` 0) none of this runs and the output is
+// the output without light.
+
+/// The most opacity `.paint` light gives one emitter.
+constant float gw_light_paint_cap = 0.85;
+
+/// The emitter's palette at position `x`, in linear light. The palette
+/// folds back and forth (period 2: stop 0 to the last stop and back), so
+/// shifting `x` by 2 is the identity and a flowing palette never jumps. Stops
+/// are spread evenly over 0 to 1 and interpolate linearly.
+static float3 gw_light_palette(float x, constant GWLightEmitter &emitter) {
+    const uint count = emitter.colorCount;
+    if (count <= 1u) {
+        return emitter.color0.xyz;
+    }
+    const float folded = x - 2.0 * floor(x * 0.5);
+    const float m = folded <= 1.0 ? folded : 2.0 - folded;
+    const float position = m * float(count - 1u);
+    const uint index = min(uint(position), count - 2u);
+    const float3 colors[4] = {emitter.color0.xyz, emitter.color1.xyz, emitter.color2.xyz, emitter.color3.xyz};
+    return mix(colors[index], colors[index + 1u], position - float(index));
+}
+
+/// A quick profile, 1 at `x` 0 and exactly 0 from `x` 1 on: (1 - x)^2. The
+/// piping uses it.
+static float gw_light_falloff(float x) {
+    const float t = 1.0 - saturate(x);
+    return t * t;
+}
+
+/// A pooled profile, 1 at `x` 0 and exactly 0 from `x` 1 on, falling slowly
+/// near 0 and near 1: 1 - smoothstep(0, 1, x). Never rises with `x`. The
+/// bands, arcs, and fields use it for their body light.
+static float gw_light_pool(float x) {
+    return 1.0 - smoothstep(0.0, 1.0, x);
+}
+
+/// One emitter's color (`xyz`) and body light (`w`, before intensity and
+/// center fade) at pixel offset `q` from the panel's center, `depth` pixels
+/// inside the outline and `w` of the way to the deepest point. `pipe`
+/// receives the weight of its piping, 0...1: the falloff with the Euclidean
+/// distance, in pixels, from the emitter's source.
+static float4 gw_light_emitter(
+    float2 q, float depth, float w, constant GWLightEmitter &emitter,
+    constant GWGlassUniforms &uniforms, thread float &pipe)
+{
+    const float2 halfSize = uniforms.panelHalfSize;
+    const float2 u = q / halfSize;
+    const float4 shape = emitter.shape;
+    const float4 motion = emitter.motion;
+    const float pipeReach = motion.w;
+    float3 color = emitter.color0.xyz;
+    float body = 0.0;
+    pipe = 0.0;
+    switch (emitter.kind) {
+    case GWLightKindBand: {
+        // The half-plane toward the lit edge: `edge` is the unit-space
+        // distance from it, never negative (the corners of a rectangle lie
+        // past it and get the full light).
+        const float2 direction = shape.xy;
+        const float edge = max(1.0 - dot(u, direction), 0.0);
+        const float reach = max(shape.z * (1.0 + 0.3 * motion.z), 1e-4);
+        body = gw_light_pool(edge / reach);
+        const float tau = saturate(0.5 + 0.5 * dot(u, float2(direction.y, -direction.x)));
+        color = gw_light_palette(tau + motion.x, emitter);
+        if (pipeReach > 0.0) {
+            pipe = gw_light_falloff(edge * shape.w / pipeReach);
+        }
+        break;
+    }
+    case GWLightKindArc: {
+        float turn = 0.0;
+        if (u.x != 0.0 || u.y != 0.0) {
+            turn = precise::atan2(u.x, -u.y) * (0.5 / M_PI_F);
+            turn = turn - floor(turn);
+        }
+        float delta = turn - (shape.x + 0.12 * motion.y);
+        delta = delta - round(delta);
+        const float halfSpan = max(shape.y, 1e-4);
+        const float along = 1.0 - smoothstep(0.4 * halfSpan, halfSpan, abs(delta));
+        body = along * gw_light_pool(depth / max(shape.z, 1e-4));
+        color = gw_light_palette(saturate(0.5 + delta / (2.0 * halfSpan)) + motion.x, emitter);
+        if (pipeReach > 0.0) {
+            // Euclidean distance to the arc: the depth, and the way along
+            // the outline past the arc's end.
+            const float beyond = max(abs(delta) - halfSpan, 0.0) * (2.0 * M_PI_F) * length(q);
+            pipe = gw_light_falloff(length(float2(depth, beyond)) / pipeReach);
+        }
+        break;
+    }
+    case GWLightKindPoint: {
+        const float2 center = (shape.xy + motion.yz * 0.25) * halfSize;
+        const float2 offset = q - center;
+        const float2 radii = float2(shape.w, 1.0) * max(shape.z, 1e-3);
+        const float2 scaled = offset / radii;
+        const float d2 = dot(scaled, scaled);
+        const float t = 1.0 - saturate(d2);
+        body = t * t;
+        color = gw_light_palette(sqrt(min(d2, 1.0)) + motion.x, emitter);
+        if (pipeReach > 0.0) {
+            pipe = gw_light_falloff(length(offset) / pipeReach);
+        }
+        break;
+    }
+    case GWLightKindField: {
+        // Four corner colors, bilinear, warped by one octave of noise that
+        // moves around a loop (`shape.yz`) and wanders with the drift.
+        const float2 uv = saturate(u * 0.5 + 0.5);
+        const float2 noiseAt = uv * 2.5 + shape.yz + motion.yz * 3.0;
+        const float2 noise = float2(
+            gw_noise2(noiseAt, int2(0), emitter.seed),
+            gw_noise2(noiseAt + float2(17.3, 5.1), int2(0), emitter.seed + 0x51ed270bu));
+        const float2 warped = saturate(uv + shape.x * 0.9 * (noise - 0.5));
+        const float3 top = mix(emitter.color0.xyz, emitter.color1.xyz, warped.x);
+        const float3 bottom = mix(emitter.color2.xyz, emitter.color3.xyz, warped.x);
+        color = mix(top, bottom, warped.y);
+        body = gw_light_pool(w);
+        pipe = 1.0;
+        break;
+    }
+    default:
+        break;
+    }
+    return float4(color, body);
+}
+
 /// One rounded glass panel over the background.
 ///
 /// Inside the rim (`bezelWidth` pixels inward from the outline) the sample
@@ -484,6 +620,15 @@ static float3 gw_interior_ramp(float e, constant GWGlassUniforms &uniforms) {
 /// pattern is evaluated only where `fade` is above 0. Pixels the interior
 /// lights are dithered like the glow; elsewhere the bytes are those without
 /// an interior.
+///
+/// With inner light (GW-21, `lightEmitterCount` above 0), each emitter's
+/// light is composited over the glass and the interior, in order: its body
+/// `intensity * profile * fade`, with the same `fade` as the interior's, and
+/// its piping `lightPiping * intensity * pipe * (1 - depth / lightPipingWidth)^2`
+/// in the rim band, combine as `a = 1 - (1 - body) * (1 - piping)`. `.light`
+/// screens it, `G + color * a * (1 - G)`, which never darkens a channel;
+/// `.paint` mixes toward the color by `min(a, 0.85)`. Pixels it lights are
+/// dithered like the glow; elsewhere the bytes are those without light.
 fragment float4 gw_glass_fragment(
     GWGlassVertexOut in [[stage_in]],
     constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]],
@@ -563,8 +708,36 @@ fragment float4 gw_glass_fragment(
         }
     }
 
+    // Inner light, over the glass, the glow, and the interior (GW-21).
+    float lightAlpha = 0.0;
+    if (uniforms.lightEmitterCount > 0u) {
+        const float minHalf = max(min(uniforms.panelHalfSize.x, uniforms.panelHalfSize.y), 1e-3);
+        const float w = saturate(depth / minHalf);
+        const float fade = (1.0 - uniforms.lightCenterFade * smoothstep(0.3, 0.85, w)) * uniforms.lightBodyScale;
+        const float pipeBand = uniforms.lightPipingWidth > 0.0 ? gw_light_falloff(depth / uniforms.lightPipingWidth) : 0.0;
+        const float pipeScale = pipeBand * uniforms.lightPiping;
+        if (fade > 0.0 || pipeScale > 0.0) {
+            for (uint i = 0u; i < min(uniforms.lightEmitterCount, 4u); ++i) {
+                constant GWLightEmitter &emitter = uniforms.lightEmitters[i];
+                float pipe = 0.0;
+                const float4 emitted = gw_light_emitter(q, depth, w, emitter, uniforms, pipe);
+                const float body = emitted.w * emitter.intensity * fade;
+                const float piping = pipe * pipeScale * emitter.intensity;
+                const float alpha = 1.0 - (1.0 - body) * (1.0 - piping);
+                if (alpha > 0.0) {
+                    if (uniforms.lightComposite == GWLightCompositePaint) {
+                        glass = mix(glass, emitted.xyz, min(alpha, gw_light_paint_cap));
+                    } else {
+                        glass = glass + emitted.xyz * alpha * (1.0 - glass);
+                    }
+                    lightAlpha = max(lightAlpha, alpha);
+                }
+            }
+        }
+    }
+
     float3 encoded = gw_glass_encode_srgb(mix(outside, glass, coverage));
-    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0) {
+    if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0) {
         const uint2 cell = uint2(pixel) & 3u;
         encoded = saturate(encoded + ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0);
     }

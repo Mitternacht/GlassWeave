@@ -35,8 +35,8 @@ kernel void gw_test_background_uniforms_probe(
 
 /// Writes the shader's view of a GWGlassUniforms record, field by field
 /// (including the nested background record, the glow, the halo, and the
-/// interior), plus its size, alignment, and field offsets, and the interior
-/// seed as an integer.
+/// interior, and the inner light), plus its size, alignment, and field
+/// offsets, and the interior seed and the emitters' seeds as integers.
 kernel void gw_test_glass_uniforms_probe(
     constant GWGlassUniforms &record [[buffer(0)]],
     device float *values [[buffer(1)]],
@@ -114,6 +114,28 @@ kernel void gw_test_glass_uniforms_probe(
         values[79 + 4 * i] = record.interiorSparks[i].w;
     }
     seed[0] = record.interiorSeed;
+    // Inner light (GW-21).
+    values[124] = float(record.lightEmitterCount);
+    values[125] = float(record.lightComposite);
+    values[126] = record.lightCenterFade;
+    values[127] = record.lightPiping;
+    values[128] = record.lightPipingWidth;
+    values[129] = record.lightBodyScale;
+    for (uint i = 0; i < 4; ++i) {
+        const uint base = 130 + 27 * i;
+        const GWLightEmitter emitter = record.lightEmitters[i];
+        const float4 lanes[6] = {emitter.color0, emitter.color1, emitter.color2, emitter.color3, emitter.shape, emitter.motion};
+        for (uint lane = 0; lane < 6; ++lane) {
+            values[base + 4 * lane] = lanes[lane].x;
+            values[base + 4 * lane + 1] = lanes[lane].y;
+            values[base + 4 * lane + 2] = lanes[lane].z;
+            values[base + 4 * lane + 3] = lanes[lane].w;
+        }
+        values[base + 24] = float(emitter.kind);
+        values[base + 25] = float(emitter.colorCount);
+        values[base + 26] = emitter.intensity;
+        seed[1 + i] = emitter.seed;
+    }
 
     layout[0] = sizeof(GWGlassUniforms);
     layout[1] = alignof(GWGlassUniforms);
@@ -159,4 +181,25 @@ kernel void gw_test_glass_uniforms_probe(
     layout[40] = (GWInteriorEffectNone == 0u && GWInteriorEffectEnergy == 1u
                   && GWInteriorEffectRays == 2u && GWInteriorEffectEmbers == 3u) ? 0u : 1u;
     layout[41] = __builtin_offsetof(GWGlassUniforms, interiorSparks);
+    layout[42] = __builtin_offsetof(GWGlassUniforms, lightEmitterCount);
+    layout[43] = __builtin_offsetof(GWGlassUniforms, lightComposite);
+    layout[44] = __builtin_offsetof(GWGlassUniforms, lightCenterFade);
+    layout[45] = __builtin_offsetof(GWGlassUniforms, lightPiping);
+    layout[46] = __builtin_offsetof(GWGlassUniforms, lightPipingWidth);
+    layout[47] = __builtin_offsetof(GWGlassUniforms, lightBodyScale);
+    layout[48] = __builtin_offsetof(GWGlassUniforms, padding7);
+    layout[49] = __builtin_offsetof(GWGlassUniforms, padding8);
+    layout[50] = __builtin_offsetof(GWGlassUniforms, lightEmitters);
+    layout[51] = sizeof(GWLightEmitter);
+    layout[52] = alignof(GWLightEmitter);
+    layout[53] = __builtin_offsetof(GWLightEmitter, color0);
+    layout[54] = __builtin_offsetof(GWLightEmitter, color1);
+    layout[55] = __builtin_offsetof(GWLightEmitter, color2);
+    layout[56] = __builtin_offsetof(GWLightEmitter, color3);
+    layout[57] = __builtin_offsetof(GWLightEmitter, shape);
+    layout[58] = __builtin_offsetof(GWLightEmitter, motion);
+    layout[59] = __builtin_offsetof(GWLightEmitter, kind);
+    layout[60] = __builtin_offsetof(GWLightEmitter, colorCount);
+    layout[61] = __builtin_offsetof(GWLightEmitter, intensity);
+    layout[62] = __builtin_offsetof(GWLightEmitter, seed);
 }

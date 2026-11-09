@@ -67,6 +67,69 @@ typedef enum GWInteriorEffect {
     GWInteriorEffectEmbers = 3,
 } GWInteriorEffect;
 
+/// The placement of one inner light emitter (GW-21), stored in
+/// `GWLightEmitter.kind`. 0 draws nothing.
+typedef enum GWLightKind {
+    GWLightKindNone = 0,
+    /// A half-plane in panel unit space that hugs one edge.
+    GWLightKindBand = 1,
+    /// A stretch of the outline, seen from the panel's center, that lights
+    /// inward.
+    GWLightKindArc = 2,
+    /// A soft orb.
+    GWLightKindPoint = 3,
+    /// A four-corner color field, warped by noise.
+    GWLightKindField = 4,
+} GWLightKind;
+
+/// How inner light combines with the glass (GW-21), stored in
+/// `GWGlassUniforms.lightComposite`.
+typedef enum GWLightComposite {
+    /// Screen: never darkens a channel.
+    GWLightCompositeLight = 0,
+    /// Source-over at a capped opacity, so it also shows on white.
+    GWLightCompositePaint = 1,
+} GWLightComposite;
+
+/// One inner light emitter (GW-21), resolved on the CPU for one draw: angles
+/// become direction vectors, lengths become pixels, and the motion at the
+/// draw's effect time is already applied to the colors and `motion`.
+///
+/// - `color0` ... `color3`: the stops in linear light (`xyz`, `w` zero).
+///   For a field they are the corners: top-left, top-right, bottom-left,
+///   bottom-right. Unused stops are zero.
+/// - `shape`: by kind.
+///   Band: unit direction toward the lit edge in panel unit space (`xy`),
+///   reach in unit-space lengths (`z`), pixels per unit along that direction
+///   (`w`).
+///   Arc: center angle in turns (`x`), half the span in turns (`y`), reach
+///   in pixels (`z`), `w` zero.
+///   Point: center in panel unit space (`xy`), radius in pixels (`z`), the
+///   horizontal stretch (`w`).
+///   Field: warp 0...1 (`x`), the position on the warp's loop (`yz`), `w`
+///   zero.
+/// - `motion`: palette shift in palette units (`x`); the drift offset
+///   `drift * (cos, sin)` of the loop phase (`yz`); the reach of the
+///   piping from this emitter in pixels (`w`, 0 for none).
+/// - `kind`: a `GWLightKind` value. `colorCount`: 1 to 4. `intensity`:
+///   0...1. `seed`: mixed into a field's warp noise.
+///
+/// Layout in bytes: color0 0, color1 16, color2 32, color3 48, shape 64,
+/// motion 80, kind 96, colorCount 100, intensity 104, seed 108.
+/// Size 112, alignment 16, stride 112.
+typedef struct GWLightEmitter {
+    simd_float4 color0;
+    simd_float4 color1;
+    simd_float4 color2;
+    simd_float4 color3;
+    simd_float4 shape;
+    simd_float4 motion;
+    uint32_t kind;
+    uint32_t colorCount;
+    float intensity;
+    uint32_t seed;
+} GWLightEmitter;
+
 /// Per-draw parameters for one rounded glass panel, in target pixels.
 ///
 /// Coordinate space: target pixels, origin at the top-left corner of the
@@ -139,6 +202,21 @@ typedef enum GWInteriorEffect {
 ///   panel's center (y down), radius in points, and brightness 0...1 (0 is
 ///   not drawn). Zero for the other effects.
 ///
+/// Inner light (GW-21), appended after the GW-19 fields, which keep their
+/// layout. `lightEmitterCount` 0 disables the whole light; every other light
+/// field is then zero. See docs/glass-optics.md for the math.
+/// - `lightEmitterCount`: 0 to 4.
+/// - `lightComposite`: a `GWLightComposite` value.
+/// - `lightCenterFade`: 0...1, how much the body light fades toward the
+///   middle (as `interiorCenterFade`).
+/// - `lightPiping`: 0...1, how strongly an emitter lights the rim band near
+///   it.
+/// - `lightPipingWidth`: the width of the lit rim band in pixels; 0 draws no
+///   piping.
+/// - `lightBodyScale`: 0...1, the factor on the light inside the rim band's
+///   reach (0 leaves only the piping).
+/// - `lightEmitters`: the emitters, in drawing order; unused ones are zero.
+///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
 /// maxDisplacement 76, edgeHighlight 80, explicit padding 84, 88, 92 (set
@@ -153,8 +231,11 @@ typedef enum GWInteriorEffect {
 /// interiorEffect 304, interiorColorCount 308, interiorSeed 312,
 /// interiorIntensity 316, interiorPhase 320, interiorCenterFade 324,
 /// interiorPixelsPerPoint 328, explicit padding 332 (set to zero),
-/// interiorSparks 336 (12 × 16 bytes).
-/// Size 528, alignment 16, stride 528.
+/// interiorSparks 336 (12 × 16 bytes); lightEmitterCount 528,
+/// lightComposite 532, lightCenterFade 536, lightPiping 540,
+/// lightPipingWidth 544, lightBodyScale 548, explicit padding 552, 556 (set
+/// to zero), lightEmitters 560 (4 × 112 bytes).
+/// Size 1008, alignment 16, stride 1008.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
     simd_float2 targetSize;
@@ -201,6 +282,15 @@ typedef struct GWGlassUniforms {
     float interiorPixelsPerPoint;
     float padding6;
     simd_float4 interiorSparks[12];
+    uint32_t lightEmitterCount;
+    uint32_t lightComposite;
+    float lightCenterFade;
+    float lightPiping;
+    float lightPipingWidth;
+    float lightBodyScale;
+    float padding7;
+    float padding8;
+    GWLightEmitter lightEmitters[4];
 } GWGlassUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

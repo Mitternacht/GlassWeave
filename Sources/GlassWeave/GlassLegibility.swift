@@ -1,3 +1,6 @@
+import CoreGraphics
+import Foundation
+
 /// Text legibility over a tinted glass panel, whatever the background.
 ///
 /// Inside the rim the panel shows `mix(background, tint, strength)` in linear
@@ -107,5 +110,96 @@ extension GlassTint {
             "GlassTint legibility: the \(name) is \(value). Pass a finite value; the renderer rejects a non-finite tint with GlassParameterError.nonFinite, and finite values outside 0...1 are clamped."
         )
         return min(max(value, 0), 1)
+    }
+}
+
+/// Legibility with inner light (GW-21, experimental).
+///
+/// Light is added to the glass, so it can lift the interior's luminance
+/// above the tint's range. These bounds give the most it can do anywhere in
+/// a rectangle of the panel, whatever the background, so an app can place
+/// text where the light cannot reach, or choose a tint strength that still
+/// gives the contrast it needs. Both are conservative: they ignore the
+/// panel's rounded corners (which only reduce the light) and take each
+/// emitter at its brightest color and full intensity.
+extension GlassLight {
+    /// The largest opacity any emitter's light has anywhere inside `rect`,
+    /// 0...1, for a panel at `panelFrame` (both in the same coordinate
+    /// space, in points) with the rim width `bezelWidth` in points.
+    ///
+    /// The body light is bounded by the center fade at the shallowest
+    /// point of `rect` (its distance to the panel's nearest edge); the
+    /// piping by its band, which only the part of `rect` within the piping
+    /// width of the edge can reach. `rect` is clipped to the panel. Returns
+    /// 0 for light that draws nothing, or for a `rect` outside the panel.
+    public func maximumOpacity(in rect: CGRect, ofPanel panelFrame: CGRect, bezelWidth: Double) -> Double {
+        guard isVisible else { return 0 }
+        let area = rect.intersection(panelFrame)
+        guard !area.isNull, area.width >= 0, area.height >= 0 else { return 0 }
+        let shortSide = Double(min(panelFrame.width, panelFrame.height))
+        guard shortSide > 0 else { return 0 }
+        // The shallowest depth in `area`: its distance to the nearest edge.
+        let depth = Double(min(
+            area.minX - panelFrame.minX, panelFrame.maxX - area.maxX,
+            area.minY - panelFrame.minY, panelFrame.maxY - area.maxY
+        ))
+        let w = min(max(depth / (shortSide / 2), 0), 1)
+        let t = min(max((w - 0.3) / 0.55, 0), 1)
+        let fade = 1 - min(max(centerFade, 0), 1) * t * t * (3 - 2 * t)
+        let body = min(max(self.body, 0), 1) * fade
+        let width = min(pipingWidth ?? bezelWidth, shortSide / 2)
+        let band = width > 0 ? min(max(1 - depth / width, 0), 1) : 0
+        let pipe = min(max(piping, 0), 1) * band * band
+        let largest = emitters.filter { !$0.colors.isEmpty }.map { min(max($0.intensity, 0), 1) }.max() ?? 0
+        return largest * (1 - (1 - body) * (1 - pipe))
+    }
+
+    /// The largest relative luminance (WCAG 2) any stop's color can have:
+    /// its own, or with a hue drift the largest any rotation of its hue
+    /// about the gray axis reaches, `mean + 0.478 × |chroma|` (Cauchy-
+    /// Schwarz on the part of the color off the gray axis), at most 1. This
+    /// is the most luminance one unit of light opacity can add.
+    var brightestStopLuminance: Double {
+        emitters.flatMap(\.colors).map { stop in
+            let linear = SIMD3(
+                GlassPanelGeometry.decodeSRGB(min(max(stop.red, 0), 1)),
+                GlassPanelGeometry.decodeSRGB(min(max(stop.green, 0), 1)),
+                GlassPanelGeometry.decodeSRGB(min(max(stop.blue, 0), 1))
+            )
+            let own = 0.2126 * linear.x + 0.7152 * linear.y + 0.0722 * linear.z
+            guard hueDrift != 0 else { return own }
+            let mean = linear.sum() / 3
+            let chroma = max((linear * linear).sum() - 3 * mean * mean, 0).squareRoot()
+            return min(max(own, mean + 0.478 * chroma), 1)
+        }.max() ?? 0
+    }
+}
+
+extension GlassTint {
+    /// ``interiorLuminanceRange`` with `light` over it, anywhere inside
+    /// `rect` of the panel at `panelFrame` (points), whatever the
+    /// background. The bound takes the brightest stop, at its brightest hue
+    /// when the hue drifts.
+    ///
+    /// `.light` adds at most each emitter's opacity times the brightest
+    /// color's luminance (screen never adds more than the light itself);
+    /// `.paint` mixes toward the colors by at most the capped opacity per
+    /// emitter, which can also lower the floor.
+    public func interiorLuminanceRange(
+        with light: GlassLight, in rect: CGRect, ofPanel panelFrame: CGRect, bezelWidth: Double
+    ) -> ClosedRange<Double> {
+        let base = interiorLuminanceRange
+        let opacity = light.maximumOpacity(in: rect, ofPanel: panelFrame, bezelWidth: bezelWidth)
+        guard opacity > 0 else { return base }
+        let ceiling = light.brightestStopLuminance
+        // Every emitter adds in turn, so the bound counts them all.
+        let count = Double(light.emitters.filter { !$0.colors.isEmpty && $0.intensity > 0 }.count)
+        switch light.composite {
+        case .light:
+            return base.lowerBound...min(base.upperBound + min(count * opacity * ceiling, 1), 1)
+        case .paint:
+            let cap = min(opacity, GlassLight.maximumPaintOpacity)
+            return (base.lowerBound * pow(1 - cap, count))...max(base.upperBound, ceiling)
+        }
     }
 }

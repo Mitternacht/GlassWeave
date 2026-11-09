@@ -42,6 +42,7 @@ public struct GlassTint: Hashable, Sendable {
 /// | ``tint`` | normalized | components and strength 0...1 | See ``GlassTint``. |
 /// | ``glow`` | see ``GlassGlow`` | see ``GlassGlow`` | A colored rim, inner glow, and center fill drawn over the glass, an optional halo outside it, and an optional pulse; ``GlassGlow/none`` (the default) draws nothing. |
 /// | ``interior`` | see ``GlassInterior`` | see ``GlassInterior`` | An animated energy, rays, or embers pattern inside the outline, screened over the glass and the glow, fading toward the middle; ``GlassInterior/none`` (the default) draws nothing. |
+/// | ``light`` | see ``GlassLight`` | see ``GlassLight`` | Up to four emitters of colored light inside the glass (a band along an edge, an arc, an orb, or a four-corner field), over the interior; ``GlassLight/none`` (the default) draws nothing. Experimental. |
 ///
 /// **Normalization rule.** When a renderer accepts parameters, a non-finite
 /// value (NaN or infinity) anywhere is rejected with
@@ -49,8 +50,8 @@ public struct GlassTint: Hashable, Sendable {
 /// value. A finite value outside its range is clamped to the nearest valid
 /// value: negative lengths become zero, lengths longer than half the
 /// panel's shorter side become that half, and coefficients and tint
-/// components are clamped to 0...1. ``GlassGlow`` and ``GlassInterior``
-/// document the same rule for their fields. The renderer reports the values it actually uses through
+/// components are clamped to 0...1. ``GlassGlow``, ``GlassInterior``, and
+/// ``GlassLight`` document the same rule for their fields. The renderer reports the values it actually uses through
 /// ``GlassRenderer/panel``.
 public struct GlassParameters: Hashable, Sendable {
     /// Outline corner radius, in points.
@@ -69,6 +70,9 @@ public struct GlassParameters: Hashable, Sendable {
     /// An animated pattern inside the outline, drawn over the glass and the
     /// glow; ``GlassInterior/none`` for none.
     public var interior: GlassInterior
+    /// Colored light inside the outline, drawn over the glass, the glow, and
+    /// the interior; ``GlassLight/none`` for none. Experimental.
+    public var light: GlassLight
 
     /// The most edge illumination can brighten the outline: this fraction of
     /// the way from the glass color to white, at ``edgeHighlight`` 1.
@@ -81,7 +85,8 @@ public struct GlassParameters: Hashable, Sendable {
         edgeHighlight: Double = 0.5,
         tint: GlassTint = .none,
         glow: GlassGlow = .none,
-        interior: GlassInterior = .none
+        interior: GlassInterior = .none,
+        light: GlassLight = .none
     ) {
         self.cornerRadius = cornerRadius
         self.bezelWidth = bezelWidth
@@ -90,6 +95,13 @@ public struct GlassParameters: Hashable, Sendable {
         self.tint = tint
         self.glow = glow
         self.interior = interior
+        self.light = light
+    }
+
+    /// Whether a host must keep drawing new frames for this panel's glow
+    /// pulse, interior, or light, which change with time.
+    public var isAnimated: Bool {
+        glow.isAnimated || interior.isAnimated || light.isAnimated
     }
 }
 
@@ -161,8 +173,14 @@ public enum GlassParameterError: Error, Hashable, Sendable, CustomStringConverti
     /// instead; a non-finite value has no nearest valid value.
     case nonFinite(Field)
 
+    /// A value of a ``GlassLight`` is NaN or infinite. Light has its own
+    /// field list, so ``Field`` stays as shipped.
+    case nonFiniteLight(GlassLight.Field)
+
     public var description: String {
         switch self {
+        case let .nonFiniteLight(field):
+            "The glass light parameter \(field.rawValue) is NaN or infinite. Pass a finite value; finite values outside the documented range are clamped."
         case .nonFinite(.effectTime):
             "The effectTime is NaN or infinite. Pass a finite number of seconds."
         case let .nonFinite(field):
@@ -187,6 +205,7 @@ extension GlassParameters {
         }
         let glow = try glow.normalized(maximumLength: maximumLength)
         let interior = try interior.normalized()
+        let light = try light.normalized(maximumLength: maximumLength)
         let length = { (value: Double) in min(max(value, 0), maximumLength) }
         let unit = { (value: Double) in min(max(value, 0), 1) }
         return GlassParameters(
@@ -199,7 +218,8 @@ extension GlassParameters {
                 strength: unit(tint.strength)
             ),
             glow: glow,
-            interior: interior
+            interior: interior,
+            light: light
         )
     }
 }

@@ -31,6 +31,10 @@ struct GlassPanelGeometry: Equatable {
     /// built for, or `nil` when the panel's interior draws nothing (GW-19;
     /// the model is in GlassInteriorModel.swift).
     var interior: Interior?
+    /// The inner light resolved at the effect time the geometry was built
+    /// for, or `nil` when the panel's light draws nothing (GW-21; the model
+    /// is in GlassLightModel.swift).
+    var light: Light?
 
     /// A visible ``GlassGlow`` converted to target pixels and linear light.
     struct Glow: Equatable {
@@ -98,6 +102,10 @@ struct GlassPanelGeometry: Equatable {
         interior = Interior(
             parameters.interior, displayScale: displayScale, effectTime: effectTime,
             halfSize: halfSize / displayScale, exitHeight: (glow?.haloRadius ?? 0) / displayScale
+        )
+        light = Light(
+            parameters.light, displayScale: displayScale, effectTime: effectTime,
+            halfSize: halfSize, bezelWidth: bezelWidth
         )
     }
 
@@ -341,7 +349,15 @@ struct GlassPanelGeometry: Equatable {
             interiorCenterFade: Float(interior?.centerFade ?? 0),
             interiorPixelsPerPoint: Float(interior?.pixelsPerPoint ?? 0),
             padding6: 0,
-            interiorSparks: sparkLanes
+            interiorSparks: sparkLanes,
+            lightEmitterCount: UInt32(light?.emitters.count ?? 0),
+            lightComposite: light?.composite ?? GWLightCompositeLight.rawValue,
+            lightCenterFade: light?.centerFade ?? 0,
+            lightPiping: light?.piping ?? 0,
+            lightPipingWidth: light?.pipingWidth ?? 0,
+            lightBodyScale: light?.bodyScale ?? 0,
+            padding7: 0, padding8: 0,
+            lightEmitters: light?.records ?? Light.emptyRecords
         )
     }
 
