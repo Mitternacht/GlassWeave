@@ -67,6 +67,12 @@ animating the link only asks the display for the high rate; it requests no
 frames, the app still does. `effectFrameRate` reports the range in force;
 `activeMotionClass` the class.
 
+The effect clock runs while a presented panel's `GlassParameters.isAnimated`
+is true (a glow pulse, a moving interior, an animated inner light, or a
+wobbling shape), the surface has a source or producer and is visible, and the
+panel can change a pixel of the drawable. `isEffectClockPaused` (experimental)
+holds it still, for showing one moment through the `timeOffset` fields.
+
 An iPhone above 60 Hz needs the app's `CADisableMinimumFrameDurationOnPhone`
 Info.plist key (documented for `CADisplayLink` and `CAAnimation`; its effect on
 an update link is not measured). The laboratory sets it.

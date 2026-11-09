@@ -19,9 +19,10 @@ import UIKit
 /// not overlap). The view sizes its drawable from its own bounds and
 /// `traitCollection.displayScale`, never from a screen or a global scene.
 ///
-/// Effect clock (``isAnimating``): while any presented panel whose glow
-/// animates (`GlassGlow.isAnimated`, a pulse) or whose interior does
-/// (`GlassInterior.isAnimated`, a speed above 0) can change a pixel of the
+/// Effect clock (``isAnimating``): while any presented panel whose
+/// parameters animate (`GlassParameters.isAnimated`: a glow pulse, an
+/// interior with a speed above 0, an animated inner light, or a wobbling
+/// shape) can change a pixel of the
 /// drawable (it has area, and its quad, the panel grown by one pixel and its
 /// halo radius, overlaps the view's bounds), the view has a source or a
 /// frame producer, and the view is visible, the view runs one `UIUpdateLink`
@@ -32,8 +33,8 @@ import UIKit
 /// every other request: they coalesce, wait while hidden, and never exceed
 /// the in-flight bound. Each draw evaluates the glow and the interior at the
 /// effect time (`GlassRenderer.effectTime`). The link is removed as soon as
-/// nothing animates any more (no pulse and no moving interior, or Reduce
-/// Motion, which steadies the glow and stills the interior), every animated
+/// nothing animates any more (no pulse, no moving interior, light or shape,
+/// or Reduce Motion, which steadies and stills all of them), every animated
 /// panel lies outside the bounds or has no area, the source and the producer
 /// are gone, the view stops being visible, or it leaves its window; the
 /// effect time then stays where it was and continues from there when the
@@ -169,15 +170,28 @@ public final class GlassSurfaceView: UIView {
     /// can stop its source's nonessential motion under Reduce Motion.
     public var accessibilitySettingsHandler: ((GlassAccessibilitySettings) -> Void)?
 
-    /// Whether the effect clock runs: a presented panel's glow or interior
-    /// animates (a pulse that Reduce Motion has not steadied, or an interior
-    /// with a speed above 0 that Reduce Motion has not stilled) and that
+    /// Whether the effect clock runs: a presented panel's parameters animate
+    /// (a glow pulse, an interior with a speed above 0, an animated inner
+    /// light, or a wobbling shape, none of them steadied or stilled by Reduce
+    /// Motion) and that
     /// panel can change a pixel of the drawable, the view has a source or a
     /// frame producer, and the view is visible. While it runs, the view
     /// requests a frame on every display update of its window; otherwise the
     /// glow is drawn only when something else requests a frame.
     public var isAnimating: Bool {
         effectClockRunning
+    }
+
+    /// Holds the effect clock still while `true` (experimental): nothing
+    /// animates, ``isAnimating`` is `false`, and the effect time stays where
+    /// it was (0 if the clock never ran), so a still moment can be shown by
+    /// setting each animated parameter's `timeOffset`. The default is `false`.
+    /// Pausing and resuming do not jump the effect time.
+    public var isEffectClockPaused = false {
+        didSet {
+            guard isEffectClockPaused != oldValue else { return }
+            updateEffectClock()
+        }
     }
 
     /// The effect clock's time, in seconds, given to the renderer at each
@@ -568,14 +582,18 @@ public final class GlassSurfaceView: UIView {
     }
 
     /// Whether the effect clock should run now: the view is visible, has a
-    /// source or a producer, and a presented panel whose glow or interior
-    /// animates can change a pixel of the drawable. A tick for a panel that
-    /// cannot would only present the same pixels again.
+    /// source or a producer, and a presented panel whose parameters animate
+    /// (``GlassParameters/isAnimated``: a glow pulse, a moving interior, an
+    /// animated inner light, or a wobbling shape) can change a pixel of the
+    /// drawable. The panels are the presented ones, so the quality tier and
+    /// the accessibility policy have already steadied what they steady (Reduce
+    /// Motion stills every one of them). A tick for a panel that cannot would
+    /// only present the same pixels again.
     private var wantsEffectClock: Bool {
-        guard isVisible, renderer.currentFrame != nil || frameProducer != nil else { return false }
+        guard !isEffectClockPaused, isVisible, renderer.currentFrame != nil || frameProducer != nil else { return false }
         let scale = Double(traitCollection.displayScale)
         return renderer.panels.contains { panel in
-            (panel.parameters.glow.isAnimated || panel.parameters.interior.isAnimated)
+            panel.parameters.isAnimated
                 && panel.reachesTarget(pixelWidth: pixelSize.width, pixelHeight: pixelSize.height, displayScale: scale)
         }
     }

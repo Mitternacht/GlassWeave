@@ -112,13 +112,14 @@ and a four-corner field. Captures are in `docs/evidence/captures/gw-21-*`.
 
 ### Deviations and limits
 
-- **Surface clock.** `GlassSurfaceView` decides whether to run its effect
-  clock from `glow.isAnimated || interior.isAnimated`. It was not edited in
-  this lane (the presentation lane owns that file), so the surface does not
-  yet tick for light on its own. The one-line follow-up is to use
-  `GlassParameters.isAnimated`, which already includes `light.isAnimated`.
-  Until then the lab demo drives `GlassLight.timeOffset` from its own update
-  link (stopped under Reduce Motion and when hidden).
+- **Surface clock (closed by the merge of GW-27).** `GlassSurfaceView` runs
+  its effect clock while a presented panel's `GlassParameters.isAnimated` is
+  true, which includes the inner light and a wobbling shape as well as the
+  glow and the interior (it reads the panels after the quality tier and the
+  accessibility policy, so Reduce Motion stills all of them). The lab's light
+  fields and shapes pages no longer have an update link of their own; a still
+  `-lab.lightTime` or `-lab.shapesTime` pauses the clock with
+  `GlassSurfaceView.isEffectClockPaused` and sets the `timeOffset`.
 - **Field corners.** The proposal's `.field(corners:warp:)` is
   `.field(warp:)` here, with the emitter's four stops as the corners.
 - **Error field.** New light fields have their own `GlassLight.Field` and
@@ -659,8 +660,10 @@ Three plane waves (amplitude `amplitude / 3` each, wavelength 1.6 frame units)
 whose phases turn 6, 9 and 13 times per 64 s of wobble time
 `(effectTime + timeOffset) x speed`, so the shape repeats exactly every 64 s.
 The raw distance and its gradient both include the waves, so the normal and
-every effect follow. The surface's effect clock does not run for it: like
-`GlassLight`, a host moves `timeOffset` from its own clock (the lab does).
+every effect follow. The surface's effect clock runs for it (and for
+`GlassLight`) because `GlassParameters.isAnimated` includes both; a host
+needs no clock of its own and leaves `timeOffset` at 0 unless it shows a still
+moment.
 Reduce Motion: `GlassAccessibilityPolicy.presentedShape` sets `speed` 0, a
 still, slightly irregular outline. Reduce Transparency and Increase Contrast
 keep the shape.

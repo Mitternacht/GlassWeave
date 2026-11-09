@@ -186,11 +186,12 @@ final class BenchBackground {
 ///   <seconds>` shows one still moment.
 ///
 /// All glass is one `GlassSurfaceView`; its background frame is produced only
-/// when the page or the size changes. The light flows by this screen's own
-/// update link, which sets each light's ``GlassLight/timeOffset`` and runs
-/// only while something moves: not under Reduce Motion (the surface's policy
-/// stills the light, and the link stops), not when hidden, not for a still
-/// `-lab.lightTime`.
+/// when the page or the size changes. The light flows by the surface's own
+/// effect clock (``GlassParameters/isAnimated`` includes the light), which
+/// runs only while something moves: not under Reduce Motion (the surface's
+/// policy stills the light), not when hidden. A still `-lab.lightTime`
+/// pauses the clock (``GlassSurfaceView/isEffectClockPaused``) and sets each
+/// light's ``GlassLight/timeOffset``.
 final class MaterialBenchViewController: UIViewController {
     enum Mode {
         case bench
@@ -225,8 +226,6 @@ final class MaterialBenchViewController: UIViewController {
     private var captionLabels: [UILabel] = []
     private let timeLabel = UILabel()
     private let diagnosticsLabel = UILabel()
-    private var link: UIUpdateLink?
-    private var startModelTime: Double?
     /// The moment `-lab.lightTime` freezes the light at, or `nil` to flow.
     private let stillTime: Double?
 
@@ -485,12 +484,6 @@ final class MaterialBenchViewController: UIViewController {
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
         applyPage()
-        updateLink()
-    }
-
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        updateLink()
     }
 
     override func viewDidLayoutSubviews() {
@@ -522,12 +515,13 @@ final class MaterialBenchViewController: UIViewController {
             rendering = .success(Rendering(surface: surface, background: background))
             surface.visibilityHandler = { [weak self] visible in
                 if !visible { self?.currentBackground?.trim() }
-                self?.updateLink()
             }
             surface.accessibilitySettingsHandler = { [weak self] _ in
-                self?.updateLink()
                 self?.updateDiagnostics()
             }
+            // A still `-lab.lightTime` holds the surface's effect clock; the
+            // light's `timeOffset` then names the moment shown.
+            surface.isEffectClockPaused = stillTime != nil
             surface.setFrameProducer { [weak self] commandBuffer, pixelSize in
                 self?.produceBackground(into: commandBuffer, pixelSize: pixelSize)
             }
@@ -583,6 +577,8 @@ final class MaterialBenchViewController: UIViewController {
             guard let self else { return }
             page = pages[pageControl.selectedSegmentIndex]
             applyPage()
+            // The light's composite and the tint depend on the page.
+            applyPanels()
         }, for: .valueChanged)
         for label in [titleLabel, timeLabel, diagnosticsLabel] {
             label.translatesAutoresizingMaskIntoConstraints = true
@@ -750,23 +746,19 @@ final class MaterialBenchViewController: UIViewController {
             let fitted = label.sizeThatFits(CGSize(width: label.frame.width, height: .greatestFiniteMagnitude))
             label.frame.size = CGSize(width: min(fitted.width + 14, label.frame.width), height: min(fitted.height + 6, label.frame.height))
         }
-        applyPanels(elapsed: currentElapsed)
+        applyPanels()
         applyLightOffset()
-        // The panels are in place, so the surface can say whether they move.
-        updateLink()
         updateDiagnostics()
     }
 
-    private var currentElapsed = 0.0
-
-    /// Gives the surface the demo panels with their light at `elapsed`
-    /// seconds past the still time (or the start).
-    private func applyPanels(elapsed: Double) {
-        currentElapsed = elapsed
+    /// Gives the surface the demo panels. The light flows by the surface's
+    /// own effect clock; only a still `-lab.lightTime` sets the moment, as
+    /// each light's `timeOffset`.
+    private func applyPanels() {
         let base = stillTime ?? 0
         let panels = demos.map { demo -> GlassPanel in
             var parameters = demo.parameters
-            parameters.light.timeOffset = base + elapsed
+            parameters.light.timeOffset = base
             // An inlaid dome button sits at the panel's right end.
             for index in parameters.lens.inlays.indices {
                 parameters.lens.inlays[index].x = demo.frame.width / 2 - parameters.lens.inlays[index].radius - 10
@@ -783,43 +775,6 @@ final class MaterialBenchViewController: UIViewController {
         }
         try? surface?.setPanels(panels)
     }
-
-    // MARK: Motion
-
-    /// Whether the demo's lights should move now: light fields only, not
-    /// still, visible, and not under Reduce Motion.
-    private var shouldFlow: Bool {
-        guard mode == .lightFields, stillTime == nil, let surface, surface.isVisible else { return false }
-        return !surface.accessibilitySettings.reduceMotion && surface.presentedPanels.contains { $0.parameters.light.isAnimated }
-    }
-
-    private func updateLink() {
-        if shouldFlow {
-            guard link == nil else { return }
-            let newLink = UIUpdateLink(view: view) { [weak self] _, info in
-                self?.tick(modelTime: info.modelTime)
-            }
-            newLink.requiresContinuousUpdates = true
-            newLink.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-            newLink.isEnabled = true
-            startModelTime = nil
-            bankedElapsed = currentElapsed
-            link = newLink
-        } else if let link {
-            link.isEnabled = false
-            self.link = nil
-        }
-    }
-
-    private func tick(modelTime: Double) {
-        let start = startModelTime ?? modelTime
-        startModelTime = start
-        applyPanels(elapsed: bankedElapsed + modelTime - start)
-    }
-
-    /// Elapsed seconds from earlier running periods, so a pause does not jump
-    /// the light.
-    private var bankedElapsed = 0.0
 
     private func updateDiagnostics() {
         guard let surface else {

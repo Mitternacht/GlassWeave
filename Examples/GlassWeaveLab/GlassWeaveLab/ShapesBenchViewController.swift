@@ -11,10 +11,11 @@ import UIKit
 /// `-lab.shapes YES` opens it; `-lab.shapesBackdrop <page>` picks the bench
 /// page behind it (default the charcoal wall); `-lab.shapesTime <seconds>` freezes the
 /// wobble at one moment. All glass is one `GlassSurfaceView`. The wobble runs by
-/// this screen's own update link, which sets each blob's
-/// ``GlassBlob/Wobble/timeOffset`` and runs only while something moves: not
-/// under Reduce Motion (the surface's policy stills the wobble and the link
-/// stops), not when hidden, not for a still `-lab.shapesTime`. The diagnostics
+/// the surface's own effect clock (``GlassParameters/isAnimated`` includes the
+/// shape), which runs only while something moves: not under Reduce Motion
+/// (the surface's policy stills the wobble), not when hidden. A still
+/// `-lab.shapesTime` pauses the clock (``GlassSurfaceView/isEffectClockPaused``)
+/// and sets each blob's ``GlassBlob/Wobble/timeOffset``. The diagnostics
 /// line reports whether any two panels' quads overlap (rule 10 of the optics
 /// study); it must read `none`.
 final class ShapesBenchViewController: UIViewController {
@@ -38,10 +39,6 @@ final class ShapesBenchViewController: UIViewController {
     private let closeButton = UIButton(configuration: .glass())
     private var captionLabels: [UILabel] = []
     private let diagnosticsLabel = UILabel()
-    private var link: UIUpdateLink?
-    private var startModelTime: Double?
-    private var bankedElapsed = 0.0
-    private var currentElapsed = 0.0
     /// The moment `-lab.shapesTime` freezes the wobble at, or `nil` to move.
     private let stillTime: Double?
 
@@ -168,12 +165,6 @@ final class ShapesBenchViewController: UIViewController {
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
         applyPage()
-        updateLink()
-    }
-
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        updateLink()
     }
 
     override func viewDidLayoutSubviews() {
@@ -205,12 +196,13 @@ final class ShapesBenchViewController: UIViewController {
             rendering = .success(Rendering(surface: surface, background: background))
             surface.visibilityHandler = { [weak self] visible in
                 if !visible { self?.currentBackground?.trim() }
-                self?.updateLink()
             }
             surface.accessibilitySettingsHandler = { [weak self] _ in
-                self?.updateLink()
                 self?.updateDiagnostics()
             }
+            // A still `-lab.shapesTime` holds the surface's effect clock; the
+            // wobble's `timeOffset` then names the moment shown.
+            surface.isEffectClockPaused = stillTime != nil
             surface.setFrameProducer { [weak self] commandBuffer, pixelSize in
                 self?.produceBackground(into: commandBuffer, pixelSize: pixelSize)
             }
@@ -332,59 +324,25 @@ final class ShapesBenchViewController: UIViewController {
             let fitted = label.sizeThatFits(CGSize(width: label.frame.width, height: .greatestFiniteMagnitude))
             label.frame.size = CGSize(width: min(fitted.width + 14, label.frame.width), height: min(fitted.height + 6, label.frame.height))
         }
-        applyPanels(elapsed: currentElapsed)
-        updateLink()
+        applyPanels()
         updateDiagnostics()
     }
 
-    /// Gives the surface the panels with their wobble at `elapsed` seconds
-    /// past the still time (or the start).
-    private func applyPanels(elapsed: Double) {
-        currentElapsed = elapsed
+    /// Gives the surface the panels. The wobble and the light move by the
+    /// surface's own effect clock; only a still `-lab.shapesTime` sets the
+    /// moment, as the `timeOffset` of each.
+    private func applyPanels() {
         let base = stillTime ?? 0
         let panels = demos.map { demo -> GlassPanel in
             var parameters = demo.parameters
-            parameters.light.timeOffset = base + elapsed
+            parameters.light.timeOffset = base
             if case var .blob(blob) = parameters.shape {
-                blob.wobble.timeOffset = base + elapsed
+                blob.wobble.timeOffset = base
                 parameters.shape = .blob(blob)
             }
             return GlassPanel(frame: demo.frame, parameters: parameters)
         }
         try? surface?.setPanels(panels)
-    }
-
-    // MARK: Motion
-
-    /// Whether the shapes should move now: not still, visible, and not under
-    /// Reduce Motion.
-    private var shouldFlow: Bool {
-        guard stillTime == nil, let surface, surface.isVisible else { return false }
-        return !surface.accessibilitySettings.reduceMotion && surface.presentedPanels.contains { $0.parameters.isAnimated }
-    }
-
-    private func updateLink() {
-        if shouldFlow {
-            guard link == nil else { return }
-            let newLink = UIUpdateLink(view: view) { [weak self] _, info in
-                self?.tick(modelTime: info.modelTime)
-            }
-            newLink.requiresContinuousUpdates = true
-            newLink.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-            newLink.isEnabled = true
-            startModelTime = nil
-            bankedElapsed = currentElapsed
-            link = newLink
-        } else if let link {
-            link.isEnabled = false
-            self.link = nil
-        }
-    }
-
-    private func tick(modelTime: Double) {
-        let start = startModelTime ?? modelTime
-        startModelTime = start
-        applyPanels(elapsed: bankedElapsed + modelTime - start)
     }
 
     // MARK: Diagnostics
