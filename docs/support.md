@@ -41,7 +41,7 @@ functional evidence only.
 | macOS 26.x | **Untested** | Declared floor; not run. |
 | Clean consumer, SwiftPM git dependency | Tested | A separate package resolved the candidate revision and ran native and custom mode tests on My Mac and the iPhone 18 Pro simulator; see [the pre-alpha notes](evidence/pre-alpha.md#clean-consumer-check). |
 | Xcode 27.2 (27B52), Swift 6.4.2 | Used for every result | Other toolchains are untested. |
-| GitHub Actions `macos-26` | **Not run** | The workflow is written; it has not run on GitHub. |
+| GitHub Actions `macos-26` | **Not run** | The workflow is written; it has not run on GitHub. It selects `/Applications/Xcode_27.2.app` and fails if that Xcode is missing or reports another version, so a hosted run uses the recorded toolchain or stops. Whether the hosted image provides Xcode 27.2 is not known. |
 | Metal 4 | Not used | `RenderCapabilities` reports it; the renderer uses conventional Metal (GW-11 decides). |
 | VoiceOver, live navigation | **Untested** | The Simulator has no VoiceOver; element structure and audits pass in UI tests. |
 
