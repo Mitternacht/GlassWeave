@@ -1,14 +1,14 @@
 # Material studies (GW-29)
 
-Three lab screens that put GlassWeave's own glass next to Apple's and show what it adds. Each is built only from public GlassWeave API and a procedural background written for it (`Examples/GlassWeaveLab/GlassWeaveLab/Studies/StudyBackgrounds.metal`); no reference picture, crop or traced asset is used or stored. The direction is Apple's Liquid Glass with more capability: a mostly clear body, a thin crisp rim, one light from the upper left, quiet color, calm shadows, generous negative space. Every study can add a real `UIGlassEffect` capsule on the same backdrop (`-lab.studyTwin YES`) so the two can be compared by eye.
+Four lab screens that put GlassWeave's own glass next to Apple's and show what it adds. Each is built only from public GlassWeave API and a procedural background written for it (`Examples/GlassWeaveLab/GlassWeaveLab/Studies/StudyBackgrounds.metal`); no reference picture, crop or traced asset is used or stored. The direction is Apple's Liquid Glass with more capability: a mostly clear body, a thin crisp rim, one light from the upper left, quiet color, calm shadows, generous negative space. Every study can add a real `UIGlassEffect` capsule on the same backdrop (`-lab.studyTwin YES`) so the two can be compared by eye.
 
-> The API these studies use is experimental. Nothing here changes the package.
+> The API these studies use is experimental. The studies themselves change nothing in the package; the two package edits of this pass (the native `.clear` style and the gel's noise level) are described below.
 
 ## How to open them
 
 | Launch argument | Effect |
 | --- | --- |
-| `-lab.study pearl\|pill\|shelf` | Opens the study as the window's root. The lab's "Material studies" menu opens the same screens over the window. |
+| `-lab.study pearl\|pill\|shelf\|vessel` | Opens the study as the window's root. The lab's "Material studies" menu opens the same screens over the window. |
 | `-lab.studyTime <seconds>` | Pins the script at that time: a capture is repeatable, and two runs show the same picture. |
 | `-lab.studyTwin YES` | Adds a native `UIGlassEffect` capsule at the bottom for comparison. |
 | `-lab.studyDiagnostics YES` | Shows the diagnostics line (panels, rule 10, draws, backgrounds, accessibility settings). |
@@ -50,10 +50,37 @@ A frosted capsule holds a large native title and three native buttons, over a bl
 - Cost: the frost pyramid is rebuilt each frame while the pebbles drift (30 times a second); under Reduce Motion nothing ticks.
 - Met: frost, bevel bending and fringes at the bevel, a guaranteed-contrast title. Approximated: a pale pebble under the text band makes a small gray smudge where the scrim darkens it to keep the contrast; the rainbow arc is soft, not a prism.
 
+## Vessel (target: thick, smoky glass holding a calm luminous liquid, on a dark stage)
+
+An original composition around the GW-28 liquid fill: two vessels, each one panel, on a near-black stage (`study_vessel_fragment`: a cool wall that warms toward the table, one very faint far soft box at the upper left, the warm light each vessel throws on the table, a soft vignette).
+
+- The large vessel is a rounded rectangle with a refined thick lens (squircle bevel, dispersion 0.10, the thin lit-side rim) and a smoky tint, so the glass is nearly clear and dark. It holds a **gel**: a smooth rounded body low in the glass, one warm ramp (deep amber, orange, pale gold), one contour sheet at low brightness, a thin line in the glass wall, five tiny bubbles.
+- The small vessel is a tall rounded rectangle holding a **level** liquid (surface waves 0.5 pt, meniscus 3 pt). A native "Liquid level" slider fills it and a native "Nudge" button starts a damped slosh (`GlassFillSlosh`) that the 30 Hz script tick steps until it settles; Nudge is disabled under Reduce Motion. The level also lights the table under the small vessel a little more.
+- The surface's effect clock moves the bubbles and the gel's slow wobble (the other studies pause it; a pinned `-lab.studyTime` pauses it here too, so a capture is repeatable). The stage is a still picture, drawn again only when the layout or the level changes.
+- Met: calm luminous liquid with a bright thin edge, smoky thick glass with a crisp rim, sparse tiny bubbles (no rings or crescents), generous negative space, native controls. Approximated: reference 1 has a far richer dark glass (long soft reflections on the outer wall, a thick curved refraction of the liquid through the rim); ours is one rim line and a dark body. A level liquid in a rectangle shows soft diagonal creases where the liquid's depth profile folds at the corners (the dome profile has no smoothing there), so the large vessel uses a gel, whose rounded body has none.
+- One shader change for this study, in the filled pipeline only: the gel's heat noise went from a 50% to a 24% modulation and its fine noise from 14% to 8%, because the first capture looked mottled and dirty. `.none` is untouched (the GW-28 baseline test is unchanged).
+
 ## Captures
 
-`docs/evidence/captures/gw-29-study-*.png`, iPhone 18 Pro simulator. The three "vs native" captures are full size and include the real `UIGlassEffect` capsule at the bottom; the "half" captures are half size (reduce transparency, right-to-left, increase contrast).
+`docs/evidence/captures/gw-29-study-*.png`, iPhone 18 Pro simulator. The "vs native" captures (pearl, pill, shelf, vessel) are full size and include the real `UIGlassEffect` capsule at the bottom; the "half" captures are half size (reduce transparency, right-to-left, increase contrast).
+
+## The Apple vs GlassWeave screen: the refined rows
+
+`VersusViewController` (`-lab.versus YES`) now has ten rows. The first four (hues, clear middle with colored rim, light from one side, animated interior) are the GW-29a glow rows, with a softer halo. Six refined rows follow, one per feature; each native half is the genuine `UIGlassEffect` alone (no GlassWeave rim or halo), the weave half is built for a light and a dark page, and each caption states only what the code or Apple's public API does:
+
+| Row | Native half | GlassWeave half |
+| --- | --- | --- |
+| A thick lens with dispersion | `NativeGlassView` style `.clear` (new) | squircle bevel, six-tap dispersion 0.7, nearly clear body |
+| Inner light and pooled color | one blue tint | three colors pooled along the bottom edge, clear middle |
+| Chrome and prismatic finishes | regular glass | thin ring band, light studio, prismatic finish (softer in dark) |
+| Frost with a clear center | regular glass | `clearCenter` frost, sigma 12 |
+| Freeform shapes | capsule (`cornerConfiguration`) | a three-part smooth blob with a slow wobble |
+| Liquid fill | one orange tint | a gel in a smoky vessel, one sheet, three bubbles |
+
+The "Animate interiors" switch also holds the light's flow, a blob's wobble, and the fill's bubbles and waves. The hierarchy check (native half: `UIGlassEffect` views, no GlassWeave surface; weave half: one surface) and the divider clipping are unchanged.
+
+`NativeGlassView.Configuration.style` (`.regular` default, `.clear`) maps to `UIGlassEffect.Style`. Its doc comment carries Apple's advice for clear glass: over bright content add a dark dimming layer of about 35% opacity behind it; none is drawn by the view.
 
 ## Not done in this pass
 
-Dynamic Type at the largest sizes, the accessibility audit, iPad and landscape captures, full-frame M5 characterization, and the vessel study and the final versus rows (a later agent).
+Dynamic Type at the largest sizes, the accessibility audit, iPad and landscape captures (the studies were smoke-run once on the iPad simulator, no capture kept), the right-to-left and largest-text versus captures, a captured nudge frame of the vessel study, and full-frame M5 characterization.

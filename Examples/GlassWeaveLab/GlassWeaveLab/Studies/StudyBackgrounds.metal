@@ -2,7 +2,7 @@
 
 using namespace metal;
 
-// The three material studies' backgrounds (GW-29): pearl, pill and shelf.
+// The four material studies' backgrounds (GW-29): pearl, pill, shelf and vessel.
 //
 // Every picture is a pure function of the position on the screen in points
 // and of the parameters below, written by us; no picture is traced from or
@@ -322,5 +322,50 @@ fragment float4 study_shelf_fragment(
         const float opacity = 0.72 + 0.20 * z;
         color = mix(color, stone, edge * opacity);
     }
+    return float4(studyFinish(color, in.position.xy), 1.0);
+}
+
+// MARK: Vessel (a dark stage under warm glass)
+
+// Rectangles: 0 the large vessel, 1 the small one (their frames, in points).
+// 1.w is the small vessel's liquid level, 0...1: a fuller vessel lights the
+// table beneath it a little more.
+//
+// The picture is quiet on purpose, so the liquid is the only bright thing: a
+// near-black wall that warms toward the table, one far soft box at the upper
+// left (the studies' one light, so the glass has an edge to bend and a lit
+// side to catch it), and the warm light each vessel throws on the table below
+// it, a wide Gaussian that peaks just under the vessel.
+fragment float4 study_vessel_fragment(
+    StudyVertexOut in [[stage_in]],
+    constant float4 *parameters [[buffer(0)]])
+{
+    const float scale = max(parameters[0].z, 1.0);
+    const float2 size = max(parameters[1].xy, float2(1.0));
+    const float level = saturate(parameters[1].w);
+    const float2 p = in.position.xy / scale;
+    const float2 uv = p / size;
+
+    float3 color = mix(float3(0.011, 0.012, 0.017), float3(0.030, 0.026, 0.025), smoothstep(0.15, 1.0, uv.y));
+
+    // The far soft box: a tall rounded strip, faint, with a wide falloff.
+    const float2 q = (uv - float2(0.08, 0.36)) / float2(0.16, 0.34);
+    const float strip = 1.0 - smoothstep(0.0, 1.0, length(q));
+    color += float3(0.50, 0.55, 0.66) * 0.045 * strip;
+
+    // The light of the liquids on the table.
+    for (int i = 0; i < 2; ++i) {
+        const float4 rect = parameters[2 + i];
+        if (rect.z <= 0.0) { continue; }
+        const float2 center = float2(rect.x + 0.5 * rect.z, rect.y + 0.97 * rect.w);
+        const float2 d = (p - center) / float2(0.78 * rect.z, 0.30 * rect.w);
+        const float pool = exp(-1.7 * dot(d, d));
+        const float strength = i == 0 ? 0.17 : 0.05 + 0.10 * level;
+        color += float3(1.0, 0.40, 0.09) * strength * pool;
+    }
+
+    // A soft vignette, so the edges of the screen fall away.
+    const float2 v = (uv - 0.5) * float2(1.0, 0.8);
+    color *= 1.0 - 0.45 * smoothstep(0.30, 0.80, length(v));
     return float4(studyFinish(color, in.position.xy), 1.0);
 }

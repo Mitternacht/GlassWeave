@@ -24,7 +24,7 @@ import UIKit
 ///   panel grown by its halo and its grounding's reach) and reports it in the
 ///   diagnostics line (`-lab.studyDiagnostics YES` shows it).
 ///
-/// Launch arguments: `-lab.study pearl|pill|shelf` opens a study as the
+/// Launch arguments: `-lab.study pearl|pill|shelf|vessel` opens a study as the
 /// window's root, `-lab.studyTime <s>` pins the script, `-lab.studyTwin YES`
 /// adds a real `UIGlassEffect` capsule on the same backdrop to compare with,
 /// `-lab.studyDiagnostics YES` shows the diagnostics line.
@@ -40,6 +40,11 @@ class StudyViewController: UIViewController {
     /// Whether the script time changes the picture; a study whose picture is
     /// still has no tick.
     var animates: Bool { true }
+    /// Whether the surface's own effect clock runs (it moves the bubbles and
+    /// the gel of a liquid fill, which have no time input of their own). Off
+    /// by default: the script is the only clock. A pinned script time
+    /// (`-lab.studyTime`) and Reduce Motion stop it either way.
+    var usesEffectClock: Bool { false }
     /// Adds the native controls and the clear placeholders to `content`.
     func buildContent(in content: UIView) {}
     /// The glass panels at script time `time`, with frames in the surface's
@@ -222,7 +227,9 @@ class StudyViewController: UIViewController {
             }
             // The script is the only clock: the surface's effect clock stays
             // still, and each moving thing is driven by the script time.
-            surface.isEffectClockPaused = true
+            // (A study that holds a liquid fill lets the clock move the
+            // bubbles, except in a pinned capture.)
+            surface.isEffectClockPaused = !usesEffectClock || Self.pinnedTime != nil
             surface.renderObserver = { [weak self] _ in
                 self?.drawCount += 1
                 self?.updateDiagnostics()
@@ -409,6 +416,7 @@ class StudyViewController: UIViewController {
         case .pearl: PearlStudyViewController()
         case .pill: PillStudyViewController()
         case .shelf: ShelfStudyViewController()
+        case .vessel: VesselStudyViewController()
         }
     }
 

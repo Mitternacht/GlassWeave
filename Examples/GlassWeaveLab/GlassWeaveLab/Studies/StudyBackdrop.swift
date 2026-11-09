@@ -3,19 +3,21 @@ import GlassWeave
 import Metal
 import UIKit
 
-/// The three material studies (GW-29): each is a lab screen that shows one
+/// The four material studies (GW-29): each is a lab screen that shows one
 /// reference-level look over a procedural background, with native controls
-/// above the glass. `-lab.study pearl|pill|shelf` opens one at launch.
+/// above the glass. `-lab.study pearl|pill|shelf|vessel` opens one at launch.
 enum StudyKind: String, CaseIterable {
     case pearl
     case pill
     case shelf
+    case vessel
 
     var title: String {
         switch self {
         case .pearl: String(localized: "Pearl")
         case .pill: String(localized: "Pill")
         case .shelf: String(localized: "Shelf")
+        case .vessel: String(localized: "Vessel")
         }
     }
 

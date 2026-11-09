@@ -488,6 +488,7 @@ final class VersusViewController: UIViewController {
         let surface = rendering.surface
         guard surface.bounds.width > 0, view.bounds.width > 0 else { return }
         let animated = interiorsAnimate
+        let dark = traitCollection.userInterfaceStyle == .dark
         // Only panels in view are drawn; the renderer holds a few panels.
         let reach = CGFloat(VersusCase.halo) + 2
         let visible = surface.bounds.insetBy(dx: -reach, dy: -reach)
@@ -495,7 +496,7 @@ final class VersusViewController: UIViewController {
         for (index, row) in weaveRows.enumerated() {
             let rect = row.panel.convert(row.panel.bounds, to: surface)
             guard rect.intersects(visible) else { continue }
-            panels.append(GlassPanel(frame: rect, parameters: cases[index].weaveParameters(animated: animated)))
+            panels.append(GlassPanel(frame: rect, parameters: cases[index].weaveParameters(animated: animated, dark: dark)))
         }
         do {
             try surface.setPanels(panels)

@@ -116,9 +116,14 @@ final class VersusRowView: UIView {
         case .native:
             let host = EnhancedNativeGlassView()
             host.glass.cornerConfiguration = .capsule()
-            host.glass.configuration = NativeGlassView.Configuration(tintColor: versusCase.native.tint, isInteractive: true)
-            // The glow is finite, so the view never rejects it.
-            try? host.setGlow(versusCase.native.glow)
+            host.glass.configuration = NativeGlassView.Configuration(
+                tintColor: versusCase.native.tint, isInteractive: true, style: versusCase.native.style
+            )
+            // The glow is finite, so the view never rejects it. A row without
+            // one shows the genuine `UIGlassEffect` alone.
+            if let glow = versusCase.native.glow {
+                try? host.setGlow(glow)
+            }
             if let override = LabViewController.accessibilitySettingsOverride {
                 host.accessibilitySettingsSource = .fixed(override)
             }
@@ -163,8 +168,8 @@ final class VersusRowView: UIView {
             panel.centerXAnchor.constraint(equalTo: slot.centerXAnchor),
             panel.centerYAnchor.constraint(equalTo: slot.centerYAnchor),
             panel.widthAnchor.constraint(lessThanOrEqualToConstant: 260),
-            panel.heightAnchor.constraint(equalToConstant: VersusCase.panelHeight),
-            slot.heightAnchor.constraint(equalToConstant: VersusCase.panelHeight + 2 * Self.verticalMargin),
+            panel.heightAnchor.constraint(equalToConstant: versusCase.height),
+            slot.heightAnchor.constraint(equalToConstant: versusCase.height + 2 * Self.verticalMargin),
         ])
 
         let column = UIStackView(arrangedSubviews: [titlePlate, slot, captionPlate])

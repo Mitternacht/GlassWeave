@@ -1,6 +1,6 @@
 import XCTest
 
-/// GW-29: the material studies (pearl, pill and shelf). `-lab.study <name>`
+/// GW-29: the material studies (pearl, pill, shelf and vessel). `-lab.study <name>`
 /// opens a study as the window's root, `-lab.studyTime <s>` pins its script,
 /// `-lab.studyDiagnostics YES` shows the screen's own diagnostics line.
 final class StudyUITests: XCTestCase {
@@ -22,6 +22,7 @@ final class StudyUITests: XCTestCase {
             name: "shelf", appearance: "dark",
             controls: ["study.shelf.title", "study.shelf.previous", "study.shelf.play", "study.shelf.next"]
         ),
+        Study(name: "vessel", appearance: "dark", controls: ["study.vessel.title", "study.vessel.level", "study.vessel.nudge"]),
     ]
 
     /// Each study launches with its script pinned at two fixed times, shows
