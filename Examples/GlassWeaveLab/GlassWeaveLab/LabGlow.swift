@@ -3,8 +3,10 @@ import GlassWeaveUIKit
 import UIKit
 
 /// A colored glow for the laboratory's custom panel, chosen at launch with
-/// `-lab.glow <name>` (GW-17, GW-18). Without the argument the panel has no
-/// glow and renders exactly as before.
+/// `-lab.glow <name>` (GW-17, GW-18), or for the native reference glass with
+/// `-lab.nativeGlow <name>` (GW-14), which draws the same value's rim and
+/// halo around Apple's glass. Without the argument the panel has no glow and
+/// renders exactly as before, and the reference is plain native glass.
 ///
 /// Every preset keeps the middle see-through (center opacity 0) and keeps
 /// its inner glow within the panel's 22-point rim, where the laboratory
@@ -24,7 +26,13 @@ enum LabGlow: String, CaseIterable {
 
     /// From the `lab.glow` launch argument, or `nil` for no glow.
     static var fromLaunchArguments: LabGlow? {
-        UserDefaults.standard.string(forKey: "lab.glow").flatMap(LabGlow.init(rawValue:))
+        fromLaunchArguments(key: "lab.glow")
+    }
+
+    /// From the launch argument `key` (`lab.glow` for the custom panel,
+    /// `lab.nativeGlow` for the native reference, GW-14), or `nil`.
+    static func fromLaunchArguments(key: String) -> LabGlow? {
+        UserDefaults.standard.string(forKey: key).flatMap(LabGlow.init(rawValue:))
     }
 
     /// The glow for this preset, with system colors resolved for `traits`

@@ -19,6 +19,10 @@ import UIKit
 /// `RenderMetrics` recording. Launching with `-lab.glow <name>` gives the
 /// custom panel a colored glow (``LabGlow``, GW-17), with a halo and a pulse
 /// for `ember` and `energy` (GW-18); a pulsing preset adds a Pulse switch.
+/// Launching with `-lab.nativeGlow <name>` draws the same preset's rim and
+/// halo around the native reference glass (``EnhancedNativeGlassView``,
+/// GW-14), with a Native glow switch; without it the reference is plain
+/// native glass.
 final class LabViewController: UIViewController {
     enum SourceMode {
         case moving
@@ -37,6 +41,9 @@ final class LabViewController: UIViewController {
     private let benchmark = BenchmarkScenario.fromLaunchArguments()
     /// The panel's glow, when launched with `-lab.glow <name>`.
     private let labGlow = LabGlow.fromLaunchArguments
+    /// The native reference's glow, when launched with
+    /// `-lab.nativeGlow <name>` (GW-14).
+    private let labNativeGlow = LabGlow.fromLaunchArguments(key: "lab.nativeGlow")
 
     // MARK: Stage
 
@@ -54,8 +61,11 @@ final class LabViewController: UIViewController {
 
     /// Native mode: genuine Apple glass around a real button. Nothing here
     /// creates a GlassWeave renderer; the glass samples whatever the system
-    /// composites behind it, which here is the same stage.
-    private let nativeGlass = NativeGlassView()
+    /// composites behind it, which here is the same stage. The glass sits in
+    /// an enhanced-native host, which draws nothing until
+    /// `-lab.nativeGlow` gives it a glow.
+    private let nativeHost = EnhancedNativeGlassView()
+    private var nativeGlass: NativeGlassView { nativeHost.glass }
     private let nativeButton = UIButton(configuration: .plain())
     private let referenceCaption = UILabel()
     private var nativeTapCount = 0
@@ -70,8 +80,11 @@ final class LabViewController: UIViewController {
     private let stageSwitch = UISwitch()
     private let newWindowButton = UIButton(configuration: .bordered())
     private let closeWindowButton = UIButton(configuration: .bordered())
-    /// Turns a pulsing glow preset's pulse on and off (GW-18).
+    /// Turns a pulsing glow preset's pulse on and off (GW-18), on the custom
+    /// panel and the native reference.
     private let pulseSwitch = UISwitch()
+    /// Turns the native reference's glow on and off (GW-14).
+    private let nativeGlowSwitch = UISwitch()
     private let diagnosticsLabel = UILabel()
     private let resetButton = UIButton(configuration: .bordered())
     /// Benchmark only: settles the stage and reports allocated bytes.
@@ -132,6 +145,7 @@ final class LabViewController: UIViewController {
         // contrast setting.
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (self: Self, _) in
             self.updateCustomPanel()
+            self.updateNativeGlow()
             self.updateDiagnostics()
         }
         applyContentSizeLayout()
@@ -186,6 +200,8 @@ final class LabViewController: UIViewController {
         }
         stageSwitch.isOn = true
         pulseSwitch.isOn = true
+        nativeGlowSwitch.isOn = true
+        updateNativeGlow()
         // Before the first layout the stage lays the panel out itself.
         if stage.bounds.width > 0 {
             updateCustomPanel()
@@ -246,6 +262,9 @@ final class LabViewController: UIViewController {
         nativeGlass.cornerConfiguration = .capsule()
         nativeGlass.accessibilityIdentifier = "lab.nativeGlass"
         nativeGlass.contentView.addSubview(nativeButton)
+        if let override = Self.accessibilitySettingsOverride {
+            nativeHost.accessibilitySettingsSource = .fixed(override)
+        }
 
         referenceCaption.text = String(localized: "Native reference")
         referenceCaption.font = .preferredFont(forTextStyle: .footnote)
@@ -255,10 +274,13 @@ final class LabViewController: UIViewController {
         referenceCaption.layer.cornerRadius = 6
         referenceCaption.layer.masksToBounds = true
 
-        let reference = UIStackView(arrangedSubviews: [referenceCaption, nativeGlass])
+        let reference = UIStackView(arrangedSubviews: [referenceCaption, nativeHost])
         reference.axis = .vertical
         reference.alignment = .center
-        reference.spacing = 6
+        // The native glow's halo spills outside the glass; keep the caption
+        // and the custom panel clear of it.
+        let nativeHalo = CGFloat(labNativeGlow?.glow(for: traitCollection).haloRadius ?? 0)
+        reference.spacing = 6 + nativeHalo
         // A benchmark mode shows only its own composition.
         if let benchmark {
             reference.isHidden = !benchmark.mode.showsNativeReference
@@ -269,7 +291,7 @@ final class LabViewController: UIViewController {
         content.addArrangedSubview(reference)
         content.axis = .vertical
         content.alignment = .center
-        content.spacing = 20
+        content.spacing = 20 + nativeHalo
         content.translatesAutoresizingMaskIntoConstraints = false
         // The content is centered in the stage's safe area while it fits and
         // scrolls when it does not.
@@ -372,6 +394,14 @@ final class LabViewController: UIViewController {
         pulseSwitch.isOn = true
         pulseSwitch.addAction(UIAction { [weak self] _ in
             self?.updateCustomPanel()
+            self?.updateNativeGlow()
+            self?.updateDiagnostics()
+        }, for: .valueChanged)
+        nativeGlowSwitch.accessibilityIdentifier = "lab.nativeGlowEnabled"
+        nativeGlowSwitch.accessibilityLabel = String(localized: "Native glow")
+        nativeGlowSwitch.isOn = true
+        nativeGlowSwitch.addAction(UIAction { [weak self] _ in
+            self?.updateNativeGlow()
             self?.updateDiagnostics()
         }, for: .valueChanged)
 
@@ -411,12 +441,17 @@ final class LabViewController: UIViewController {
         // the system supports several (iPad).
         let lifecycleRow = Self.row([newWindowButton, closeWindowButton, UIView(), Self.caption(String(localized: "Stage")), stageSwitch])
         // A pulsing glow preset can be settled to compare frame counts.
+        // A pulsing preset (custom or native) can be settled; each caption
+        // sits beside its own switch, which carries the label.
         let glowRow = Self.row([UIView(), Self.caption(String(localized: "Pulse")), pulseSwitch])
-        glowRow.isHidden = labGlow?.pulses != true
-        controlRows = [tintRow, motionRow, lifecycleRow, glowRow]
+        glowRow.isHidden = labGlow?.pulses != true && labNativeGlow?.pulses != true
+        // The native reference's glow can be turned off to compare (GW-14).
+        let nativeGlowRow = Self.row([UIView(), Self.caption(String(localized: "Native glow")), nativeGlowSwitch])
+        nativeGlowRow.isHidden = labNativeGlow == nil
+        controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, diagnosticsLabel, resetButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, diagnosticsLabel, resetButton, measureButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -685,6 +720,10 @@ final class LabViewController: UIViewController {
         if case let .success(stageRendering) = custom {
             stageRendering.surface.requestFrame()
         }
+        // UIKit reports no ancestor's hiding; the native glow looks again at
+        // its next layout pass, which this asks for.
+        nativeHost.setNeedsLayout()
+        nativeHost.layoutIfNeeded()
         updateDiagnostics()
     }
 
@@ -874,6 +913,18 @@ final class LabViewController: UIViewController {
         updateDiagnostics()
     }
 
+    /// The native reference's glow: the `-lab.nativeGlow` preset with its
+    /// system colors resolved for the current traits, without its pulse when
+    /// the Pulse switch is off, or none when the Native glow switch is off.
+    private func updateNativeGlow() {
+        var glow = nativeGlowSwitch.isOn ? labNativeGlow?.glow(for: traitCollection) ?? .none : .none
+        if !pulseSwitch.isOn {
+            glow.pulseDepth = 0
+        }
+        // The presets are finite, so the view never rejects them.
+        try? nativeHost.setGlow(glow)
+    }
+
     /// Restores untinted, enabled, interactive glass and clears the tap count.
     private func resetNativeReference() {
         tintControl.selectedSegmentIndex = NativeTint.none.rawValue
@@ -1053,6 +1104,13 @@ final class LabViewController: UIViewController {
                     ? "pulse \(String(format: "%.1f", glow.pulsePeriod)) s × \(String(format: "%.2f", glow.pulseDepth))"
                     : "no pulse"
                 lines.append("Halo: \(String(format: "%.0f", glow.hasHalo ? glow.haloRadius : 0)) pt · \(String(format: "%.2f", glow.hasHalo ? glow.haloIntensity : 0)) · \(pulse) · effect clock \(surface.isAnimating ? "running" : "stopped") · t \(String(format: "%.2f", surface.renderer.effectTime)) s")
+            }
+            if let labNativeGlow {
+                let glow = nativeHost.presentedGlow
+                let pulse = glow.pulseDepth > 0
+                    ? "pulse \(String(format: "%.1f", glow.pulsePeriod)) s × \(String(format: "%.2f", glow.pulseDepth))"
+                    : "no pulse"
+                lines.append("Native glow: \(nativeGlowSwitch.isOn ? labNativeGlow.rawValue : "off") · \(glow.colors.count) colors · rim \(String(format: "%.1f", glow.rimWidth)) pt · halo \(String(format: "%.0f", glow.hasHalo ? glow.haloRadius : 0)) pt · \(String(format: "%.2f", glow.hasHalo ? glow.haloIntensity : 0)) · \(pulse) · animation \(nativeHost.isAnimating ? "running" : "stopped")")
             }
             lines.append("Accessibility: Reduce Motion \(settings.reduceMotion ? "on" : "off") · Reduce Transparency \(settings.reduceTransparency ? "on" : "off") · contrast \(traitCollection.accessibilityContrast == .high ? "high" : "normal") · \(traitCollection.userInterfaceStyle == .dark ? "dark" : "light") · text \(traitCollection.preferredContentSizeCategory.rawValue.replacingOccurrences(of: "UICTContentSizeCategory", with: ""))")
             let statistics = surface.frameStatistics
