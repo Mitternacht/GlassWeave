@@ -88,25 +88,33 @@ final class GlowGalleryUITests: XCTestCase {
 
     // MARK: Opening
 
+    /// The gallery opens from the laboratory's button and closes again.
+    /// While it covers the laboratory, the laboratory's surface (drawing its
+    /// moving background until then) is out of the window and submits
+    /// nothing, even with a gallery capsule moving.
     @MainActor
     func testTheGalleryOpensFromTheLaboratoryAndCloses() throws {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
-        app.launchArguments += ["-lab.source", "pattern"]
         app.launch()
+        let labDiagnostics = app.staticTexts["lab.diagnostics"]
+        XCTAssertTrue(labDiagnostics.waitForExistence(timeout: 10))
+        XCTAssertTrue(wait(for: labDiagnostics, toContain: "Clock: running"), labDiagnostics.label)
         let open = app.buttons["lab.openGallery"]
-        XCTAssertTrue(open.waitForExistence(timeout: 10))
         XCTAssertEqual(open.label, "Glow gallery")
         open.tap()
         let diagnostics = app.staticTexts["gallery.diagnostics"]
         XCTAssertTrue(diagnostics.waitForExistence(timeout: 10))
         XCTAssertTrue(wait(for: diagnostics, toContain: "Glass: 5 panels · 5 halos · 1 interiors · 0 moving · quads apart"), diagnostics.label)
-        // While the gallery covers it, the laboratory's own surface is out of
-        // the window and draws nothing.
-        XCTAssertFalse(app.staticTexts["lab.diagnostics"].exists)
+        XCTAssertFalse(labDiagnostics.exists)
+        card(app, "ember").tap()
+        XCTAssertTrue(wait(for: diagnostics, toContain: "effect clock running"), diagnostics.label)
+        Thread.sleep(forTimeInterval: 1.5)
         app.buttons["gallery.close"].tap()
-        XCTAssertTrue(app.staticTexts["lab.diagnostics"].waitForExistence(timeout: 10))
+        XCTAssertTrue(labDiagnostics.waitForExistence(timeout: 10))
         XCTAssertFalse(diagnostics.exists)
+        let back = try waitForDiagnostics(labDiagnostics) { $0.surfaceVisible && $0.hiddenPeriodSubmissions != nil }
+        XCTAssertEqual(back.hiddenPeriodSubmissions, 0, labDiagnostics.label)
     }
 
     // MARK: Controls
