@@ -346,8 +346,10 @@ in GlassWeaveUIKit draws a glow's rim and halo *around* a genuine
 display link. The glass keeps its own material and tint, and its middle stays
 Apple's glass. The same ``GlassGlow`` styles both modes: its colors, light,
 rim, halo, and pulse are drawn; its inner glow and center fill are not,
-because the inside belongs to Apple's material. The view does not clip, so
-leave about ``GlassGlow/haloRadius`` of unclipped space around it. A pulse is
+because the inside belongs to Apple's material. The layers live in the
+layer of the glass's `contentView` (they are not views), so interactive
+glass, which grows while it is pressed, takes its rim and halo with it. Nothing clips them, so leave about ``GlassGlow/haloRadius`` of
+unclipped space around the view (and keep the content view unclipped). A pulse is
 a Core Animation opacity animation that runs only while the view is visible;
 Reduce Motion holds it at its mean level, Reduce Transparency keeps a thin
 crisp rim, and Increase Contrast keeps the rim evenly lit.

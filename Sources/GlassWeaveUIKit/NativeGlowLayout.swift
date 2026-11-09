@@ -5,7 +5,8 @@ import UIKit
 
 /// What the Core Animation layers of an ``EnhancedNativeGlassView`` draw for
 /// one layout: paths, frames, shadow radii, and gradient colors, all in the
-/// view's points. A pure function of the view's size, its glass's corner
+/// view's points, with the origin at the glass's top-left corner (the
+/// layers' host fills the glass's content view). A pure function of the view's size, its glass's corner
 /// radii, the display scale, and the presented glow, so tests can check it
 /// directly.
 ///
@@ -20,8 +21,8 @@ import UIKit
 ///   `rimWidth + s / 2`, as in custom mode). With `s = 0` it is the crisp
 ///   band alone.
 /// - **Halo:** outside the outline only (a mask removes it everywhere inside
-///   the outline but its outermost pixel, so the glass never samples it
-///   under its middle). It is a Core Animation shadow of the outline grown
+///   the outline but its outermost pixel, so it never lies over the glass's
+///   middle). It is a Core Animation shadow of the outline grown
 ///   by `haloOutsetFraction × haloRadius`, with a Gaussian of
 ///   `haloSigmaFraction × haloRadius`: about 95 % of `haloIntensity` at a
 ///   straight outline, 25 % at half the radius, and below 0.2 % at the

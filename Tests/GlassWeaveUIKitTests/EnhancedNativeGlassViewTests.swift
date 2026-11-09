@@ -121,6 +121,11 @@ struct EnhancedNativeGlassViewTests {
             #expect(animation.beginTime == template.beginTime)
             #expect(animation.timingFunction == template.timingFunction)
         }
+        // The host follows the content view with the same timing.
+        for keyPath in ["bounds", "position"] {
+            let animation = try #require(view.glowHost.animation(forKey: prefix + keyPath), "The host's \(keyPath) is not animated")
+            #expect(animation.duration == template.duration && animation.beginTime == template.beginTime)
+        }
         // The model values are already the final ones.
         try expectGeometry(of: view, size: CGSize(width: 320, height: 100), radius: 50, haloRadius: 28)
 
@@ -147,13 +152,18 @@ struct EnhancedNativeGlassViewTests {
         #expect(!hole.contains(CGPoint(x: extent + 1 / 3 + 0.05, y: extent + 32), using: .winding))
     }
 
-    /// The layer tree draws the presented glow at the glass's frame.
+    /// The layer tree draws the presented glow at the glass's frame: its
+    /// host fills the glass's content view, and the layers sit in the
+    /// host's coordinates (the glass's own).
     private func expectGeometry(
         of view: EnhancedNativeGlassView, size: CGSize, radius: CGFloat, haloRadius: Double,
         sourceLocation: SourceLocation = #_sourceLocation
     ) throws {
-        let frame = view.glass.frame
-        #expect(frame.size == size, sourceLocation: sourceLocation)
+        #expect(view.glass.frame == CGRect(origin: .zero, size: size), sourceLocation: sourceLocation)
+        #expect(view.glowHost.superlayer === view.glass.contentView.layer, sourceLocation: sourceLocation)
+        #expect(view.glowHost.frame == view.glass.contentView.bounds, sourceLocation: sourceLocation)
+        #expect(view.glass.contentView.convert(view.glass.contentView.bounds, to: view) == view.glass.frame, sourceLocation: sourceLocation)
+        let frame = CGRect(origin: .zero, size: size)
         #expect(view.layout.radii == .init(topLeft: radius, topRight: radius, bottomRight: radius, bottomLeft: radius), sourceLocation: sourceLocation)
         let outline = NativeGlowLayout.roundedRect(CGRect(origin: .zero, size: size), radii: view.layout.radii)
         #expect(view.rimLayer.frame == frame, sourceLocation: sourceLocation)
@@ -365,14 +375,40 @@ struct EnhancedNativeGlassViewTests {
         #expect(effect.tintColor == .systemTeal)
         #expect(effect.isInteractive)
         #expect(view.glass.configuration == NativeGlassView.Configuration(tintColor: .systemTeal, isInteractive: true))
-        // The rim is above the glass, the halo below it; both are layers of
-        // this view, not of the glass, so the glass's material is untouched.
-        let sublayers = try #require(view.layer.sublayers)
-        let glassIndex = try #require(sublayers.firstIndex { $0 === view.glass.layer })
-        #expect(sublayers.firstIndex { $0 === view.haloLayer }! < glassIndex)
-        #expect(sublayers.firstIndex { $0 === view.rimLayer }! > glassIndex)
+        // The halo and the rim (in that order) are layers of one host in the
+        // glass's content view, drawn above the app's content there; the
+        // glass's own layers (its material) get no sublayer.
+        #expect(view.glowHost.superlayer === view.glass.contentView.layer)
+        #expect(view.glowHost.sublayers?.count == 2)
+        #expect(view.glowHost.sublayers?.first === view.haloLayer)
+        #expect(view.glowHost.sublayers?.last === view.rimLayer)
+        #expect(view.glowHost.zPosition == EnhancedNativeGlassView.glowHostZPosition)
+        #expect(view.glowHost.zPosition > fixture.button.layer.zPosition)
         #expect(view.glass.layer.sublayers?.contains { $0 === view.rimLayer || $0 === view.haloLayer } != true)
-        #expect(!view.clipsToBounds)
+        #expect(view.glass.contentView.layer.sublayers?.contains { $0 === view.rimLayer || $0 === view.haloLayer } != true)
+        #expect(!view.clipsToBounds && !view.glass.contentView.clipsToBounds && !view.glowHost.masksToBounds)
+    }
+
+    @Test func `The glow is hosted in the glass's content, so the glass's press transform applies to it`() throws {
+        // Interactive glass grows while it is pressed and scales its content
+        // with it (seen in the laboratory on the simulator; the transform is
+        // not observable in process). Whatever transform the content gets,
+        // the rim's outline follows the content's bounds exactly, and the
+        // halo stays outside it.
+        let fixture = Fixture()
+        let view = fixture.view
+        try view.setGlow(Self.energy)
+        view.layoutIfNeeded()
+        let content = view.glass.contentView
+        content.transform = CGAffineTransform(scaleX: 1.07, y: 1.07)
+        defer { content.transform = .identity }
+        let contentFrame = content.convert(content.bounds, to: view)
+        #expect(contentFrame.width > view.bounds.width + 10, "The stand-in press grows the content")
+        let rimFrame = view.rimLayer.convert(view.rimLayer.bounds, to: view.layer)
+        #expect(abs(rimFrame.minX - contentFrame.minX) < 1e-6 && abs(rimFrame.maxX - contentFrame.maxX) < 1e-6)
+        #expect(abs(rimFrame.minY - contentFrame.minY) < 1e-6 && abs(rimFrame.maxY - contentFrame.maxY) < 1e-6)
+        let haloFrame = view.haloLayer.convert(view.haloLayer.bounds, to: view.layer)
+        #expect(haloFrame.contains(contentFrame) && haloFrame.width > contentFrame.width)
     }
 
     // MARK: Interaction and structure
@@ -398,8 +434,14 @@ struct EnhancedNativeGlassViewTests {
         let inHalo = CGPoint(x: view.frame.midX, y: view.frame.minY - 10)
         #expect(view.haloLayer.frame.offsetBy(dx: view.frame.minX, dy: view.frame.minY).contains(inHalo))
         #expect(parent.hitTest(inHalo, with: nil) === behind)
-        // The glow adds layers, never views or accessibility elements.
+        // A point on the rim, inside the glass but beside the button, lands
+        // on the glass, as without a glow.
+        let onRim = CGPoint(x: view.frame.minX + 6, y: view.frame.midY)
+        #expect(parent.hitTest(onRim, with: nil)?.isDescendant(of: view.glass) == true)
+        // The glow adds layers, never views or accessibility elements: the
+        // glass's content holds only the app's button.
         #expect(view.subviews == [view.glass])
+        #expect(view.glass.contentView.subviews == [fixture.button])
         #expect(!view.isAccessibilityElement)
         #expect(view.accessibilityElementsHidden == false)
     }

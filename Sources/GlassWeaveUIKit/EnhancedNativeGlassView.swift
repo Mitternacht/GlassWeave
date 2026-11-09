@@ -33,12 +33,22 @@ import UIKit
 /// every layout pass, so the glow follows them). The view does not clip:
 /// the halo reaches about `haloRadius` (its layers about 1.2 × `haloRadius`)
 /// outside the bounds, so keep that margin free and unclipped by ancestors
-/// (a scroll view or a view with `clipsToBounds` cuts it off). The rim and
-/// halo are layers, not views: they take no touches and add no
-/// accessibility element, so hit testing and VoiceOver reach the glass's
-/// content exactly as without them. When the glass's frame is animated (a
-/// `UIView` animation, rotation), the glow's paths animate with the
-/// glass's own timing.
+/// (a scroll view or a view with `clipsToBounds` cuts it off) and leave
+/// `glass.contentView.clipsToBounds` off. When the glass's frame is
+/// animated (a `UIView` animation, rotation), the glow's paths animate with
+/// the glass's own timing.
+///
+/// **Where the glow lives.** The rim and halo are sublayers of one host
+/// layer in `glass.contentView`'s layer, sized to the content view and drawn
+/// above the app's content there (`zPosition` 1). Interactive glass
+/// (`NativeGlassView.Configuration.isInteractive`) grows while it is pressed
+/// and scales its content with it; hosted in the content, the rim stays on
+/// the glass's edge and the halo outside it for as long as the press lasts.
+/// They are layers, not views: `glass.contentView.subviews` stays the app's
+/// own, and they take no touches and add no accessibility element, so hit
+/// testing and VoiceOver reach the glass's content exactly as without them.
+/// The halo is drawn over Apple's material outside its outline only, so the
+/// glass neither covers nor samples it.
 ///
 /// **No custom rendering.** The view creates no GlassWeave renderer, Metal
 /// device, command queue, `MTKView`, display link, or update link. A settled
@@ -99,22 +109,29 @@ public final class EnhancedNativeGlassView: UIView {
     /// What the layers draw for the current layout.
     private(set) var layout = NativeGlowLayout(size: .zero, radii: .zero, displayScale: 1, glow: .none)
 
-    // The halo, below the glass: a conic gradient seen through a shadow of
-    // the outline, inside a layer whose mask removes the glass's interior.
+    // The halo, outside the outline: a conic gradient seen through a shadow
+    // of the outline, inside a layer whose mask removes the glass's interior.
     let haloLayer = CALayer()
     let haloHoleMask = CAShapeLayer()
     let haloGradient = CAGradientLayer()
     let haloShadowMask = CALayer()
-    // The rim, above the glass: a conic gradient seen through the band,
-    // inside a layer clipped to the outline.
+    // The rim, over the glass's edge: a conic gradient seen through the
+    // band, inside a layer clipped to the outline.
     let rimLayer = CALayer()
     let rimClipMask = CAShapeLayer()
     let rimGradient = CAGradientLayer()
     let rimBandMask = CAShapeLayer()
+    /// Holds ``haloLayer`` and ``rimLayer`` in `glass.contentView`'s layer,
+    /// at its bounds, so whatever the glass does to its content (the growth
+    /// of interactive glass while pressed) applies to the glow too.
+    let glowHost = CALayer()
+    /// The host's `zPosition`: above the app's content in the glass, as the
+    /// rim is the shape's outline.
+    static let glowHostZPosition: CGFloat = 1
 
     /// Every layer the glow adds.
     var glowLayers: [CALayer] {
-        [haloLayer, haloHoleMask, haloGradient, haloShadowMask, rimLayer, rimClipMask, rimGradient, rimBandMask]
+        [glowHost, haloLayer, haloHoleMask, haloGradient, haloShadowMask, rimLayer, rimClipMask, rimGradient, rimBandMask]
     }
 
     /// The key of the pulse animation on ``haloLayer`` and ``rimLayer``.
@@ -178,8 +195,11 @@ public final class EnhancedNativeGlassView: UIView {
 
         haloLayer.isHidden = true
         rimLayer.isHidden = true
-        layer.insertSublayer(haloLayer, below: glass.layer)
-        layer.addSublayer(rimLayer)
+        glowHost.masksToBounds = false
+        glowHost.zPosition = Self.glowHostZPosition
+        glowHost.addSublayer(haloLayer)
+        glowHost.addSublayer(rimLayer)
+        glass.contentView.layer.addSublayer(glowHost)
 
         registerForTraitChanges([UITraitDisplayScale.self, UITraitAccessibilityContrast.self]) { (self: Self, _) in
             self.updateGlow()
@@ -238,30 +258,29 @@ public final class EnhancedNativeGlassView: UIView {
     /// geometry, traits, and settings. With `template` (the glass's running
     /// frame animation) the layers' geometry animates the same way.
     private func updateGlow(like template: CAAnimation? = nil) {
-        let frame = glass.frame
+        // The layers live in the glass's content, whose origin is the
+        // glass's own.
+        let size = glass.bounds.size
         let presented = Self.nativeGlow(
             GlassAccessibilityPolicy.presentedGlow(for: glow, settings: accessibilitySettings, traits: traitCollection),
-            size: frame.size
+            size: size
         )
         presentedGlow = presented
         let radii = cornerRadii
         let scale = traitCollection.displayScale
         // Most layout passes change nothing the glow depends on.
-        if frame.origin == layoutOrigin, frame.size == layout.size, radii.clamped(to: frame.size) == layout.radii,
+        if size == layout.size, radii.clamped(to: size) == layout.radii,
            scale == layout.displayScale, presented == layout.glow {
             updatePulse()
             return
         }
-        let newLayout = NativeGlowLayout(size: frame.size, radii: radii, displayScale: scale, glow: presented)
-        apply(newLayout, at: frame.origin, like: template)
+        let newLayout = NativeGlowLayout(size: size, radii: radii, displayScale: scale, glow: presented)
+        apply(newLayout, like: template)
         layout = newLayout
-        layoutOrigin = frame.origin
         layoutBuilds += 1
         updatePulse()
     }
 
-    /// Where the glass was when ``layout`` was applied.
-    private var layoutOrigin = CGPoint.zero
     /// How many times the layers were rebuilt, for tests.
     private(set) var layoutBuilds = 0
 
@@ -278,7 +297,7 @@ public final class EnhancedNativeGlassView: UIView {
 
     // MARK: Layers
 
-    private func apply(_ layout: NativeGlowLayout, at origin: CGPoint, like template: CAAnimation?) {
+    private func apply(_ layout: NativeGlowLayout, like template: CAAnimation?) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
@@ -286,11 +305,13 @@ public final class EnhancedNativeGlassView: UIView {
             glowLayer.contentsScale = layout.displayScale
         }
         let animator = LayerAnimator(template: template)
+        // The host fills the content view, which fills the glass.
+        animator.set(glowHost, frame: CGRect(origin: .zero, size: layout.size))
 
         if let rim = layout.rim {
             rimLayer.isHidden = false
             let local = CGRect(origin: .zero, size: layout.size)
-            animator.set(rimLayer, frame: CGRect(origin: origin, size: layout.size))
+            animator.set(rimLayer, frame: local)
             for sublayer in [rimClipMask, rimGradient, rimBandMask] as [CALayer] {
                 animator.set(sublayer, frame: local)
             }
@@ -313,9 +334,8 @@ public final class EnhancedNativeGlassView: UIView {
 
         if let halo = layout.halo {
             haloLayer.isHidden = false
-            let frame = halo.frame.offsetBy(dx: origin.x, dy: origin.y)
-            let local = CGRect(origin: .zero, size: frame.size)
-            animator.set(haloLayer, frame: frame)
+            let local = CGRect(origin: .zero, size: halo.frame.size)
+            animator.set(haloLayer, frame: halo.frame)
             for sublayer in [haloHoleMask, haloGradient, haloShadowMask] as [CALayer] {
                 animator.set(sublayer, frame: local)
             }

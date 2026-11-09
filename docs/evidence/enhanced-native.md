@@ -7,8 +7,8 @@ server runs on the Mac, and no iPhone or iPad was measured. The design is in
 
 ## What runs while the glow is shown
 
-`EnhancedNativeGlassView` adds, beside its `NativeGlassView`, two groups of
-Core Animation layers: the halo (a layer masked by the outline's complement,
+`EnhancedNativeGlassView` adds, under one host layer in its glass's content
+view's layer, two groups of Core Animation layers: the halo (a layer masked by the outline's complement,
 holding a conic `CAGradientLayer` masked by a layer whose shadow is the
 grown outline) and the rim (a layer clipped to the outline, holding a conic
 `CAGradientLayer` masked by the band and, when soft, the band's shadow). That
@@ -57,14 +57,37 @@ the still pattern, glow on versus the Native glow switch off:
 | Change beyond the halo's layers (40 pt out, three points) | 0 steps | 0 steps |
 | Rim color one point inside the top edge, against the gradient at the pixel's angle | within 2 steps | within 2 steps |
 | Glass middle from 6 pt in, rim-only glow (`aurora`) | at most 2 steps | at most 2 steps |
-| Glass middle from 6, 12, 18 pt in, with the 28 pt halo (`energy`) | 20, 14, 10 steps | 43, 32, 24 steps |
+| Glass middle from 6, 12, 18 pt in, with the 28 pt halo (`energy`) | 0, 0, 0 steps | 0, 0, 0 steps |
 
-The last row is Apple's glass blurring and lensing a backdrop that now
-includes the halo beside it; GlassWeave draws nothing there. A deliberate
-mutation that left the halo under the glass changed the same region by 192
-to 195 steps. Rim colors next to a stop whose neighbour rises steeply in an
+The halo lies over Apple's material outside the outline only, so the glass
+neither covers nor samples it. (When the layers were siblings of the glass,
+with the halo below it, the last row read 20, 14, 10 steps dark and 43, 32,
+24 steps light: Apple's glass picking up the halo beside it.) A deliberate
+mutation that removed the halo's hole mask changed the same region by 228
+steps. Rim colors next to a stop whose neighbour rises steeply in an
 encoded channel (yellow's blue toward cyan) measured up to 9 steps off: Core
 Animation's conic gradient, not the color model.
+
+## Press (interactive glass)
+
+Method: `-lab.nativeGlow aurora` (rim only) and `-lab.nativeGlow ember`
+(rim and halo), dark appearance, still pattern; a touch held for 8 s on the
+native button with Xcode's device-interaction tool while `simctl io
+screenshot` captured the screen every 1.5 s. Pixels at 3 per point along the
+capsule's middle row and center column:
+
+| | Rest | Pressed |
+| --- | --- | --- |
+| Glass's left edge (darkened pixel), first rim pixel | 357, 358 | 334, 335 |
+| Last rim pixel, glass's right edge | 848, 849 | 871, 872 |
+| First rim pixel at the top | 1112 | 1105 |
+
+The glass grows about 7.7 points at each end and 2.3 points at the top and
+bottom, and the rim moves with its edge; the halo stays outside the pressed
+outline ([capture, rest above and pressed below](captures/gw-14-native-ember-rest-and-pressed-dark-iphone18pro-sim.png)).
+Before the layers moved into the glass's content, the same press left the
+rim on the resting outline, about 23 pixels inside the pressed edge. XCUITest
+cannot take a screenshot during a press, so this is a recorded manual check.
 
 ## Open
 

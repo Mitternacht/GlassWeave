@@ -219,10 +219,10 @@ final class EnhancedNativeGlowUITests: XCTestCase {
     /// yellow quarter: its opacity, read from the blue channel
     /// (source-over: shown = color × a + background × (1 − a)), follows the
     /// documented profile, and from its layers' reach on the screen is the
-    /// background. The rim is the glow color. Apple's glass blurs a
-    /// backdrop that now includes the halo beside it, so its middle picks up
-    /// a little of that light (measured, bounded); a halo drawn under the
-    /// glass would change it far more.
+    /// background. The rim is the glow color. The halo lies over Apple's
+    /// material outside the outline only (its layers are hosted in the
+    /// glass's content), so the glass neither covers nor samples it, and the
+    /// glass's middle is unchanged.
     @MainActor
     func testAHaloFollowsItsProfileOutsideAppleGlass() throws {
         var report: [String] = []
@@ -252,9 +252,10 @@ final class EnhancedNativeGlowUITests: XCTestCase {
             for depth in [6.0, 12, 18] {
                 let middle = middleDifference(shots, depth: depth)
                 report.append("\(appearance) middle from \(depth) pt in: largest difference \(middle) steps")
-                // Measured 10 to 43 steps (more in light, nearer the edge);
-                // a halo left under the glass changed it by 192 to 195.
-                XCTAssertLessThanOrEqual(middle, 60, report.last!)
+                // Measured 0 steps. (With the halo below the glass, before
+                // the glow moved into the glass's content, Apple's glass
+                // picked up 10 to 43 steps of it by itself.)
+                XCTAssertLessThanOrEqual(middle, 2, report.last!)
             }
         }
         let attachment = XCTAttachment(string: report.joined(separator: "\n"))

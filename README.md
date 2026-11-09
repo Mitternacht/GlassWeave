@@ -76,7 +76,8 @@ What works (simulator and Mac evidence):
 - **Several shapes in one pass**: `GlassRenderer.setPanels(_:)` and
   `GlassSurfaceView.setPanels(_:)` draw up to eight panels over one frame.
 - **Native glass** (`EnhancedNativeGlassView`): the same rim and halo around
-  genuine `UIGlassEffect` glass, whose material stays Apple's.
+  genuine `UIGlassEffect` glass, whose material stays Apple's; they move with
+  interactive glass as it grows under a press.
 - **On demand and accessible**: animation runs only while something moves
   and the surface is visible; Reduce Motion, Reduce Transparency, and
   Increase Contrast follow a documented mapping.
