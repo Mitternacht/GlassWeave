@@ -100,6 +100,8 @@ final class LabViewController: UIViewController {
     private let galleryButton = UIButton(configuration: .bordered())
     /// Whether `-lab.gallery YES` has opened the gallery yet.
     private var openedGalleryAtLaunch = false
+    /// Whether `-lab.versus YES` has opened the Apple vs GlassWeave screen yet.
+    private var openedVersusAtLaunch = false
     /// The control rows; vertical at accessibility text sizes.
     private var controlRows: [UIStackView] = []
     /// At accessibility text sizes the custom panel takes the stage's full
@@ -174,6 +176,11 @@ final class LabViewController: UIViewController {
         if !openedGalleryAtLaunch, UserDefaults.standard.bool(forKey: "lab.gallery") {
             openedGalleryAtLaunch = true
             openGallery(animated: false)
+        }
+        // `-lab.versus YES` opens the Apple vs GlassWeave screen once (GW-29a).
+        if !openedVersusAtLaunch, VersusViewController.launchRequested {
+            openedVersusAtLaunch = true
+            VersusViewController.present(from: self, animated: false)
         }
     }
 
@@ -496,7 +503,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), measureButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
