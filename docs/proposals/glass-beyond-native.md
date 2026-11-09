@@ -1,6 +1,6 @@
 # Proposal: glass beyond native (GW-21 to GW-29)
 
-**Status:** proposal, not approved and not started (written 2026-11-09). The authoritative
+**Status:** approved by the user on 2026-11-09 ("build all nine", as a fast pass); in progress on branch `implement/glass-beyond`. Written 2026-11-09. The authoritative
 checklist is still [tasks/todo.md](../../tasks/todo.md); nothing here is a shipped feature.
 
 **Why this exists.** The user's goal for GlassWeave: Apple's native glass "is only like the

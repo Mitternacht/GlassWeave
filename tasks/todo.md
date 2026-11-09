@@ -405,3 +405,271 @@ The user asked for glass that takes tints and glows at its edges in any color wh
 **Verification:** Laboratory UI tests (interaction, audits, submission counts) on the iPhone 18 Pro simulator; simulator captures; a live VoiceOver pass and device presentation stay open until a device run.
 
 **Likely files:** `Examples/GlassWeaveLab/GlassWeaveLab/GlowGalleryViewController.swift`, `Sources/GlassWeave/GlassRenderer.swift`, `Examples/GlassWeaveLab/GlassWeaveLabUITests/GlowGalleryUITests.swift`, `docs/evidence/captures/`.
+
+## Next round: glass beyond native (GW-21 to GW-29, approved 2026-11-09)
+
+The user approved building all nine tasks of [the proposal](../docs/proposals/glass-beyond-native.md) on 2026-11-09, as a fast pass: each task ships its API, shader, focused tests, a laboratory demo, and inspected simulator captures. Criteria that need mutation runs, CPU mirrors, M5 characterization, or a physical device stay unchecked, with the reason written in the task's evidence paragraph. Check an item only when its evidence exists.
+
+## GW-21: Inner light fields and the material bench
+
+**Description:** Colored light lives anywhere inside the glass (pooled along an edge, along an arc, as an orb, or as a 4-corner field) and flows slowly, while the middle stays exactly clear.
+
+**Dependencies:** GW-17 to GW-20. **Scope:** M, about 9 files plus tests.
+
+**Acceptance criteria:**
+- [ ] The API is documented and normalized; at most 4 emitters and 4 stops; `GlassRenderer.panel` reports the light drawn.
+- [ ] `.none` is byte-identical to `GlassBaselineGW20.metal`: four GW-05 sets plus a glow-and-interior case, on a gradient and a checkerboard.
+- [ ] Band light does not increase with distance from its edge and is exactly 0 beyond `reach`. `.light` never lowers a channel. Nothing changes outside the outline.
+- [ ] With center fade 1, pixels deeper than the fade end are byte-identical to light-off output.
+- [ ] Stops and the whole image match the CPU model within one step.
+- [ ] Piping: the nearest bevel pixel is brighter than the farthest, and the ratio is within 5% of the CPU model.
+- [ ] `t` and `t + 64/speed` are byte-identical, with no seam at the wrap. Hue drift ≤ 16 turns per 64 s.
+- [ ] Reduce Motion gives identical frames and no effect clock (controlled-clock UIKit test).
+- [ ] `.paint` over white changes relative luminance by ≥ 0.2 at an opacity where `.light` changes it by < 0.02.
+- [ ] The extended legibility bound holds on 1,000 seeded backgrounds. Reduce Transparency and Increase Contrast pass UIKit tests.
+- [ ] Every bench background renders; captures inspected.
+- [ ] M5 increment for 4 emitters plus piping ≤ +0.15 ms p95.
+- [ ] **Device only:** cost; light and dark visual check.
+
+**Evidence:** not started.
+
+**Verification:** Swift Testing readback on My Mac under Metal API Validation; mutations; UIKit and lab UI tests on the iPhone 18 Pro simulator.
+
+**Likely files:**
+- `Sources/GlassWeave/GlassLight.swift` (new), `GlassParameters.swift`, `GlassPanelGeometry.swift`, `GlassLegibility.swift`, `Shaders/Glass.metal`
+- `GlassWeaveShaderTypes.h`, `GlassAccessibilityPolicy.swift`
+- `Tests/GlassWeaveTests/GlassLightTests.swift`, `Shaders/GlassBaselineGW20.metal`
+- `Examples/GlassWeaveLab/GlassWeaveLab/MaterialBenchViewController.swift`, `BenchBackgrounds.metal`
+
+## GW-22: Thick-lens optics, chromatic dispersion and inlays
+
+**Description:** Panels read as solid glass. Content magnifies and bends hard toward the outline, domes magnify, rings stand up at the edge, bright edges split into fringes, and a dome button can sit *on* a pill as part of the same glass.
+
+**Dependencies:** GW-21. **Scope:** L, three commits (lens, dispersion, inlays), about 10 files plus tests.
+
+**Acceptance criteria:**
+- [ ] `.rim` with dispersion 0 and no inlays is byte-identical; `base` is reported.
+- [ ] IOR 1.0 gives the unrefracted background within one step.
+- [ ] Each profile matches the CPU mirror within one step, excluding the antialiasing band and slope-clamped pixels.
+- [ ] Dot-grid centroids: the offset never exceeds `maximumOffset`. With `allowsFold == false` the mapping is monotonic along normal lines: a CPU property test over 10,000 panels, plus readback of 50.
+- [ ] No corner crease: across each corner diagonal, the second difference of the decoded offset is ≤ 2× its value off the diagonal, for bevel = 1, 2 and 4× the corner radius.
+- [ ] Dome at IOR 1.5 over a checkerboard: center magnification within 5% of the CPU value.
+- [ ] Finite outputs over IOR 1.0–2.4 and thickness 0–64 pt.
+- [ ] Dispersion 0 is byte-identical to the lens; spread < 0.25 px is byte-identical at any strength.
+- [ ] Gray stays gray, and white stays neutral in `.sixTap` (≤ 1 step).
+- [ ] B/W edge: R–B separation within 0.5 px of the CPU (per-channel 50% crossing). No magenta from outside the valid rect.
+- [ ] Inlay: height and offset are C0 across the inlay's base; its quad is unchanged; it is byte-identical outside its radius plus 1 px.
+- [ ] Pipeline census: all built at initialization; creation time recorded.
+- [ ] Base-variant cost, interleaved A/B ≤ max(0.05 ms, spread).
+- [ ] M5 targets: lens ≤ +0.10 ms; 3-tap ≤ +0.10 ms; 6-tap ≤ +0.20 ms.
+- [ ] Bench captures: dome marble, capsule, ring, fold on/off, dispersion bar, pill with an inlaid dome.
+- [ ] Temporal stability on the Mac: over a source translated in 1/8 px steps, frame-to-frame RMS change at fold pixels is recorded and ≤ 2× the unfolded rim's.
+- [ ] **Device only:** cost; visual shimmer sign-off.
+
+**Evidence:** not started.
+
+**Verification:** As in GW-21, plus property tests.
+
+**Likely files:**
+- `Sources/GlassWeave/GlassLens.swift`, `GlassShapeField.swift` (new), `GlassParameters.swift`, `GlassPanelGeometry.swift`, `GlassRenderer.swift`
+- `Shaders/Glass.metal`, `Shaders/GlassOptics.h`
+- `GlassWeaveShaderTypes.h`, `GlassAccessibilityPolicy.swift`
+- `Tests/GlassWeaveTests/GlassLensTests.swift`, `GlassDispersionTests.swift`, `ShaderLayoutTests.swift`
+
+## GW-23: Light model: Fresnel, specular, studio reflections, chrome and prismatic rims, bloom
+
+**Description:** Glass catches light from **one** movable light: a Fresnel outline, a specular streak, studio reflections, chrome or prismatic thin rims, and SDR bloom around the brightest lines.
+
+**Dependencies:** GW-22. **Scope:** M, about 7 files plus tests.
+
+**Acceptance criteria:**
+- [ ] `.legacy` is byte-identical.
+- [ ] At `N.z = 1` the reflected fraction equals `F0` (1e-3 CPU; one step GPU; black source, white environment), increasing monotonically to the outline.
+- [ ] Specular peak on a dome within 2° of the light azimuth and 1 px of the CPU radius, for 8 azimuths.
+- [ ] A 90° light rotation rotates a circular panel's image over a uniform source within one step (panel centered on a pixel corner).
+- [ ] Prismatic:
+  - hue at 12 angles within 2° of the CPU, for 3 film values;
+  - deeper pixels byte-identical;
+  - darkest band ≥ 1.3:1 on white.
+- [ ] Knee monotonic and C1; outputs finite and ≤ 1. Bloom never lowers a channel and is exactly 0 beyond its width.
+- [ ] `setLightOffset` changes only light terms and rejects non-finite values.
+- [ ] Glow light follows the key light when not set explicitly (test).
+- [ ] Legibility holds over 1,000 backgrounds; Increase Contrast and Reduce Transparency UIKit tests pass.
+- [ ] M5 ≤ +0.15 ms p95. "Light studio" captures in light and dark.
+- [ ] **Device only:** chrome ring sign-off; cost.
+
+**Evidence:** not started.
+
+**Verification:** As in GW-21.
+
+**Likely files:**
+- `Sources/GlassWeave/GlassLighting.swift` (new), `GlassRenderer.swift`, `GlassPanelGeometry.swift`, `GlassLegibility.swift`, `GlassGlow.swift`
+- `Shaders/Glass.metal`, `GlassOptics.h`, `GlassWeaveShaderTypes.h`, `GlassAccessibilityPolicy.swift`
+- `Tests/GlassWeaveTests/GlassLightingTests.swift`
+
+## GW-24: Frost: variable blur with a per-shape frost map
+
+**Description:** A shape can be clear, frosted, or both (clear center with frosted rim, or frosted body with a crisp rim), and a label on it can be guaranteed a contrast ratio.
+
+**Dependencies:** GW-21, GW-27; wired to GW-22. **Scope:** L, about 9 files plus tests.
+
+**Acceptance criteria:**
+- [ ] `.none` is byte-identical with `frostMemoryBytes == 0`; the same under Reduce Transparency.
+- [ ] Uniform source stays uniform; mean luminance on noise (away from valid-rect edges) within 1/255.
+- [ ] Dot: anisotropy < 1.15, fitted σ within 15%; step-edge spread monotonic in radius.
+- [ ] `.clearCenter` deep pixels byte-identical to unfrosted.
+- [ ] No magenta from outside the valid rect.
+- [ ] Static source plus pulsing glow: 0 rebuilds in 120 ticks after the first; a new frame ID causes exactly 1. A producer returning `nil` causes 0.
+- [ ] Red/blue alternating `.encoded(in:)` frames show their own frame in the frost.
+- [ ] A host ignoring the bound (10 draws, none completed) never waits and never writes a pyramid in use (completion-handler audit).
+- [ ] A target-unavailable skip commits nothing for a non-produced draw.
+- [ ] Scrim on 1,000 backgrounds meets the ratio with all light terms on; outside pixels unchanged.
+- [ ] White stays neutral with `.sixTap` plus frost.
+- [ ] No texture allocation in the draw path after warm-up (internal counter; the simulator reports 0 for allocation sizes [V: milestone-1.md]).
+- [ ] Memory: `frostMemoryBytes` equals the computed bound. GW-09 panel plus full-screen sheet totals stay within the ≤ 64 MiB budget [V: validation.md:117], or the overage is recorded with a reason.
+- [ ] Temporal stability on the Mac over a sub-pixel-scrolling source, recorded per radius.
+- [ ] M5: pyramid build ≤ +0.15 ms (moving), 0 when static; sampling ≤ +0.30 ms; full-screen sheet recorded.
+- [ ] **Device only:** cost at 60 Hz; shimmer sign-off.
+
+**Evidence:** not started.
+
+**Verification:** As in GW-21; property tests for the pyramid.
+
+**Likely files:**
+- `Sources/GlassWeave/GlassFrost.swift`, `FrostPyramid.swift`, `Shaders/Frost.metal` (new)
+- `BackgroundRenderer.swift`, `GlassRenderer.swift`, `RenderMetrics.swift`, `Shaders/Glass.metal`
+- `Tests/GlassWeaveTests/GlassFrostTests.swift`, `docs/architecture.md`
+
+## GW-25: Depth cues for light mode: shadows and colored caustics
+
+**Description:** On light pages the glass sits on the surface with drop, contact and inner shadows and a colored caustic, even when neighbours are close.
+
+**Dependencies:** GW-23. **Scope:** S–M, about 6 files plus tests.
+
+**Acceptance criteria:**
+- [ ] Off is byte-identical, with no pre-pass draw.
+- [ ] Shadows never raise a channel; caustics never lower one (white, gray, colored sources).
+- [ ] Darkening centroid opposite the key azimuth within 3°.
+- [ ] Seam: on a uniform background, the step across the body's quad edge and across the outline is ≤ 1 step.
+- [ ] Two buttons 8 pt apart with 16 pt drop shadows: neither body loses a pixel versus drawing it alone (readback).
+- [ ] Every changed pixel lies inside the CPU pre-pass quad or body quad; the CPU mirror (encoded-space blend) matches within one step.
+- [ ] M5 ≤ +0.10 ms. "Paper desk" capture.
+- [ ] **Device only:** light-mode check.
+
+**Evidence:** not started.
+
+**Verification:** As in GW-21.
+
+**Likely files:**
+- `Sources/GlassWeave/GlassGrounding.swift` (new), `GlassRenderer.swift` (pre-pass pipeline), `GlassPanelGeometry.swift`
+- `Shaders/Glass.metal`, `Shaders/Grounding.metal`
+- `GlassWeaveShaderTypes.h`, `GlassAccessibilityPolicy.swift`
+- `Tests/GlassWeaveTests/GlassGroundingTests.swift`
+
+## GW-26: Freeform shapes: ellipses, squircles and smooth blobs
+
+**Description:** Glass takes organic forms, and **every** effect follows the outline, GW-17/18/19/21 included.
+
+**Dependencies:** GW-22. **Scope:** M, about 7 files plus tests.
+
+**Acceptance criteria:**
+- [ ] `.roundedRectangle` is byte-identical, glow and interior included.
+- [ ] Circle and capsule distances within 1e-4 px on the CPU and one step on the GPU.
+- [ ] Outline within 0.5 px of the mirror over 360 directions; ellipse area within 0.5% of πab.
+- [ ] Neck smoothness: the normal angle changes ≤ 3° between adjacent pixels across smooth-union necks. A two-circle union with a circular lens over a checkerboard has no jump > 2 steps on the bisector.
+- [ ] Glow rim, halo and light piping on a blob match the CPU within one step.
+- [ ] Antialiasing ramp 1 px; wobble periodic and still under Reduce Motion; every covered pixel inside the CPU quad.
+- [ ] M5: 6-primitive blob ≤ +0.15 ms. "Pebble garden" capture.
+- [ ] **Device only:** cost.
+
+**Evidence:** not started.
+
+**Verification:** As in GW-21.
+
+**Likely files:**
+- `Sources/GlassWeave/GlassShape.swift` (new), `GlassShapeField.swift`, `GlassPanelGeometry.swift`, `GlassParameters.swift`
+- `Shaders/GlassOptics.h`, `Shaders/Glass.metal`, `GlassWeaveShaderTypes.h`
+- `Tests/GlassWeaveTests/GlassShapeTests.swift`
+
+## GW-27: Non-blocking presentation, frame pacing and quality tiers (closes GW-04 item 3)
+
+**Description:** No GlassWeave draw stalls the main thread waiting for a drawable. Interaction frames can request up to 120 Hz while ambient motion stays calm, native views over moving glass stay in step, and a quality setting trades extras for frame time.
+
+**Dependencies:** GW-07, GW-18. No shader dependency; starts day one. Before GW-24, GW-28, GW-12, GW-13. **Scope:** M, about 7 files plus tests.
+
+**Acceptance criteria:**
+- [ ] **Fails on today's code first:** a lab UI test (the surface must be on screen; unit-test processes have no scene [V: GlassSurfaceView.swift:480-484]) holds every drawable of the layer, then requests a frame. Before the change, the main thread stalls ≥ 900 ms [V: 1 s timeout]. After it, the main-actor heartbeat's worst lateness is < 50 ms, and the request draws once the drawables are released.
+- [ ] On-demand behavior unchanged: GW-07, GW-18 and GW-19 submission tests pass unmodified; 0 submissions when settled, hidden or backgrounded.
+- [ ] The frame-rate range follows the declared motion class (UIKit test reading the link's range).
+- [ ] Effect time equals the sum of `targetPresentationTimestamp` deltas (controlled clock).
+- [ ] Per-tier readback snapshot is fixed. An injected Low Power Mode notification downgrades and restores. Under Reduce Transparency every tier draws the policy's opaque body.
+- [ ] Native/panel skew recorded on the simulator for both sync options; the decision is recorded.
+- [ ] GW-04 item 3 checked with evidence; DocC failure table and known limitations updated.
+- [ ] **Device only:** Instruments trace on a ProMotion iPhone (120 Hz interaction, no acquisition stall); 60 Hz on the baseline device; visual sync sign-off.
+
+**Evidence:** not started.
+
+**Verification:** Controlled-clock UIKit tests; lab UI tests; spike note and GW-11 decision note.
+
+**Likely files:**
+- `Sources/GlassWeaveUIKit/GlassSurfaceView.swift`, `GlassPresentationHost.swift` (new)
+- `Sources/GlassWeave/FrameScheduler.swift`, `GlassQuality.swift` (new), `RenderMetrics.swift`
+- `Tests/GlassWeaveUIKitTests/PresentationTests.swift`, `Examples/GlassWeaveLab/GlassWeaveLabUITests/PresentationUITests.swift`
+- lab `Info.plist`, `docs/decisions/metal-backend.md`
+
+## GW-28: Liquid and gel fill: a luminous body inside a glass vessel
+
+**Description:** A glass shape holds a glowing liquid or gel with layered inner sheets, bright caustic edges with bloom, bubbles, a lit inner wall, and (in level mode) a surface that sloshes.
+
+**Dependencies:** GW-21, 22, 23, 26, 27. **Scope:** L, about 8 files plus tests.
+
+**Acceptance criteria:**
+- [ ] `.none` or level 0 is byte-identical to the shell-only output.
+- [ ] Level 1 equals the inset region at pixel centers. No fill pixel is shallower than `wallThickness`. A gel stays inside the inset shell (property test).
+- [ ] Waves off: center height = level ± 0.5 px. A 30° vessel tilt settles at −30° ± 0.5°.
+- [ ] Shell refraction of the fill matches the CPU within one step (dot-grid fill).
+- [ ] Absorption and emission monotonic in thickness (radial readback against the CPU).
+- [ ] Bubbles within 0.5 px of the CPU and inside the fill at 1,000 instants.
+- [ ] `t` and `t + 64/speed` byte-identical; replaying an input trace reproduces the bytes.
+- [ ] After an impulse, settled (< 0.1°) within the CPU time, then the effect clock stops.
+- [ ] Reduce Motion and Reduce Transparency UIKit tests pass; CPU mirror within one step.
+- [ ] M5 recorded at 120, 240 and 360 pt; target ≤ +1.0 ms at 240 pt.
+- [ ] **Device only:** p95 for **one** 240 pt vessel at 60 Hz on the baseline device; visual sign-off.
+
+**Evidence:** not started.
+
+**Verification:** As in GW-21, plus slosh tests.
+
+**Likely files:**
+- `Sources/GlassWeave/GlassFill.swift`, `GlassFillModel.swift`
+- `Shaders/GlassFill.metal`, `GlassOptics.h`, `GlassRenderer.swift`, `GlassWeaveShaderTypes.h`, `GlassAccessibilityPolicy.swift`
+- `Tests/GlassWeaveTests/GlassFillTests.swift`
+
+## GW-29: Material studies and the Apple vs GlassWeave screen
+
+**Description:** Four original studies reach the reference quality, and a versus screen shows what native glass cannot do and what it does better.
+
+**Dependencies:** GW-21 to GW-28 (staged). **Scope:** M, about 9 lab files plus UI tests.
+
+**Acceptance criteria:**
+- [ ] Each study launches, runs its script, and writes captures at fixed times; two runs agree within one step.
+- [ ] Accessibility audit passes in light and dark with only native elements; the largest text size keeps content and targets; the RTL pseudo-language capture mirrors positions.
+- [ ] Reduce Motion, Reduce Transparency and Increase Contrast produce their documented variants.
+- [ ] 0 submissions when settled, hidden or backgrounded.
+- [ ] Versus:
+  - same backdrop and layout;
+  - the native half's view hierarchy contains a `UIGlassEffect` view and no GlassWeave surface (hierarchy check);
+  - GlassWeave panels are clipped at the divider by a scissor rect; native glass by a mask.
+- [ ] Full-frame M5 characterization per study, including the producer's own cost.
+- [ ] Review note: each reference feature met, approximated or not met; compared locally only.
+- [ ] `git ls-files` contains no reference image, crop, traced asset or path to them.
+- [ ] **Device only:** recordings; cost per study on the baseline device.
+
+**Evidence:** not started.
+
+**Verification:** Lab UI tests on the iPhone 18 Pro and iPad Pro 13-inch simulators; human review of captures.
+
+**Likely files:**
+- `Examples/GlassWeaveLab/GlassWeaveLab/Studies/*.swift`, `StudyBackgrounds.metal`, `VersusViewController.swift`
+- `Sources/GlassWeaveUIKit/NativeGlassView.swift`, `Sources/GlassWeave/GlassRenderer.swift` (scissor)
+- `Examples/GlassWeaveLab/GlassWeaveLabUITests/StudyUITests.swift`
