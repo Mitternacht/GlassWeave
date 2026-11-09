@@ -127,4 +127,12 @@ Recorded 2026-11-08 with the second uploaded record.
   (padding set to nonzero sentinels so a misplaced read shows) and writes back
   every field, `sizeof`, `alignof`, and each offset. It passed on My Mac
   (Apple M5) and on the iOS 27.2 Simulator with Metal API Validation.
+- GW-17 (2026-11-09) appends the glow after `tint`, leaving the first 112
+  bytes unchanged: four stop colors (`simd_float4`, 112 to 160), stop angles
+  in turns (`simd_float4`, 176), the light direction (`simd_float2`, 192), the
+  stop count (`uint32_t`, 200), nine `float` fields (204 to 232), and zeroed
+  padding (236). Size 240, alignment 16, stride 240. The header includes
+  `<stdint.h>` only outside Metal. The same three checks and the extended
+  probe cover it; a frozen copy of the GW-05 shader in the tests declares the
+  old 112-byte record and reads the new one's prefix.
 

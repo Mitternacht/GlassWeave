@@ -170,6 +170,19 @@ the CPU; the GPU tests compare the two pixel by pixel.
 The parameters are a first lab-tuned set, not a frozen public API; which of
 them stay public is decided after the coexistence proof (plan decision 3).
 
+### Implemented glow (GW-17, experimental)
+
+Added after the v0.1 candidate at the user's request. `GlassParameters.glow`
+(`GlassGlow`, default `.none`) draws a colored layer over the finished glass
+in the same fragment: a rim band, an inner glow falling off as
+`(1 − depth / radius)²`, and a center fill, in one color or an angular
+gradient of up to four stops, with a directional light term, composited as a
+premultiplied layer in linear light and dithered where it draws. The panel's
+quad, sampling, and every pixel outside the outline's antialiasing band are
+unchanged; without a glow the output is byte-identical to the GW-05 shader
+(a frozen copy in the tests). Units, math, record layout, and the
+accessibility mapping are in [the glow design](glow.md).
+
 ## Scheduling and resources
 
 - Render static surfaces on demand; use continuous drawing only while a source or effect is changing.

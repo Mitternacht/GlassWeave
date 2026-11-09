@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased: after the v0.1 candidate (experimental glow)
+
+Requested by the user on 2026-11-09 and outside the v0.1 candidate's scope;
+see [the glow design](docs/glow.md). Not released; simulator and Mac
+evidence only.
+
+### Added
+
+- `GlassGlow`, a colored glow on a custom panel's edge: a rim band, an inner
+  glow fading toward the middle, and an optional center fill, in one color or
+  an angular gradient of up to four stops, lit from a chosen side; documented
+  units, ranges, and normalization; `GlassParameters.glow`, default `.none`,
+  which renders byte-identical output to the earlier shader (GW-17).
+- `GlassAccessibilityPolicy` maps the glow: a thin crisp rim on the opaque
+  body under Reduce Transparency, no inner glow or center fill under Increase
+  Contrast; `GlassGlow.ColorStop(_:angle:traits:)` reads a stop from a
+  `UIColor` (GW-17).
+- The laboratory's `-lab.glow amber|aurora` launch argument (GW-17).
+
 ## Unreleased: v0.1 pre-alpha candidate
 
 Not released and not tagged. Every API is experimental. No physical device

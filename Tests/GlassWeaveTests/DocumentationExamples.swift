@@ -15,3 +15,24 @@ func measure(_ renderer: GlassRenderer) -> () -> Double? {
         return Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1e15
     }
 }
+
+import CoreGraphics
+import GlassWeave
+
+/// A capsule whose edge glows amber at the top and violet at the bottom and
+/// fades to clear glass in the middle.
+func glowingCapsule(frame: CGRect) -> GlassPanel {
+    GlassPanel(frame: frame, parameters: GlassParameters(
+        cornerRadius: frame.height / 2,
+        glow: GlassGlow(
+            colors: [
+                .init(red: 1, green: 0.62, blue: 0.2, angle: 0),
+                .init(red: 0.55, green: 0.3, blue: 1, angle: 180),
+            ],
+            rimWidth: 2, rimSoftness: 2,
+            innerGlowRadius: 20, innerGlowIntensity: 0.7,
+            centerOpacity: 0,
+            lightAngle: 0, directionality: 0.5
+        )
+    ))
+}

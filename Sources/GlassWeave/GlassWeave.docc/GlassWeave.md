@@ -144,6 +144,54 @@ final class GlassStage {
 The producer writes `bgra8Unorm` and hands GlassWeave a `bgra8Unorm_srgb`
 view, because the iOS Simulator cannot render into sRGB textures.
 
+### Colored glow (experimental)
+
+> Note: The glow was added after the v0.1 candidate at the user's request
+> (GW-17). It is experimental and not part of the v0.1 scope.
+
+``GlassGlow`` gives a panel's edge a color: a rim band at the outline, an
+inner glow that fades inward, and an optional center fill. The color is one
+``GlassGlow/ColorStop`` or an angular gradient of up to four, at angles in
+degrees from the top, clockwise, blended in linear light. With
+``GlassGlow/centerOpacity`` at 0 the middle stays exactly the glass without a
+glow. A light angle and directionality light one side more than the other.
+Lengths are in points; every field follows the ``GlassParameters``
+normalization rule, and ``GlassRenderer/panel`` reports the glow drawn. The
+default, ``GlassGlow/none``, renders exactly what a panel without a glow
+rendered before. A circle or capsule is a rounded panel whose corner radius
+is half its shorter side.
+
+```swift
+import CoreGraphics
+import GlassWeave
+
+/// A capsule whose edge glows amber at the top and violet at the bottom and
+/// fades to clear glass in the middle.
+func glowingCapsule(frame: CGRect) -> GlassPanel {
+    GlassPanel(frame: frame, parameters: GlassParameters(
+        cornerRadius: frame.height / 2,
+        glow: GlassGlow(
+            colors: [
+                .init(red: 1, green: 0.62, blue: 0.2, angle: 0),
+                .init(red: 0.55, green: 0.3, blue: 1, angle: 180),
+            ],
+            rimWidth: 2, rimSoftness: 2,
+            innerGlowRadius: 20, innerGlowIntensity: 0.7,
+            centerOpacity: 0,
+            lightAngle: 0, directionality: 0.5
+        )
+    ))
+}
+```
+
+In GlassWeaveUIKit, `GlassGlow.ColorStop(_:angle:traits:)` reads a stop from
+a `UIColor` resolved for a trait collection. Under Reduce Transparency the
+glow keeps only a thin, crisp rim on the opaque body; under Increase Contrast
+it loses its inner glow and center fill, so the interior is the glass without
+a glow. Genuine native glass cannot carry this glow inside itself; see
+`docs/glow.md` in the repository for the design and the plan for halos,
+pulses, and native glass.
+
 ### Source ownership
 
 A ``BackgroundFrame`` states everything the renderer needs and nothing it
@@ -294,6 +342,7 @@ func measure(_ renderer: GlassRenderer) -> () -> Double? {
 - ``GlassPanel``
 - ``GlassParameters``
 - ``GlassTint``
+- ``GlassGlow``
 - ``GlassParameterError``
 
 ### Background source

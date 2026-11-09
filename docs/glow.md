@@ -40,7 +40,7 @@ the glow is drawn over the tinted, refracted, edge-lit glass.
 
 ## GW-17: rim, inner glow, and center fade
 
-### Public types
+### Public types (implemented)
 
 `GlassGlow` (`Sources/GlassWeave/GlassGlow.swift`) is `Hashable` and
 `Sendable`. Lengths are in **points**, converted with the host's display
@@ -69,9 +69,12 @@ shorter side, coefficients and color components to 0...1. Angles are reduced
 modulo 360 into 0..<360. Only the first four stops are kept, then they are
 ordered by angle (stably, so two stops at one angle make a hard edge). A
 glow with no stops normalizes to `GlassGlow.none`. `GlassRenderer.panel`
-reports the normalized glow.
+reports the normalized glow. In GlassWeaveUIKit,
+`GlassGlow.ColorStop(_:angle:traits:)` reads a stop from a `UIColor`
+resolved for a trait collection (alpha ignored; `nil` for a color without
+RGB components, such as a pattern).
 
-### Shader math
+### Shader math (implemented)
 
 Everything below is evaluated per pixel in target pixels (y down) by
 `gw_glass_fragment` and mirrored on the CPU by `GlassPanelGeometry`, which
@@ -84,9 +87,12 @@ the tests compare with the GPU output.
 2. **Gradient angle.** `p = (pixel − center) / halfSize` (the panel scaled
    to a square, so 45° always points at the top-right corner);
    `θ = atan2(p.x, −p.y)` in turns, wrapped to 0..<1; at the exact center
-   `θ = 0`. The glow color `C(θ)` interpolates linearly, in linear light,
-   between the two neighbouring stops around the circle (cyclically, so the
-   last stop blends back into the first). One stop is a solid color.
+   `θ = 0`. The shader uses `precise::atan2`: on the axis through the center
+   `−p.y` is a signed zero, and the fast-math `atan2` put such pixels in the
+   wrong half-plane (a GPU test found it; the CPU model was right). The
+   glow color `C(θ)` interpolates linearly, in linear light, between the
+   two neighbouring stops around the circle (cyclically, so the last stop
+   blends back into the first). One stop is a solid color.
 3. **Light.** `L = (sin λ, −cos λ)` for light angle `λ`. `n` is the outward
    normal of a rounded rectangle with radius
    `max(cornerRadius, rimWidth + feather, innerGlowRadius)` (capped at half
@@ -119,7 +125,7 @@ whole block, so the default panel renders exactly what it rendered before.
 The tests keep a frozen copy of the pre-glow (GW-05) shader and compare
 bytes.
 
-### GPU record
+### GPU record (implemented)
 
 `GWGlassUniforms` keeps its first 112 bytes unchanged (the GW-05 layout) and
 appends the glow, all in target pixels or normalized:
@@ -151,15 +157,27 @@ GW-17 changes only pixels the panel covers (coverage above zero). With
 `max(rimWidth + feather, innerGlowRadius)` of the outline. Pixels outside the
 outline's antialiasing band are byte-identical to the glow-off output.
 
+### Laboratory (implemented)
+
+`-lab.glow amber` (one warm system color lit from the top, directionality
+0.7) and `-lab.glow aurora` (cyan, indigo, pink, and yellow at 0°, 90°,
+180°, and 270°, evenly lit) give the laboratory's custom panel a glow
+(`Examples/GlassWeaveLab/GlassWeaveLab/LabGlow.swift`). Both keep center
+opacity 0 and an inner glow no deeper than the panel's 22-point rim, where
+the laboratory places no text, so the tint's legibility rule still describes
+the text area. The diagnostics print a `Glow:` line with the presented
+values.
+
 ## Accessibility mapping
 
-`GlassAccessibilityPolicy` applies these to the presented panel (the app's
-panel is kept unchanged):
+Implemented for GW-17's rows. `GlassAccessibilityPolicy` applies these to the
+presented panel (the app's panel is kept unchanged); the GW-18 and GW-19 rows
+are the plan:
 
 | Feature | Reduce Transparency | Increase Contrast | Reduce Motion |
 | --- | --- | --- | --- |
 | Body (GW-05/GW-08) | Opaque `secondarySystemBackground`, no refraction or edge light (GW-08) | Unchanged; the app's tint keeps text at 7:1 through the GW-08 legibility rule | Unchanged (no motion) |
-| Rim (GW-17) | Kept, at most 2 pt wide, crisp, evenly lit, so the shape keeps its color identity on the opaque body | Kept and evenly lit (directionality 0), a clearer boundary | Unchanged |
+| Rim (GW-17) | Kept with its colors as a crisp, evenly lit band: its width plus softness, capped at `GlassAccessibilityPolicy.reducedTransparencyRimWidth` (2 pt), so the shape keeps its color identity on the opaque body | Kept with its width and softness, evenly lit (directionality 0), a clearer boundary | Unchanged |
 | Inner glow, center fill (GW-17) | Removed: the body is exactly the opaque legible surface | Removed: the interior is exactly the GW-08 glass, so the legibility rule for text still holds | Unchanged |
 | Halo (GW-18) | Removed | Kept (outside the shape, behind no text) | Steady at its mean level |
 | Pulse (GW-18) | Not drawn (no halo; rim steady) | Kept | Off: steady at the mean level |

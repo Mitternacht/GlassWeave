@@ -56,6 +56,7 @@ functional evidence only.
 | `GlassAccessibilityPolicy`, legibility rule | UIKit and laboratory tests, documentation example | Live VoiceOver, device display |
 | `RenderMetrics` | Package tests, laboratory benchmark, characterization | Device timings |
 | `RenderCapabilities` | Package tests, laboratory diagnostics | Device GPU families |
+| `GlassGlow` (GW-17, experimental) and its accessibility mapping | GPU readback on My Mac and the iPhone 18 Pro simulator against a CPU model and a frozen copy of the pre-glow shader; UIKit tests including an offscreen render on the iPhone 18 Pro simulator; laboratory UI test reading rim colors from screenshots; documentation example | Device GPUs and displays, the clean-consumer check (which pins the v0.1 candidate revision) |
 
 ## Platforms
 
@@ -76,7 +77,7 @@ the backend today.
 
 | Product or target | Imports | Purpose |
 | --- | --- | --- |
-| `GlassWeave` | Metal, simd, os, CoreGraphics, Synchronization | Core types and rendering: the source-frame contract, its validation and lease, the background renderer, the glass renderer with its parameters (one rounded panel), the frame scheduler (package access), `FrameTexturePool`, a bounded pool of producer textures recycled only after GPU use, the text legibility rule for tinted glass (`GlassTint.worstCaseContrast`, `minimumStrength`), and opt-in `RenderMetrics` (CPU encode, producer, and drawable-acquisition time, GPU start/end per command buffer, counts, and allocated bytes). Never imports UIKit or SwiftUI; `CoreGraphics` supplies only `CGRect` for panel frames in points. |
+| `GlassWeave` | Metal, simd, os, CoreGraphics, Synchronization | Core types and rendering: the source-frame contract, its validation and lease, the background renderer, the glass renderer with its parameters (one rounded panel), the frame scheduler (package access), `FrameTexturePool`, a bounded pool of producer textures recycled only after GPU use, the text legibility rule for tinted glass (`GlassTint.worstCaseContrast`, `minimumStrength`), and opt-in `RenderMetrics` (CPU encode, producer, and drawable-acquisition time, GPU start/end per command buffer, counts, and allocated bytes). Since GW-17 (experimental, after the v0.1 candidate), `GlassGlow` adds a colored rim, inner glow, and center fill to the panel. Never imports UIKit or SwiftUI; `CoreGraphics` supplies only `CGRect` for panel frames in points. |
 | `GlassWeaveUIKit` | UIKit, MetalKit | UIKit presentation. `NativeGlassView` is native mode: a `UIVisualEffectView` with a public `UIGlassEffect` (tint, interactive) around native controls, creating no GlassWeave renderer. `GlassSurfaceView` hosts an `MTKView` for an explicit source and an optional glass panel given in the view's points; it draws on demand, only while visible in its own window scene, with at most two frames in flight (`frameStatistics` reports the counts); it is hidden from assistive technologies and applies `GlassAccessibilityPolicy` (an opaque legible panel under Reduce Transparency; Reduce Motion reported to the app). Compiled only where UIKit exists; on macOS the module is empty. |
 | `GlassWeaveShaderTypes` (internal C target, not a product) | simd | The single definition of every record uploaded to the GPU, shared by Swift and the Metal shaders. |
 
