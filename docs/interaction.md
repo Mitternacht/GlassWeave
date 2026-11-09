@@ -1,8 +1,8 @@
 # Interaction (GW-12, GW-13)
 
 Experimental. Everything here is unreleased and can change. This note covers how
-GlassWeave's own glass answers a finger (GW-12). The merge of two surfaces
-(GW-13) adds its own section below when it lands.
+GlassWeave's own glass answers a finger (GW-12) and how two of its surfaces merge
+and separate under a spring (GW-13, [below](#merging-two-surfaces-gw-13)).
 
 ## Touch response (GW-12)
 
@@ -150,3 +150,133 @@ widened (`16 + 0.14 R` points) and the light became one Gaussian.
   test, and no cost measurement: fast pass, not tested.
 - The ring's catch light and the gleam are the least visible parts at the standard
   strength on a busy backdrop; they show on the dark stage and the grid.
+
+## Merging two surfaces (GW-13)
+
+Two surfaces of GlassWeave's own glass, for example a minus and a plus button,
+that merge into one pill and separate again under a progress from 0 to 1.
+
+**Custom to custom.** GlassWeave owns both surfaces: they are two parts of one
+blob, drawn as one panel (the shape field is in
+[glass-optics](glass-optics.md#merging-two-surfaces-gw-13)). Apple's
+`UIGlassEffect` merges too, through the system's `UIGlassContainerEffect` (glass
+views inside one container blend when closer than its `spacing`). That is a
+separate material system with its own look and its own rules; GlassWeave does not
+drive it, and nothing here changes it. The lab shows it beside ours, driven from
+the same progress, only as the benchmark for restraint.
+
+### API (all experimental)
+
+Core (`GlassWeave`): `GlassSurfaceMerge` (two `Surface`s, each a `Pose` apart and
+a `Pose` merged; `blob(progress:)`, `shape(progress:)`, `normalizedProgress(_:)`),
+`GlassBlob.interiorSmoothness`, `GlassShape.Field.mergeProgress`. A progress that
+is NaN or infinite throws `GlassParameterError.nonFiniteShape(.mergeProgress)`;
+a finite one clamps to 0...1. Off is the default: no merge, no shape change, no
+new pipeline; every existing shape is byte-identical.
+
+UIKit (`GlassWeaveUIKit`): `SurfaceTransition`.
+
+```swift
+let transition = try SurfaceTransition(
+    surface: surface, merge: merge, frame: stepperFrame, parameters: parameters
+)
+try transition.setTarget(1)   // merge; a spring on the effect clock
+transition.reverse()          // turn around, even in flight
+try transition.scrub(to: 0.4) // a slider: set it directly, no spring
+```
+
+`SurfaceTransition` calls the app's panel closure (or builds the one merged panel
+from `merge`, `frame` and `parameters`) each time the progress changes and gives
+the result to the surface. The surface keeps it weakly; the app owns it.
+
+### The spring
+
+A critically damped spring by default (`Spring`: response 0.5 s, damping 0.9;
+about 0.8 s to settle). `setTarget` and `reverse` retarget **without a jump**: the
+spring's value and velocity carry over, the glass coasts the way it was going for a
+moment, then comes back. The lab's status line reads `largest dv`, the largest
+change of velocity between two frames: 2.6 per second after a merge that was
+reversed 0.2 s in, which is the spring's acceleration times one frame (a jump
+would flip the velocity, a change of about 8). The state advances by the effect
+time (the sum of the clock's deltas, clamped to 0.1 s a tick, in 1/240 s
+substeps), so it follows the clock, not the wall.
+
+### Clock and settling
+
+The surface runs its effect clock while the spring moves (a transition is a clock
+client: `GlassEffectClockClient`, internal), asks the display for the interaction
+rates (`GlassMotionClass.interaction`: 80 to 120 Hz at the full tier, 60 Hz
+below), and stops the clock on the tick that settles the spring, which presents
+the last frame. After that the surface draws nothing more: on demand again. The
+lab's status line reads `after settle +0` and `clock off` (capture
+[settled after a reversal](evidence/captures/gw-13-merge-settled-after-reverse-iphone18pro-sim.png):
+50 frames submitted during the motion, none after). A surface that is hidden or
+has no source does not run its clock; the spring waits and resumes where it was.
+
+### Reduce Motion and the quality tiers
+
+| | Behavior |
+|---|---|
+| Full and balanced tiers | The spring runs; the clock's rate and the interaction rate follow the tier (60 Hz at balanced). |
+| Minimal tier | A change of target jumps to the end state: no clock, no velocity. |
+| Reduce Motion | The same jump. A setting that changes in flight jumps the spring to its target. [Capture](evidence/captures/gw-13-merge-reduce-motion-jump-iphone18pro-sim.png): one frame, `clock off`, velocity 0. |
+| Reduce Transparency, Increase Contrast | These change the material (the opaque body), not the motion; the outline still moves. |
+
+### Layout and hit-test policy for native content
+
+The glass is decorative; it moves nothing but itself.
+
+1. **Native controls keep their frames for the whole transition.** The minus and
+   plus buttons are ordinary UIKit buttons at fixed frames (52 x 52 pt, centered
+   on the two surfaces' centers). The merge never moves, resizes or
+   re-parents a view. The poses should keep each button inside the glass at every
+   progress (the lab's arms start under the buttons and grow toward each other).
+2. **Native controls keep their own hit testing.** The surface takes no touches
+   (`isUserInteractionEnabled` is `false`), so every tap goes to the view
+   underneath as before. A button's hit area does not follow the outline: it is the
+   same frame apart, merging and merged. A tap on the glass between the buttons
+   goes to whatever the app put there (nothing, in the lab). Verified in the lab
+   under Reduce Motion by tapping the plus button in the merged state
+   (quantity 2 to 3) and the reverse button (a native control with its own frame).
+3. **Text and controls that appear or leave use ordinary UIKit animation.** The
+   lab fades the value between the buttons in with `UIView.animate` (0.4 s, 0.12 s
+   delayed, so it appears as the glass closes around it) and out again, on
+   `setMerged`, `reverse()` and the slider, and drops the animation under Reduce
+   Motion. A view that fades is hidden from accessibility while it is not shown
+   (`isAccessibilityElement`), so VoiceOver reads what is visible. `progressHandler`
+   (every change of progress) and `didSettleHandler` are there for content that
+   should follow the progress itself.
+4. **Accessibility frames stay put.** The buttons' accessibility frames are their
+   view frames, so they do not move during the transition either.
+
+### Laboratory
+
+`-lab.merge YES` (or the "Merge" button on the main screen) opens the page: native
+text, a stepper of two GlassWeave surfaces (minus, a value, plus), a native switch
+that merges them, a native "Reverse" button that turns the flight around, a native
+slider that scrubs the progress, and below it the same two shapes as
+`UIGlassEffect` views inside a `UIGlassContainerEffect` driven from the same
+progress. `-lab.mergeBackdrop stage|orbs` picks the backdrop (default stage);
+`-lab.merge.progress <0...1>` pins a progress (no spring, no clock) for captures;
+`-lab.merge.auto YES` merges, reverses 0.22 s later, and lets it settle apart.
+
+Captures (iPhone 18 Pro simulator, progress 0, 0.25, 0.5, 0.75, 1):
+[orbs](evidence/captures/gw-13-merge-orbs-progress-strip-iphone18pro-sim.png),
+[stage](evidence/captures/gw-13-merge-stage-progress-strip-iphone18pro-sim.png),
+and [beside the system's merge](evidence/captures/gw-13-merge-vs-native-container-iphone18pro-sim.png)
+(progress 0.45).
+
+### Limits
+
+- The native twin's look is Apple's: pearlier and brighter than ours on the orbs,
+  flat gray on the stage; ours is the calmer, clearer material of the other pages,
+  and the two read as the same family by their shapes and rims, not by their
+  fill.
+- The interrupt claim rests on the spring's construction and on one logged run
+  (`largest dv`); no UI test or device run drove a reversal.
+- The merge is two parts. More than two, other primitives (boxes), or a merge of
+  a surface with a frost map or a fill were not tried. Frost and fill follow the
+  merged outline through their shaped variants but were not captured on a merge.
+- The touch response (GW-12) answers a merged panel like any shaped panel; it was
+  not exercised during a transition.
+- No cost measurement; simulator only.

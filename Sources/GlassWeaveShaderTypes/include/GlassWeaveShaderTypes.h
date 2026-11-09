@@ -395,6 +395,11 @@ typedef struct GWShapePrimitive {
 /// - `primitiveCount`: 1 to 6 for a blob.
 /// - `exponent`: the superellipse's `n`, 2 to 10.
 /// - `smoothness`: the blob's smooth-union blend distance `k`.
+/// - `depthSmoothness` (GW-13): a wider blend distance, in pixels, that the
+///   shader uses for the blob's *interior* (the depth the lens and the normal
+///   read), fading in from 0 at the outline to full a short way inside, so a
+///   merge's neck has no medial seam while its outline keeps the narrow `k`.
+///   0 (the all-zero default) is the blob as before, byte for byte.
 /// - `inscribedRadius`: a lower bound of the radius of the largest circle
 ///   inside the outline; depth fractions and the dome's bevel use it.
 /// - `wobbleAmplitude`, `wobbleWavelength`: the blob's wobble, a sum of three
@@ -405,8 +410,9 @@ typedef struct GWShapePrimitive {
 /// - `primitives`: the blob's primitives; unused ones are zero.
 ///
 /// Layout in bytes: kind 0, primitiveCount 4, exponent 8, smoothness 12,
-/// inscribedRadius 16, wobbleAmplitude 20, wobbleWavelength 24, explicit
-/// padding 28 (set to zero), wobblePhases 32, primitives 48 (6 x 48 bytes).
+/// inscribedRadius 16, wobbleAmplitude 20, wobbleWavelength 24,
+/// depthSmoothness 28 (the explicit padding of GW-26, zero until GW-13),
+/// wobblePhases 32, primitives 48 (6 x 48 bytes).
 /// Size 336, alignment 16, stride 336.
 typedef struct GWShapeUniforms {
     uint32_t kind;
@@ -416,7 +422,7 @@ typedef struct GWShapeUniforms {
     float inscribedRadius;
     float wobbleAmplitude;
     float wobbleWavelength;
-    float padding0;
+    float depthSmoothness;
     simd_float4 wobblePhases;
     GWShapePrimitive primitives[6];
 } GWShapeUniforms;

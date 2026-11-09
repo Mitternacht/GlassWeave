@@ -165,7 +165,7 @@ _Static_assert(offsetof(GWShapeUniforms, smoothness) == 12, "shape smoothness of
 _Static_assert(offsetof(GWShapeUniforms, inscribedRadius) == 16, "shape inscribedRadius offset");
 _Static_assert(offsetof(GWShapeUniforms, wobbleAmplitude) == 20, "shape wobbleAmplitude offset");
 _Static_assert(offsetof(GWShapeUniforms, wobbleWavelength) == 24, "shape wobbleWavelength offset");
-_Static_assert(offsetof(GWShapeUniforms, padding0) == 28, "shape padding0 offset");
+_Static_assert(offsetof(GWShapeUniforms, depthSmoothness) == 28, "shape depthSmoothness offset");
 _Static_assert(offsetof(GWShapeUniforms, wobblePhases) == 32, "shape wobblePhases offset");
 _Static_assert(offsetof(GWShapeUniforms, primitives) == 48, "shape primitives offset");
 _Static_assert(sizeof(GWShapePrimitive) == 48, "GWShapePrimitive size");

@@ -259,6 +259,28 @@ static GWShapeRaw gw_shape_blob(float2 q, constant GWShapeUniforms &shape) {
     return raw;
 }
 
+/// A blob with a softer interior (GW-13): the outline is `gw_shape_blob`'s
+/// (the blend distance `smoothness`, wobble included), and the inside blends
+/// the same primitives with the wider `depthSmoothness`, fading in from 0 at
+/// the outline to full a few pixels deeper. Where two parts overlap, the depth
+/// the lens reads is the larger of two cones and has a V-shaped valley along
+/// their bisector (the medial seam); the wider blend rounds that valley over
+/// a distance of about `depthSmoothness` while the outline (and a pill that
+/// the parts end as) stays exact. Only a blob with a `depthSmoothness` above 0
+/// takes this path; every other blob is `gw_shape_blob`, unchanged.
+static GWShapeRaw gw_shape_blob_soft_interior(float2 q, constant GWShapeUniforms &shape) {
+    GWShapeRaw raw = gw_shape_blob(q, shape);
+    GWShapeRaw soft = gw_shape_primitive(q, shape.primitives[0]);
+    for (uint i = 1u; i < min(shape.primitiveCount, 6u); ++i) {
+        gw_shape_union(soft, gw_shape_primitive(q, shape.primitives[i]), shape.depthSmoothness);
+    }
+    const float inside = saturate(-raw.distance / max(0.3 * shape.depthSmoothness, 1.0));
+    const float weight = inside * inside * (3.0 - 2.0 * inside);
+    raw.distance = mix(raw.distance, soft.distance, weight);
+    raw.gradient = mix(raw.gradient, soft.gradient, weight);
+    return raw;
+}
+
 /// The shape field at `q`: the raw distance renormalized by the gradient
 /// length (at least 0.3, so a flat saddle never inflates it past the
 /// inscribed radius; fading out deep inside), the unit outward normal, and the
@@ -274,7 +296,7 @@ static GWShapeSample gw_shape_field(float2 q, constant GWGlassUniforms &uniforms
         raw = gw_shape_superellipse(q, uniforms.panelHalfSize, shape.exponent);
         break;
     default:
-        raw = gw_shape_blob(q, shape);
+        raw = shape.depthSmoothness > 0.0 ? gw_shape_blob_soft_interior(q, shape) : gw_shape_blob(q, shape);
         break;
     }
     const float length2 = length(raw.gradient);

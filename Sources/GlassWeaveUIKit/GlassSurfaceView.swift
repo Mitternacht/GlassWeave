@@ -223,6 +223,15 @@ public final class GlassSurfaceView: UIView {
     /// The panels as the app set them, after the normalization rule.
     private var requestedPanels: [GlassPanel] = []
 
+    // MARK: Effect clock clients (GW-13)
+
+    /// Animations that move with the effect clock, such as a
+    /// ``SurfaceTransition``: held weakly, so an app owns its transition.
+    private var clockClients: [WeakClockClient] = []
+    /// A display update of the effect clock is being handled, so the update
+    /// link must not be removed from inside its own callback.
+    private var isInEffectTick = false
+
     // MARK: Touch state (GW-12)
 
     /// The touches being answered, on the effect clock.
@@ -417,6 +426,7 @@ public final class GlassSurfaceView: UIView {
         }
         reconcileTouches()
         updateEffectClock()
+        for client in clockClients.compactMap(\.client) { client.surfacePresentationChanged() }
     }
 
     // MARK: Pacing and quality (GW-27, experimental)
@@ -437,7 +447,7 @@ public final class GlassSurfaceView: UIView {
     /// The class in force now: ``GlassMotionClass/interaction`` while an
     /// interaction is open, ``motionClass`` otherwise.
     public var activeMotionClass: GlassMotionClass {
-        isInteracting ? .interaction : restingMotionClass
+        isInteracting || clockClientsWantClock ? .interaction : restingMotionClass
     }
 
     /// Whether an interaction is open (``beginInteraction()``).
@@ -725,6 +735,8 @@ public final class GlassSurfaceView: UIView {
         let scale = Double(traitCollection.displayScale)
         // A touch whose ring or fade is still moving also runs the clock (GW-12).
         if touchTracker.isAnimating(styles: presentedTouchStyles, time: effectClock.time) { return true }
+        // A transition that is moving also runs it (GW-13).
+        if clockClientsWantClock { return true }
         return renderer.panels.contains { panel in
             panel.parameters.isAnimated
                 && panel.reachesTarget(pixelWidth: pixelSize.width, pixelHeight: pixelSize.height, displayScale: scale)
@@ -760,7 +772,7 @@ public final class GlassSurfaceView: UIView {
             updateLink?.preferredFrameRateRange = CAFrameRateRange(
                 minimum: rate.minimum, maximum: rate.maximum, preferred: rate.preferred
             )
-        } else if let updateLink {
+        } else if let updateLink, !isInEffectTick {
             updateLink.isEnabled = false
             self.updateLink = nil
         }
@@ -772,9 +784,16 @@ public final class GlassSurfaceView: UIView {
     func effectTick(modelTime: Double) {
         guard effectClockRunning else { return }
         effectClock.advance(toModelTime: modelTime)
+        isInEffectTick = true
+        defer { isInEffectTick = false }
         // A touch whose response is over leaves, closing its interaction; the
         // frame requested below is the last one that shows it (GW-12).
         settleTouches()
+        // A transition advances by the effect time and presents its panels; the
+        // tick that settles it is the last one it needs (GW-13).
+        for client in clockClients.compactMap(\.client) where client.wantsEffectClock {
+            client.effectClockTick(time: effectClock.time)
+        }
         guard wantsEffectClock else {
             // Nothing moves any more (a settled touch, a finger held after its
             // ring): this frame is the last of the clock, which stops now so no
@@ -786,6 +805,30 @@ public final class GlassSurfaceView: UIView {
             return
         }
         requestFrame()
+    }
+
+    // MARK: Effect clock clients (GW-13)
+
+    /// Whether any client moves and so needs the effect clock.
+    private var clockClientsWantClock: Bool {
+        clockClients.contains { $0.client?.wantsEffectClock == true }
+    }
+
+    /// Registers a client; the surface keeps it weakly.
+    func addEffectClockClient(_ client: some GlassEffectClockClient) {
+        clockClients.removeAll { $0.client == nil }
+        guard !clockClients.contains(where: { $0.client === client }) else { return }
+        clockClients.append(WeakClockClient(client))
+    }
+
+    func removeEffectClockClient(_ client: some GlassEffectClockClient) {
+        clockClients.removeAll { $0.client == nil || $0.client === client }
+        updateEffectClock()
+    }
+
+    /// A client began or stopped moving: starts or stops the clock to match.
+    func effectClockClientChanged() {
+        updateEffectClock()
     }
 
     /// The frame rate range the update link asks for, for tests.
@@ -1168,3 +1211,25 @@ private final class DrawDelegate: NSObject, MTKViewDelegate {
     }
 }
 #endif
+
+/// Something that moves with the surface's effect clock (GW-13): the surface
+/// runs its clock and asks the display for the interaction rates while one
+/// wants it.
+@MainActor
+protocol GlassEffectClockClient: AnyObject {
+    /// Whether the client is moving and needs a tick on every display update.
+    var wantsEffectClock: Bool { get }
+    /// One display update: the effect clock's time in seconds.
+    func effectClockTick(time: Double)
+    /// The surface presented its panels again, for example because the
+    /// accessibility settings or the quality tier changed.
+    func surfacePresentationChanged()
+}
+
+private struct WeakClockClient {
+    weak var client: (any GlassEffectClockClient)?
+
+    init(_ client: some GlassEffectClockClient) {
+        self.client = client
+    }
+}

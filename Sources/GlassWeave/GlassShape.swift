@@ -52,8 +52,10 @@ public enum GlassShape: Hashable, Sendable {
         case superellipseExponent
         case primitiveX, primitiveY, primitiveRadius
         case primitiveHalfWidth, primitiveHalfHeight, primitiveCornerRadius, primitiveRotation
-        case smoothness
+        case smoothness, interiorSmoothness
         case wobbleAmplitude, wobbleSpeed, wobbleTimeOffset
+        /// The progress of a ``GlassSurfaceMerge`` (GW-13).
+        case mergeProgress
     }
 
     /// The most primitives one blob uses; further ones are dropped.
@@ -88,6 +90,7 @@ public enum GlassShape: Hashable, Sendable {
 /// | --- | --- | --- | --- | --- |
 /// | ``primitives`` | ``Primitive`` | 1 to ``GlassShape/maximumPrimitives`` | — | The parts. An empty list becomes one circle of radius 1. |
 /// | ``smoothness`` | frame units | 0...2 | 0.25 | How far apart two parts' outlines can be and still blend. 0 is a hard union. |
+/// | ``interiorSmoothness`` | frame units | 0...2 | 0 | A wider blend that applies to the *inside* of the blob only (fading in from 0 at the outline), so the lens depth and the normals have no medial crease where parts overlap; the outline keeps ``smoothness``. 0 is off, byte for byte. (GW-13) |
 /// | ``wobble`` | ``Wobble`` | see ``Wobble`` | none | A slow organic movement of the outline. |
 public struct GlassBlob: Hashable, Sendable {
     /// One part of a blob.
@@ -138,14 +141,20 @@ public struct GlassBlob: Hashable, Sendable {
     public var smoothness: Double
     /// The wobble; ``Wobble/none`` for none.
     public var wobble: Wobble
+    /// The blend distance of the interior, in frame units, 0...2; 0 is none.
+    /// See the table above. Experimental (GW-13).
+    public var interiorSmoothness: Double
 
     /// The wobble time, in seconds, after which the wobble repeats.
     public static let loopDuration = GlassInterior.loopDuration
 
-    public init(primitives: [Primitive], smoothness: Double = 0.25, wobble: Wobble = .none) {
+    public init(
+        primitives: [Primitive], smoothness: Double = 0.25, wobble: Wobble = .none, interiorSmoothness: Double = 0
+    ) {
         self.primitives = primitives
         self.smoothness = smoothness
         self.wobble = wobble
+        self.interiorSmoothness = interiorSmoothness
     }
 }
 
@@ -243,7 +252,8 @@ extension GlassBlob {
         if kept.isEmpty {
             kept = [.circle(center: .zero, radius: 1)]
         }
-        return GlassBlob(primitives: kept, smoothness: blend, wobble: movement)
+        let interior = min(max(try finite(interiorSmoothness, .interiorSmoothness), 0), 2)
+        return GlassBlob(primitives: kept, smoothness: blend, wobble: movement, interiorSmoothness: interior)
     }
 }
 
@@ -549,6 +559,7 @@ final class GlassShapeCache: @unchecked Sendable {
         // The wobble does not change the resting outline.
         var resting = blob
         resting.wobble = .none
+        resting.interiorSmoothness = 0
         let key = Key(blob: resting, width: Double(frameSize.width), height: Double(frameSize.height))
         lock.lock()
         let cached = entries[key]
@@ -684,6 +695,9 @@ struct GlassShapeModel: Equatable {
             record.kind = GWShapeKindBlob.rawValue
             record.primitiveCount = UInt32(scaled.count)
             record.smoothness = Float(smoothness * displayScale)
+            if case let .blob(blob) = shape {
+                record.depthSmoothness = Float(blob.interiorSmoothness * unit)
+            }
             withUnsafeMutableBytes(of: &record.primitives) { raw in
                 let primitiveRecords = raw.bindMemory(to: GWShapePrimitive.self)
                 for (index, primitive) in scaled.enumerated() {

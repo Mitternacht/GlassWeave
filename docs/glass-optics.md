@@ -1098,3 +1098,72 @@ radii, in a band 2.4 points deep inside the outline, times `0.35 + 0.65 facing` 
 the lit side is brighter; `rimDistance` is computed on the CPU from the shape's
 distance field. All three are composited after the inner light and before the
 light model, and the pixels they change are dithered like the glow.
+
+## Merging two surfaces (GW-13)
+
+Experimental. The interaction side (the spring, the clock, the hit-test policy,
+Reduce Motion) is in [interaction](interaction.md#merging-two-surfaces-gw-13);
+this is the shape and the shader.
+
+**A merge is a blob.** `GlassSurfaceMerge` (`SurfaceField.swift`) holds two
+surfaces, each a circle or a capsule at progress 0 and another at progress 1, in
+frame units. `blob(progress:)` blends the poses linearly and returns an ordinary
+`GlassBlob` of two primitives, so the GW-26 path draws it: one panel, one
+outline, the lens, dispersion, light, frost, glow, liquid and shadow all follow
+it, and there is no second surface to leave a seam. Nothing about the shape
+changes in the renderer: the app moves the blob. The progress follows the rule: a
+NaN throws `GlassParameterError.nonFiniteShape(.mergeProgress)`, a finite value
+clamps to 0...1. The CPU cost is the blob's bounds sampling (48 x 48 samples of
+two primitives) once per distinct progress; the cache holds the last 64.
+
+**The neck.** The outline blends with the blob's polynomial smooth union, whose
+distance `min(a, b) - k h^2 / 4` swells wherever the two distances are about
+equal. A smooth union cannot avoid that (a symmetric blend that is smooth where
+`a = b` must dip below `a`), so the blend distance is a curve of the progress
+(`smoothness x sin^2(pi t)`, `t = progress / neckEnd`): 0 at the start (two exact
+circles), widest while the gap closes, 0 from `neckEnd` on, when the two arms
+overlap along a line and their union is an exact stadium with no swelling. The lab
+chooses poses whose segments overlap at `neckEnd` (each arm reaches past the
+middle), so the pill is one exact outline from there on.
+
+**The seam, and the interior blend.** The first pictures (the narrow neck blend
+alone) showed a thin vertical streak through the join. Its cause is not the
+outline: inside the glass the lens depth is `-distance`, and for two overlapping
+parts that is the larger of two cones, which has a V-shaped valley along their
+bisector. The lens and the rim read the valley's slope jump, and a narrow blend
+rounds it only over a few pixels. A wider blend would round it, but at the outline
+it would swell the neck (a hump on the top edge, the first retune). So the blob
+gets a second blend distance for the inside only: `GlassBlob.interiorSmoothness`
+(frame units, 0...2, default 0), uploaded in `GWShapeUniforms.depthSmoothness`
+(the explicit padding word at byte 28 of GW-26, so the record keeps its 336
+bytes and the panel record its 1776). In `gw_shape_field` a blob with a value
+above 0 takes `gw_shape_blob_soft_interior`: the outline distance and gradient
+of `gw_shape_blob` (wobble included), mixed with the same primitives blended at
+`depthSmoothness`, by a smoothstep weight that is 0 at the outline and 1 at
+`0.3 x depthSmoothness` inside. At 0 it is `gw_shape_blob`, unchanged: the safety
+test shows every other blob byte-identical. The merge scales it with the same
+curve as the neck, so it is 0 again once the pill is exact (a constant interior
+blend would raise the depth along the whole overlap, a visible patch).
+
+**Lab pose.** Two 56 pt circles 104 pt apart become one 168 x 64 pt pill: each
+surface becomes an arm from its own center to 22 pt past the middle, its radius
+growing from 28 to 32 pt. Neck 0.35, interior 0.9, `neckEnd` 0.7. The native
+buttons stay at the two centers, which are inside the glass at every progress.
+
+**Tuning record (three rounds, beside a `UIGlassEffect` in a
+`UIGlassContainerEffect` twin that the same progress drives).** Round 1: arms that
+only met at the center left a notch until the very end, and the narrow blend
+showed a streak and a flat bump on the top edge. Round 2: arms that overlap and a
+wide neck blend gave a clean pill from 0.7 but humps on the top edge while the
+parts merged (a swelling of `k/4`, 4 to 5 points) and still a streak. Round 3: the
+interior blend, with a narrow neck blend (0.35) for the outline: no streak and no
+hump at any progress sampled (0.3 to 0.75); the thinnest neck (0.3) keeps a tiny
+wedge at its middle.
+
+**Limits.** Fast pass: one safety test. No CPU mirror of the interior blend (the
+CPU `BlobField` is the plain union, used for bounds and the inscribed radius, a
+lower bound that the interior blend can slightly exceed: the depth is clamped to
+it), no measurement of the seam, no M5 cost run. The interior blend and a wobble
+combine (the wobble is added to the outline distance only). Frost and liquid fill
+follow the merged outline through their own shaped variants but were not captured
+on a merge.
