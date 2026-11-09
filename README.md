@@ -29,9 +29,12 @@ performance budget is met or failed; see
   an `MTKView` host that draws on demand, per window scene, with at most two
   frames in flight, hidden from assistive technologies, opaque under Reduce
   Transparency), plus `GlassAccessibilityPolicy`.
-- **Experimental glow** (after the v0.1 candidate, GW-17): `GlassGlow` colors a
-  custom panel's edge in any color or an angular gradient, with an inner glow
-  that fades to a see-through middle; see [the glow design](docs/glow.md).
+- **Experimental glow** (after the v0.1 candidate, GW-17 and GW-18):
+  `GlassGlow` colors a custom panel's edge in any color or an angular
+  gradient, with an inner glow that fades to a see-through middle, a halo of
+  light outside the shape, and a pulse that `GlassSurfaceView` animates only
+  while it is visible and Reduce Motion is off; see
+  [the glow design](docs/glow.md).
 - **The laboratory** (`Examples/GlassWeaveLab`): a UIKit app with the native
   reference beside the custom panel over a deterministic moving background,
   lifecycle and accessibility controls, and the GW-09 benchmark scenario
@@ -53,9 +56,8 @@ Physical-device qualification (GW-09), a Metal 4 backend experiment (GW-11),
 a touch-driven ripple (GW-12), merging of two custom surfaces (GW-13), one
 enhanced-native effect (GW-14), a SwiftUI adapter (GW-15), and external
 texture interoperability (GW-16). None of these is part of v0.1. The glow
-work continues with a halo and pulse (GW-18), animated interiors (GW-19), a
-colored glow around native glass (GW-14, pulled forward), and a laboratory
-gallery (GW-20). See [the task list](tasks/todo.md).
+work continues with animated interiors (GW-19), a colored glow around native
+glass (GW-14, pulled forward), and a laboratory gallery (GW-20). See [the task list](tasks/todo.md).
 
 ## Modes
 

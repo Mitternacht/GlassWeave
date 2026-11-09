@@ -73,4 +73,44 @@ struct DocumentationExampleTests {
         }
         #expect(worst <= 1)
     }
+
+    @Test func `The orb example spills a halo outside its circle and pulses`() async throws {
+        let gpu = try GPUContext()
+        // A 61-point circle with 30 points of surface around it.
+        let frame = CGRect(x: 30, y: 30, width: 61, height: 61)
+        let panel = pulsingOrb(frame: frame)
+        #expect(panel.parameters.glow.isAnimated && panel.parameters.glow.hasHalo)
+        let source = Fixture.uniform(width: 121, height: 121, (20, 22, 28))
+        func render(at time: Double) async throws -> RenderedImage {
+            let renderer = try GlassRenderer(commandQueue: gpu.queue)
+            try renderer.setSource(gpu.makeLease(bgra: source.bgra, width: source.width, height: source.height))
+            try renderer.setPanel(panel)
+            try renderer.setEffectTime(time)
+            let target = try gpu.makeTarget(width: source.width, height: source.height)
+            #expect(renderer.draw(targetPixelSize: (source.width, source.height), displayScale: 1) { target } == .submitted(frameID: 1))
+            return try await gpu.readBack(try #require(target.renderPassDescriptor.colorAttachments[0].texture))
+        }
+        let peak = try await render(at: 0)
+        let trough = try await render(at: 1)
+        #expect(panel.parameters.glow.pulseLevel(at: 1) == 0.5)
+        // Eight points above the circle: the halo, brighter at the peak.
+        let background = SIMD3<Double>(28, 22, 20)
+        #expect(peak.channels(x: 60, y: 22).sum() > background.sum() + 60)
+        #expect(peak.channels(x: 60, y: 22).sum() > trough.channels(x: 60, y: 22).sum() + 20)
+        // Beyond the 24-point halo (25 points above the circle, still inside
+        // the panel's quad) the background is unchanged.
+        #expect(peak.channels(x: 60, y: 5) == background)
+        // Each instant matches the CPU model.
+        for (image, time) in [(peak, 0.0), (trough, 1.0)] {
+            let g = GlassPanelGeometry(panel: try panel.normalized(), displayScale: 1, effectTime: time)
+            let reference = GlassReference(source: source, geometry: g)
+            var worst = 0.0
+            for y in 0..<source.height {
+                for x in 0..<source.width {
+                    worst = max(worst, image.channels(x: x, y: y).largestDifference(from: reference.encodedColor(x: x, y: y)))
+                }
+            }
+            #expect(worst <= 1, "time \(time)")
+        }
+    }
 }

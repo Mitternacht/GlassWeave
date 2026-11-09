@@ -36,3 +36,23 @@ func glowingCapsule(frame: CGRect) -> GlassPanel {
         )
     ))
 }
+
+import CoreGraphics
+import GlassWeave
+
+/// A round glass button whose cyan-to-violet edge spills a soft halo and
+/// pulses every two seconds, with a clear middle.
+func pulsingOrb(frame: CGRect) -> GlassPanel {
+    GlassPanel(frame: frame, parameters: GlassParameters(
+        cornerRadius: min(frame.width, frame.height) / 2,
+        glow: GlassGlow(
+            colors: [
+                .init(red: 0.3, green: 0.85, blue: 1, angle: 0),
+                .init(red: 0.7, green: 0.35, blue: 1, angle: 180),
+            ],
+            innerGlowRadius: 16, innerGlowIntensity: 0.6,
+            haloRadius: 24, haloIntensity: 0.8,
+            pulsePeriod: 2, pulseDepth: 0.5
+        )
+    ))
+}

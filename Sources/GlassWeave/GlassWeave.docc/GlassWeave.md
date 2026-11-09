@@ -59,7 +59,8 @@ func makeNativeGlassButton(title: String, action: UIAction) -> NativeGlassView {
 The app creates the Metal device and command queue; GlassWeave never does.
 A `GlassSurfaceView` draws on demand. To animate, produce each frame inside
 the draw's own command buffer with `setFrameProducer(_:)` and ask for draws
-from your own clock with `requestFrame()`. A ``FrameTexturePool`` keeps the
+from your own clock with `requestFrame()`. A pulsing glow (below) is the one
+animation the surface drives itself, and only while it runs. A ``FrameTexturePool`` keeps the
 producer's textures bounded and hands a texture back only after the GPU has
 finished with it. Place native content above the surface and give the panel
 the same frame, in the surface's points.
@@ -189,8 +190,54 @@ a `UIColor` resolved for a trait collection. Under Reduce Transparency the
 glow keeps only a thin, crisp rim on the opaque body; under Increase Contrast
 it loses its inner glow and center fill, so the interior is the glass without
 a glow. Genuine native glass cannot carry this glow inside itself; see
-`docs/glow.md` in the repository for the design and the plan for halos,
-pulses, and native glass.
+`docs/glow.md` in the repository for the design and the plan for animated
+interiors and native glass.
+
+### Halo and pulse (experimental)
+
+> Note: Added after the v0.1 candidate at the user's request (GW-18).
+> Experimental and not part of the v0.1 scope.
+
+A glow with a ``GlassGlow/haloRadius`` above 0 spills outside the outline as
+a halo in the glow colors, lit like the rim, fading as
+`(1 − distance / haloRadius)²` to exactly zero at the radius. The halo is
+light: it is screened over the background in linear light, so it never
+darkens the background and shows its color best on dark backgrounds (on
+white, like any light, it disappears). It is drawn only inside the surface,
+so leave at least the halo radius of surface around the shape.
+
+A ``GlassGlow/pulseDepth`` above 0 makes the rim, inner glow, and halo pulse
+with ``GlassGlow/pulsePeriod``: ``GlassGlow/pulseLevel(at:)`` scales their
+opacity at the renderer's ``GlassRenderer/effectTime`` (set it with
+``GlassRenderer/setEffectTime(_:)`` when you draw yourself). The center fill
+does not pulse. `GlassSurfaceView` runs its own effect clock while a visible
+glow pulses, requests frames through its usual scheduler (never more than
+two in flight), and stops it when the pulse is removed, the surface is
+hidden, or Reduce Motion is on, which holds the glow at the pulse's mean
+level, `1 − pulseDepth / 2`. Reduce Transparency removes the halo and the
+pulse; Increase Contrast keeps both.
+
+```swift
+import CoreGraphics
+import GlassWeave
+
+/// A round glass button whose cyan-to-violet edge spills a soft halo and
+/// pulses every two seconds, with a clear middle.
+func pulsingOrb(frame: CGRect) -> GlassPanel {
+    GlassPanel(frame: frame, parameters: GlassParameters(
+        cornerRadius: min(frame.width, frame.height) / 2,
+        glow: GlassGlow(
+            colors: [
+                .init(red: 0.3, green: 0.85, blue: 1, angle: 0),
+                .init(red: 0.7, green: 0.35, blue: 1, angle: 180),
+            ],
+            innerGlowRadius: 16, innerGlowIntensity: 0.6,
+            haloRadius: 24, haloIntensity: 0.8,
+            pulsePeriod: 2, pulseDepth: 0.5
+        )
+    ))
+}
+```
 
 ### Source ownership
 
@@ -270,8 +317,9 @@ The surface is decorative: it and its Metal view expose no accessibility
 elements and take no touches, so VoiceOver and touches reach only the native
 content above it. Under Reduce Transparency the panel becomes an opaque
 `secondarySystemBackground` surface with the same shape
-(`GlassAccessibilityPolicy`); under Reduce Motion nothing in the panel moves,
-and the surface reports the setting so the app can stop its own source. For
+(`GlassAccessibilityPolicy`); under Reduce Motion a pulsing glow holds at
+its mean level, so nothing in the panel moves, and the surface reports the
+setting so the app can stop its own source. For
 see-through glass, choose a tint strength that keeps text legible over any
 background:
 

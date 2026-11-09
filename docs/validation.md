@@ -79,7 +79,12 @@ without validation, three interleaved 60 s runs per mode after 10 s
 warm-ups and 100 lifecycle cycles (environment variables
 `GLASSWEAVE_CHARACTERIZATION_RUNS`, `_SECONDS`, `_WARMUP_SECONDS`,
 `_LIFECYCLE_CYCLES`). On a Mac it characterizes the Mac only; the native
-reference glass is not part of an offscreen render.
+reference glass is not part of an offscreen render. Since GW-18 it also
+measures a glow mode (the same panel with a rim, inner glow, 28-point halo,
+and a pulse advancing with the ticks) and reports its increment over the
+plain panel; the glow mode has no laboratory benchmark counterpart, and the
+scenario version is unchanged. Results: [the glow characterization
+record](evidence/glow-characterization.md).
 
 ## Device matrix
 

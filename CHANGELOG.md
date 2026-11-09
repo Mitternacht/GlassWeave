@@ -18,6 +18,20 @@ evidence only.
   Contrast; `GlassGlow.ColorStop(_:angle:traits:)` reads a stop from a
   `UIColor` (GW-17).
 - The laboratory's `-lab.glow amber|aurora` launch argument (GW-17).
+- A halo and a pulse for `GlassGlow` (GW-18): `haloRadius` and
+  `haloIntensity` spill the glow colors outside the shape as light screened
+  over the background, fading to exactly zero at the radius;
+  `pulsePeriod` and `pulseDepth` modulate the rim, inner glow, and halo by
+  `pulseLevel(at:)` at `GlassRenderer.effectTime` (`setEffectTime(_:)`).
+  `GWGlassUniforms` grows to 256 bytes; glows without a halo render
+  byte-identical output to the GW-17 shader.
+- `GlassSurfaceView` runs an effect clock (`isAnimating`) only while a
+  visible glow pulses, through its usual scheduler; `GlassAccessibilityPolicy`
+  removes the halo and pulse under Reduce Transparency, keeps them under
+  Increase Contrast, and holds the glow at the pulse's mean level under
+  Reduce Motion (GW-18).
+- The laboratory's `-lab.glow ember|energy` presets with a Pulse switch, and
+  a glow mode in the Mac characterization (GW-18).
 
 ## Unreleased: v0.1 pre-alpha candidate
 
