@@ -5,7 +5,9 @@ using namespace metal;
 
 // The shader's view of the shared record must match the host layout asserted
 // in GlassWeaveShaderTypes.c.
-static_assert(sizeof(GWGlassUniforms) == 1312, "GWGlassUniforms size");
+static_assert(sizeof(GWGlassUniforms) == 1440, "GWGlassUniforms size");
+static_assert(sizeof(GWGroundingUniforms) == 128, "GWGroundingUniforms size");
+static_assert(alignof(GWGroundingUniforms) == 16, "GWGroundingUniforms alignment");
 static_assert(sizeof(GWLightingUniforms) == 160, "GWLightingUniforms size");
 static_assert(alignof(GWLightingUniforms) == 16, "GWLightingUniforms alignment");
 static_assert(sizeof(GWLensInlay) == 48, "GWLensInlay size");
@@ -1039,6 +1041,130 @@ static float3 gw_light_model(
     return glass;
 }
 
+// MARK: Grounding (GW-25)
+//
+// Depth cues for panels on light pages (docs/glass-optics.md): a drop shadow,
+// a contact shadow, an inner shadow, and a colored caustic, all analytic from
+// the panel's rounded-rectangle field and all driven by one direction, away
+// from the key light (`grounding.shadowDirection`). The code exists only in
+// the `grounded` pipeline variant, built with function constant 2
+// (`gw_grounding_constant`); without it everything here is compiled out and
+// the shader is the one of GW-23, byte for byte (a frozen copy in the tests
+// proves it).
+//
+// Two passes make a grounded panel. Before any panel body, a pre-pass draws
+// one quad per grounded panel, blended onto the background that is already in
+// the target: the drop and contact shadows by *multiplying* the encoded value
+// (`gw_grounding_shadow_fragment`), then the caustic by *adding* to it
+// (`gw_grounding_caustic_fragment`). Both blend in the encoded `bgra8Unorm`
+// target, so they are encoded-space operations; a multiply there approximates
+// a multiply in linear light. The body (below) leaves every pixel outside its
+// outline to the pre-pass, so a neighbour's shadow is never erased, and
+// composites its antialiased ring over whatever the target holds.
+
+constant bool gw_grounding_constant [[function_constant(2)]];
+constant bool gw_grounding = is_function_constant_defined(gw_grounding_constant) ? gw_grounding_constant : false;
+
+/// A Gaussian-blurred half-plane's coverage at signed distance `d` from its
+/// edge (positive outside): 0.5 at the edge, 1 deep inside, 0 far outside,
+/// `0.5 erfc(d / (sigma sqrt 2))`. Abramowitz and Stegun 7.1.26 for `erf`.
+static float gw_blur_edge(float d, float sigma) {
+    const float x = d / (max(sigma, 0.25) * 1.41421356);
+    const float t = 1.0 / (1.0 + 0.3275911 * abs(x));
+    const float poly = ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+    const float tail = 0.5 * poly * exp(-x * x);
+    return x >= 0.0 ? tail : 1.0 - tail;
+}
+
+/// What the drop and contact shadows multiply the encoded background by at a
+/// pixel, per channel: 1 for no shadow, below 1 where shadowed. Never above 1.
+static float3 gw_grounding_multiplier(float2 pixel, constant GWGlassUniforms &uniforms) {
+    constant GWGroundingUniforms &g = uniforms.grounding;
+    const float2 q = pixel - uniforms.panelCenter;
+    float3 multiplier = float3(1.0);
+    if (g.dropColor.w > 0.0) {
+        // The outline moved away from the light, grown by the spread, with a
+        // Gaussian edge: the blurred shadow of a rounded rectangle.
+        const float d = gw_rounded_rect_distance(q - g.shadowDirection * g.dropOffset, uniforms.panelHalfSize, uniforms.cornerRadius) - g.dropSpread;
+        const float s = g.dropColor.w * gw_blur_edge(d, g.dropSigma);
+        multiplier *= 1.0 - s * (1.0 - g.dropColor.xyz);
+    }
+    if (g.contactColor.w > 0.0 && g.contactWidth > 0.0) {
+        // A tight, dark line where the glass meets the page: full at the
+        // outline, falling quadratically over `contactWidth` pixels.
+        const float d = gw_rounded_rect_distance(q - g.shadowDirection * g.contactOffset, uniforms.panelHalfSize, uniforms.cornerRadius);
+        const float c = saturate(1.0 - d / g.contactWidth);
+        multiplier *= 1.0 - g.contactColor.w * c * c * (1.0 - g.contactColor.xyz);
+    }
+    return multiplier;
+}
+
+/// The caustic's light at a pixel, encoded, to add: a band of focused light
+/// along the outline moved away from the light by `causticOffset`, strongest
+/// where the outline faces away from the light, its red, green and blue parts
+/// pulled apart by `causticDispersion` and its hue turning around the band by
+/// `causticSpectrum`. Exactly zero three widths (and the dispersion) from the
+/// band, and never negative.
+static float3 gw_grounding_caustic(float2 pixel, constant GWGlassUniforms &uniforms) {
+    constant GWGroundingUniforms &g = uniforms.grounding;
+    if (g.causticColor.w <= 0.0 || g.causticWidth <= 0.0) { return float3(0.0); }
+    const float2 q = pixel - uniforms.panelCenter - g.shadowDirection * g.causticOffset;
+    const float d = gw_rounded_rect_distance(q, uniforms.panelHalfSize, uniforms.cornerRadius);
+    const float reach = g.causticWidth * (3.0 + 1.2 * g.causticDispersion);
+    if (abs(d) > reach) { return float3(0.0); }
+    const float2 n = gw_rounded_rect_normal(q, uniforms.panelHalfSize, uniforms.cornerRadius);
+    const float facing = saturate(dot(n, g.shadowDirection));
+    if (facing <= 0.0) { return float3(0.0); }
+    // The three wavelengths' bands sit at slightly different distances.
+    const float3 x = (d + float3(-1.0, 0.0, 1.0) * g.causticDispersion * g.causticWidth * 0.55) / g.causticWidth;
+    const float3 band = exp(-x * x);
+    const float2 across = float2(-g.shadowDirection.y, g.shadowDirection.x);
+    const float angle = atan2(dot(n, across), dot(n, g.shadowDirection));
+    const float hue = 0.5 + 0.55 * angle / 6.2831853;
+    const float3 rainbow = saturate(0.5 + 0.5 * cos(6.2831853 * (hue + float3(0.0, 1.0 / 3.0, 2.0 / 3.0))) * 1.15);
+    const float3 color = g.causticColor.xyz * mix(float3(1.0), rainbow, g.causticSpectrum);
+    return color * band * (g.causticColor.w * facing * facing);
+}
+
+static float3 gw_glass_decode_srgb(float3 encoded) {
+    const float3 c = saturate(encoded);
+    const float3 low = c / 12.92;
+    const float3 high = pow((c + 0.055) / 1.055, float3(2.4));
+    return select(high, low, c <= 0.04045);
+}
+
+/// The grounding's quad: the panel rectangle grown by `grounding.reach`.
+vertex GWGlassVertexOut gw_grounding_vertex(
+    uint vertexID [[vertex_id]],
+    constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]])
+{
+    const float2 corner = float2(float(vertexID & 1u), float(vertexID >> 1u)) * 2.0 - 1.0;
+    const float2 pixel = uniforms.panelCenter + corner * (uniforms.panelHalfSize + uniforms.grounding.reach);
+    const float2 clip = float2(pixel.x / uniforms.targetSize.x * 2.0 - 1.0,
+                               1.0 - pixel.y / uniforms.targetSize.y * 2.0);
+    GWGlassVertexOut out;
+    out.position = float4(clip, 0.0, 1.0);
+    return out;
+}
+
+/// The shadows' pre-pass fragment: the multiplier, blended as
+/// `destination * source` (source factor zero, destination factor source
+/// color).
+fragment float4 gw_grounding_shadow_fragment(
+    GWGlassVertexOut in [[stage_in]],
+    constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]])
+{
+    return float4(gw_grounding_multiplier(in.position.xy, uniforms), 1.0);
+}
+
+/// The caustic's pre-pass fragment: the light, blended by addition.
+fragment float4 gw_grounding_caustic_fragment(
+    GWGlassVertexOut in [[stage_in]],
+    constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]])
+{
+    return float4(gw_grounding_caustic(in.position.xy, uniforms), 0.0);
+}
+
 /// One rounded glass panel over the background.
 ///
 /// Inside the rim (`bezelWidth` pixels inward from the outline) the sample
@@ -1107,6 +1233,17 @@ static float3 gw_light_model(
 /// the interior, and the inner light, inside the band `lighting.bandWidth`
 /// deep (see "Light model" above). Pixels it changes are dithered like the
 /// glow; elsewhere the bytes are those without it.
+///
+/// With grounding (GW-25, the `grounded` pipeline variant and
+/// `grounding.flags` active), the body is composited over the target by
+/// premultiplied alpha, `(encoded * coverage, coverage)`, so a pixel outside
+/// the outline keeps what the pre-pass drew there (every panel's shadows and
+/// caustics, a neighbour's included) and the antialiased ring mixes with it.
+/// The inner shadow multiplies the glass (linear light) before the highlight,
+/// the glow, the interior and the lights; the caustic is added, encoded, over
+/// everything, so it continues the pre-pass's across the outline. Only where a
+/// halo draws is a pixel written opaque, over the body's own shadowed
+/// background: the halo replaces other panels' shadows under it.
 fragment float4 gw_glass_fragment(
     GWGlassVertexOut in [[stage_in]],
     constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]],
@@ -1116,7 +1253,14 @@ fragment float4 gw_glass_fragment(
     const float2 q = pixel - uniforms.panelCenter;
     const float distance = gw_rounded_rect_distance(q, uniforms.panelHalfSize, uniforms.cornerRadius);
     const float coverage = saturate(0.5 - distance);
-    const float3 background = gw_glass_sample(pixel, uniforms, source);
+    float3 background = gw_glass_sample(pixel, uniforms, source);
+    const bool grounded = gw_grounding && (uniforms.grounding.flags & GWGroundingFlagActive) != 0u;
+    if (grounded && uniforms.glowHaloRadius > 0.0 && coverage < 1.0 && distance < uniforms.glowHaloRadius) {
+        // The halo replaces the pre-pass's pixels, so it is drawn over this
+        // panel's own shadow and caustic.
+        const float3 shadowed = gw_glass_encode_srgb(background) * gw_grounding_multiplier(pixel, uniforms) + gw_grounding_caustic(pixel, uniforms);
+        background = gw_glass_decode_srgb(shadowed);
+    }
 
     // The halo, for the part of the pixel outside the outline.
     float haloAlpha = 0.0;
@@ -1141,6 +1285,8 @@ fragment float4 gw_glass_fragment(
     }
     if (coverage <= 0.0) {
         if (haloAlpha <= 0.0 && sparkAlpha <= 0.0) {
+            // Grounded: leave the pre-pass's pixel alone.
+            if (grounded) { return float4(0.0); }
             return float4(gw_glass_encode_srgb(background), 1.0);
         }
         const uint2 cell = uint2(pixel) & 3u;
@@ -1161,6 +1307,14 @@ fragment float4 gw_glass_fragment(
     }
 
     glass = mix(glass, uniforms.tint.xyz, uniforms.tint.w);
+    if (grounded && (uniforms.grounding.flags & GWGroundingFlagInner) != 0u) {
+        // The inner shadow: the rim nearest the light shades the glass just
+        // inside it, as an inset shadow moved away from the light.
+        constant GWGroundingUniforms &g = uniforms.grounding;
+        const float d = gw_rounded_rect_distance(q - g.shadowDirection * g.innerOffset, uniforms.panelHalfSize, uniforms.cornerRadius);
+        const float s = g.innerColor.w * gw_blur_edge(d, g.innerSigma);
+        glass = glass * (1.0 - s * (1.0 - g.innerColor.xyz));
+    }
     // The edge light: the upper left, or the key light with the light model.
     const float2 edgeLight = (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone)
         ? uniforms.lighting.edgeDirection : gw_light_direction;
@@ -1232,6 +1386,17 @@ fragment float4 gw_glass_fragment(
         glass = gw_light_model(glass, q, depth, uniforms, lightingAlpha);
     }
 
+    if (grounded && haloAlpha <= 0.0 && sparkAlpha <= 0.0) {
+        // Composited over the target by premultiplied alpha (see above).
+        float3 encodedGlass = gw_glass_encode_srgb(glass);
+        const float3 caustic = (uniforms.grounding.flags & GWGroundingFlagCaustic) != 0u ? gw_grounding_caustic(pixel, uniforms) : float3(0.0);
+        if (glowAlpha > 0.0 || interiorAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0 || any(caustic > 0.0)) {
+            const uint2 cell = uint2(pixel) & 3u;
+            encodedGlass += ((gw_bayer[cell.x + 4u * cell.y] + 0.5) / 16.0 - 0.5) / 255.0;
+        }
+        encodedGlass = saturate(encodedGlass + caustic);
+        return float4(encodedGlass * coverage, coverage);
+    }
     float3 encoded = gw_glass_encode_srgb(mix(outside, glass, coverage));
     if (glowAlpha > 0.0 || haloAlpha > 0.0 || interiorAlpha > 0.0 || sparkAlpha > 0.0 || lightAlpha > 0.0 || lightingAlpha > 0.0) {
         const uint2 cell = uint2(pixel) & 3u;

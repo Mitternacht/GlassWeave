@@ -18,6 +18,14 @@ internal import GlassWeaveShaderTypes
 /// where two quads overlap, the later panel wins. Lay panels out so that
 /// their quads do not overlap; panels are not merged optically.
 ///
+/// A panel with grounding (``GlassParameters/grounding``, GW-25) adds a
+/// pre-pass: after the background and before every panel body, one blended
+/// quad per grounded panel multiplies its drop and contact shadows onto the
+/// target and adds its caustic. Its body quad does not grow: the body leaves
+/// every pixel outside its outline to the pre-pass, so a neighbour closer
+/// than the shadow is long is never erased. Without a grounded panel nothing
+/// extra is drawn.
+///
 /// Source handling (validation, ordering, leases, defined skips) is the
 /// ``BackgroundRenderer`` contract; this type adds the panel. Like that
 /// renderer, it owns no display loop, never waits for the GPU, and is used
@@ -40,8 +48,14 @@ public final class GlassRenderer {
     /// The panel pipeline with the thick-lens code and the light model
     /// (GW-23), or `nil` when the panel library has no such variant.
     private let lightingPipeline: (any MTLRenderPipelineState)?
+    /// The panel pipeline with the grounding code (GW-25), blended over the
+    /// target, and the two pre-pass pipelines (shadow multiply, caustic add);
+    /// `nil` when the panel library has no such variant.
+    private let groundedPipeline: (any MTLRenderPipelineState)?
+    private let shadowPipeline: (any MTLRenderPipelineState)?
+    private let causticPipeline: (any MTLRenderPipelineState)?
 
-    /// The panel pipeline variants (GW-22, GW-23), all built at
+    /// The panel pipeline variants (GW-22, GW-23, GW-25), all built at
     /// initialization.
     public enum PipelineVariant: String, Hashable, Sendable {
         /// The shader without the thick-lens code: exactly the shader of
@@ -55,7 +69,17 @@ public final class GlassRenderer {
         /// (GW-23). Draws every panel whose ``GlassParameters/lighting`` is
         /// not ``GlassLighting/legacy``, with or without a lens.
         case lighting
+        /// The shader with the thick-lens code, the light model, and the
+        /// grounding code (GW-25), composited over the pre-pass by
+        /// premultiplied alpha. Draws every panel whose
+        /// ``GlassParameters/grounding`` is active.
+        case grounded
     }
+
+    /// How many pre-pass quads (a shadow quad or a caustic quad each) the last
+    /// draw that rendered any panel encoded: 0 when no panel was grounded
+    /// (GW-25).
+    public private(set) var groundingDrawCount = 0
 
     /// The variant that drew each panel of the last draw that rendered any,
     /// in drawing order; empty before one. Panels that draw nothing (empty
@@ -156,7 +180,9 @@ public final class GlassRenderer {
     init(
         commandQueue: any MTLCommandQueue, library: any MTLLibrary,
         panelLibrary: any MTLLibrary, panelVertex: String, panelFragment: String,
-        opticsConstant: String = GlassRenderer.opticsConstantName
+        opticsConstant: String = GlassRenderer.opticsConstantName,
+        lightingConstant: String = GlassRenderer.lightingConstantName,
+        groundingConstant: String = GlassRenderer.groundingConstantName
     ) throws {
         let clock = ContinuousClock()
         let start = clock.now
@@ -164,7 +190,9 @@ public final class GlassRenderer {
         // frozen earlier shader has one.
         let constants = panelLibrary.makeFunction(name: panelFragment)?.functionConstantsDictionary ?? [:]
         let hasOptics = constants[opticsConstant] != nil
-        let hasLighting = hasOptics && constants[Self.lightingConstantName] != nil
+        let hasLighting = hasOptics && constants[lightingConstant] != nil
+        let hasGrounding = hasLighting && constants[groundingConstant] != nil
+            && panelLibrary.makeFunction(name: Self.groundingVertexName) != nil
         panelPipeline = try Self.makePanelPipeline(
             device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel",
             vertex: panelVertex, fragment: panelFragment, optics: hasOptics ? false : nil, lighting: hasLighting ? false : nil
@@ -177,6 +205,18 @@ public final class GlassRenderer {
             device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (lighting)",
             vertex: panelVertex, fragment: panelFragment, optics: true, lighting: true
         ) : nil
+        groundedPipeline = hasGrounding ? try Self.makePanelPipeline(
+            device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (grounded)",
+            vertex: panelVertex, fragment: panelFragment, optics: true, lighting: true, grounding: true
+        ) : nil
+        shadowPipeline = hasGrounding ? try Self.makeGroundingPipeline(
+            device: commandQueue.device, library: panelLibrary, label: "GlassWeave grounding shadow",
+            fragment: Self.groundingShadowName, multiply: true
+        ) : nil
+        causticPipeline = hasGrounding ? try Self.makeGroundingPipeline(
+            device: commandQueue.device, library: panelLibrary, label: "GlassWeave grounding caustic",
+            fragment: Self.groundingCausticName, multiply: false
+        ) : nil
         let elapsed = clock.now - start
         pipelineCreationSeconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
         background = try BackgroundRenderer(commandQueue: commandQueue, library: library)
@@ -187,7 +227,12 @@ public final class GlassRenderer {
     /// The shader's name for the function constant that selects the variant.
     static let opticsConstantName = "gw_optics_constant"
     /// The shader's name for the function constant that adds the light model.
-    private static let lightingConstantName = "gw_lighting_constant"
+    static let lightingConstantName = "gw_lighting_constant"
+    /// The shader's name for the function constant that adds the grounding.
+    static let groundingConstantName = "gw_grounding_constant"
+    private static let groundingVertexName = "gw_grounding_vertex"
+    private static let groundingShadowName = "gw_grounding_shadow_fragment"
+    private static let groundingCausticName = "gw_grounding_caustic_fragment"
 
     /// Builds one variant of the panel pipeline. `optics` and `lighting` set
     /// the shader's function constants; `nil` leaves a constant unset (a
@@ -195,7 +240,7 @@ public final class GlassRenderer {
     /// is.
     private static func makePanelPipeline(
         device: any MTLDevice, library: any MTLLibrary, label: String,
-        vertex: String, fragment: String, optics: Bool?, lighting: Bool? = nil
+        vertex: String, fragment: String, optics: Bool?, lighting: Bool? = nil, grounding: Bool? = nil
     ) throws -> any MTLRenderPipelineState {
         guard let optics else {
             return try BackgroundRenderer.makePipeline(
@@ -211,6 +256,9 @@ public final class GlassRenderer {
         if var lightingFlag = lighting {
             constants.setConstantValue(&lightingFlag, type: .bool, index: 1)
         }
+        if var groundingFlag = grounding {
+            constants.setConstantValue(&groundingFlag, type: .bool, index: 2)
+        }
         let fragmentFunction: any MTLFunction
         do {
             fragmentFunction = try library.makeFunction(name: fragment, constantValues: constants)
@@ -222,6 +270,50 @@ public final class GlassRenderer {
         descriptor.vertexFunction = vertexFunction
         descriptor.fragmentFunction = fragmentFunction
         descriptor.colorAttachments[0].pixelFormat = BackgroundRenderer.outputPixelFormat
+        if grounding == true {
+            // The grounded body is composited over the pre-pass by
+            // premultiplied alpha: `source + destination * (1 - source.a)`.
+            let attachment = descriptor.colorAttachments[0]!
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .one
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        }
+        do {
+            return try device.makeRenderPipelineState(descriptor: descriptor)
+        } catch {
+            throw BackgroundRendererError.pipelineCreationFailed("\(label): \(error)")
+        }
+    }
+
+    /// Builds one of the grounding's pre-pass pipelines (GW-25): the shadows
+    /// multiply the target (`destination * source`), the caustic adds to it.
+    /// Neither touches the target's alpha.
+    private static func makeGroundingPipeline(
+        device: any MTLDevice, library: any MTLLibrary, label: String, fragment: String, multiply: Bool
+    ) throws -> any MTLRenderPipelineState {
+        guard let vertexFunction = library.makeFunction(name: groundingVertexName) else {
+            throw BackgroundRendererError.missingShaderFunction(groundingVertexName)
+        }
+        guard let fragmentFunction = library.makeFunction(name: fragment) else {
+            throw BackgroundRendererError.missingShaderFunction(fragment)
+        }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.label = label
+        descriptor.vertexFunction = vertexFunction
+        descriptor.fragmentFunction = fragmentFunction
+        let attachment = descriptor.colorAttachments[0]!
+        attachment.pixelFormat = BackgroundRenderer.outputPixelFormat
+        attachment.isBlendingEnabled = true
+        attachment.rgbBlendOperation = .add
+        attachment.alphaBlendOperation = .add
+        attachment.sourceRGBBlendFactor = multiply ? .zero : .one
+        attachment.destinationRGBBlendFactor = multiply ? .sourceColor : .one
+        attachment.sourceAlphaBlendFactor = .zero
+        attachment.destinationAlphaBlendFactor = .one
         do {
             return try device.makeRenderPipelineState(descriptor: descriptor)
         } catch {
@@ -417,32 +509,62 @@ public final class GlassRenderer {
         let effectTime = effectTime
         let lightOffset = offsetOfLight
         var variants: [PipelineVariant] = []
-        let outcome = background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline, opticsPipeline, lightingPipeline] encoder, frame, backgroundUniforms, targetSize in
+        var groundingDraws = 0
+        let outcome = background.draw(targetPixelSize: targetPixelSize, commandBuffer: commandBuffer, acquireTarget: acquireTarget, onCommit: onCommit, overlay: { [panelPipeline, opticsPipeline, lightingPipeline, groundedPipeline, shadowPipeline, causticPipeline] encoder, frame, backgroundUniforms, targetSize in
             // Converted only once a target exists, so the skips that run
             // before (including a zero display scale's zero-size target)
             // never see the scale.
             var textureSet = false
             var current: PipelineVariant?
-            for panel in panels {
-                let geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime, lightOffset: lightOffset)
-                guard !geometry.isEmpty else { continue }
+            let length = MemoryLayout<GWGlassUniforms>.stride
+            let uniformsIndex = Int(GWGlassBindingIndexUniforms.rawValue)
+            let geometries = panels
+                .map { GlassPanelGeometry(panel: $0, displayScale: displayScale, effectTime: effectTime, lightOffset: lightOffset) }
+                .filter { !$0.isEmpty }
+            // The grounding pre-pass (GW-25): every grounded panel's shadows
+            // and caustic, before any body.
+            if let shadowPipeline, let causticPipeline, groundedPipeline != nil {
+                for geometry in geometries {
+                    guard let grounding = geometry.grounding else { continue }
+                    var uniforms = geometry.uniforms(
+                        background: backgroundUniforms,
+                        targetWidth: targetSize.width, targetHeight: targetSize.height
+                    )
+                    encoder.pushDebugGroup("GlassWeave grounding")
+                    encoder.setVertexBytes(&uniforms, length: length, index: uniformsIndex)
+                    encoder.setFragmentBytes(&uniforms, length: length, index: uniformsIndex)
+                    if grounding.drawsShadow {
+                        encoder.setRenderPipelineState(shadowPipeline)
+                        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                        groundingDraws += 1
+                    }
+                    if grounding.drawsCaustic {
+                        encoder.setRenderPipelineState(causticPipeline)
+                        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                        groundingDraws += 1
+                    }
+                    encoder.popDebugGroup()
+                }
+            }
+            for geometry in geometries {
                 var uniforms = geometry.uniforms(
                     background: backgroundUniforms,
                     targetWidth: targetSize.width, targetHeight: targetSize.height
                 )
-                let length = MemoryLayout<GWGlassUniforms>.stride
-                let uniformsIndex = Int(GWGlassBindingIndexUniforms.rawValue)
                 // A lens needs the optics variant and the light model the
                 // lighting variant; a library without one draws every panel
                 // with its only pipeline.
-                let variant: PipelineVariant = geometry.lighting != nil && lightingPipeline != nil
-                    ? .lighting : (geometry.lens != nil && opticsPipeline != nil ? .optics : .base)
+                let variant: PipelineVariant = geometry.grounding != nil && groundedPipeline != nil
+                    ? .grounded
+                    : (geometry.lighting != nil && lightingPipeline != nil
+                        ? .lighting : (geometry.lens != nil && opticsPipeline != nil ? .optics : .base))
                 encoder.pushDebugGroup("GlassWeave glass panel")
                 if current != variant {
                     switch variant {
                     case .base: encoder.setRenderPipelineState(panelPipeline)
                     case .optics: encoder.setRenderPipelineState(opticsPipeline ?? panelPipeline)
                     case .lighting: encoder.setRenderPipelineState(lightingPipeline ?? panelPipeline)
+                    case .grounded: encoder.setRenderPipelineState(groundedPipeline ?? panelPipeline)
                     }
                     current = variant
                 }
@@ -459,6 +581,7 @@ public final class GlassRenderer {
         })
         if !variants.isEmpty {
             drawnVariants = variants
+            groundingDrawCount = groundingDraws
         }
         return outcome
     }

@@ -13,7 +13,7 @@ _Static_assert(offsetof(GWBackgroundUniforms, uvOrigin) == 16, "uvOrigin offset"
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMin) == 24, "sampleClampMin offset");
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMax) == 32, "sampleClampMax offset");
 
-_Static_assert(sizeof(GWGlassUniforms) == 1312, "GWGlassUniforms size");
+_Static_assert(sizeof(GWGlassUniforms) == 1440, "GWGlassUniforms size");
 _Static_assert(_Alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 _Static_assert(offsetof(GWGlassUniforms, background) == 0, "background offset");
 _Static_assert(offsetof(GWGlassUniforms, targetSize) == 40, "targetSize offset");
@@ -130,3 +130,27 @@ _Static_assert(offsetof(GWLightingUniforms, contrast) == 148, "lighting contrast
 _Static_assert(offsetof(GWLightingUniforms, edgeDirection) == 152, "lighting edgeDirection offset");
 _Static_assert(GWLightingFinishNone == 0 && GWLightingFinishDielectric == 1 && GWLightingFinishChrome == 2 && GWLightingFinishPrismatic == 3, "GWLightingFinish values");
 _Static_assert(GWLightingEnvironmentStudioLight == 0 && GWLightingEnvironmentStudioDark == 1, "GWLightingEnvironment values");
+
+_Static_assert(offsetof(GWGlassUniforms, grounding) == 1312, "grounding offset");
+_Static_assert(sizeof(GWGroundingUniforms) == 128, "GWGroundingUniforms size");
+_Static_assert(_Alignof(GWGroundingUniforms) == 16, "GWGroundingUniforms alignment");
+_Static_assert(offsetof(GWGroundingUniforms, dropColor) == 0, "grounding dropColor offset");
+_Static_assert(offsetof(GWGroundingUniforms, contactColor) == 16, "grounding contactColor offset");
+_Static_assert(offsetof(GWGroundingUniforms, innerColor) == 32, "grounding innerColor offset");
+_Static_assert(offsetof(GWGroundingUniforms, causticColor) == 48, "grounding causticColor offset");
+_Static_assert(offsetof(GWGroundingUniforms, shadowDirection) == 64, "grounding shadowDirection offset");
+_Static_assert(offsetof(GWGroundingUniforms, dropOffset) == 72, "grounding dropOffset offset");
+_Static_assert(offsetof(GWGroundingUniforms, dropSigma) == 76, "grounding dropSigma offset");
+_Static_assert(offsetof(GWGroundingUniforms, dropSpread) == 80, "grounding dropSpread offset");
+_Static_assert(offsetof(GWGroundingUniforms, contactWidth) == 84, "grounding contactWidth offset");
+_Static_assert(offsetof(GWGroundingUniforms, contactOffset) == 88, "grounding contactOffset offset");
+_Static_assert(offsetof(GWGroundingUniforms, innerOffset) == 92, "grounding innerOffset offset");
+_Static_assert(offsetof(GWGroundingUniforms, innerSigma) == 96, "grounding innerSigma offset");
+_Static_assert(offsetof(GWGroundingUniforms, causticOffset) == 100, "grounding causticOffset offset");
+_Static_assert(offsetof(GWGroundingUniforms, causticWidth) == 104, "grounding causticWidth offset");
+_Static_assert(offsetof(GWGroundingUniforms, causticDispersion) == 108, "grounding causticDispersion offset");
+_Static_assert(offsetof(GWGroundingUniforms, causticSpectrum) == 112, "grounding causticSpectrum offset");
+_Static_assert(offsetof(GWGroundingUniforms, reach) == 116, "grounding reach offset");
+_Static_assert(offsetof(GWGroundingUniforms, flags) == 120, "grounding flags offset");
+_Static_assert(offsetof(GWGroundingUniforms, padding0) == 124, "grounding padding0 offset");
+_Static_assert(GWGroundingFlagActive == 1 && GWGroundingFlagShadow == 2 && GWGroundingFlagCaustic == 4 && GWGroundingFlagInner == 8, "GWGroundingFlag values");

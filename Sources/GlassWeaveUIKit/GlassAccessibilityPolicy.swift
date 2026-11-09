@@ -46,6 +46,7 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | Inner light (`GlassLight`) | Reduce Transparency removes it. Increase Contrast removes the body light (it would sit behind text) and keeps only the piping, within ``increasedContrastPipingWidth`` of the outline, a clearer boundary like the glow's rim. Reduce Motion gives the still frame: its speed becomes 0, so it is drawn at phase 0 whatever the effect time. |
 /// | Thick lens (`GlassLens`) | Reduce Transparency removes it, dispersion included (the panel is the opaque surface). Increase Contrast keeps the lens, whose samples stay within the source's own colors so the legibility bound for text still holds, and removes the chromatic dispersion, which would put colored fringes behind text. Reduce Motion changes nothing: the lens is static. |
 /// | Light model (`GlassLighting`) | Reduce Transparency keeps a thin, crisp rim: the Fresnel outline as a contrasting hairline within ``reducedTransparencyRimWidth`` of the outline, with no reflections, specular streak, rim light, chrome or prismatic finish, or bloom (the panel is the opaque surface). Increase Contrast removes the reflections, the specular streak, the rim light, the finish, and the bloom: only the Fresnel outline in the bevel band remains, as a contrasting hairline (evenly lit) that is a clearer boundary. Reduce Motion changes nothing: the light moves only when the app moves it. |
+/// | Grounding (`GlassGrounding`) | Reduce Transparency keeps the drop and contact shadows (they ground the opaque surface) and removes the caustic and the inner shadow. Increase Contrast keeps only the contact shadow, at least ``increasedContrastContactOpacity`` dark and ``increasedContrastContactWidth`` points wide, a clearer boundary; the drop shadow, the inner shadow, and the caustic are removed. Reduce Motion changes nothing: grounding is static. |
 /// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
     /// The widest rim a glow keeps under Reduce Transparency, in points.
@@ -54,6 +55,13 @@ public enum GlassAccessibilityPolicy {
     /// The widest rim band that light piping keeps under Increase Contrast,
     /// in points.
     public static let increasedContrastPipingWidth = 2.0
+
+    /// The least opacity the contact shadow has under Increase Contrast.
+    public static let increasedContrastContactOpacity = 0.45
+
+    /// The least width, in points, the contact shadow has under Increase
+    /// Contrast.
+    public static let increasedContrastContactWidth = 1.5
 
     /// The panel to draw for `panel` under `settings`, resolved for `traits`.
     public static func presentedPanel(
@@ -76,6 +84,7 @@ public enum GlassAccessibilityPolicy {
         presented.parameters.lighting = presentedLighting(
             for: panel.parameters.lighting, bezelWidth: panel.parameters.bezelWidth, settings: settings, traits: traits
         )
+        presented.parameters.grounding = presentedGrounding(for: panel.parameters.grounding, settings: settings, traits: traits)
         presented.parameters.light = presentedLight(
             for: panel.parameters.light, bezelWidth: panel.parameters.bezelWidth, settings: settings, traits: traits
         )
@@ -110,6 +119,31 @@ public enum GlassAccessibilityPolicy {
         presented.fresnel = max(lighting.fresnel, 0.8)
         if reduceTransparency {
             presented.bandWidth = min(lighting.bandWidth ?? bezelWidth, reducedTransparencyRimWidth)
+        }
+        return presented
+    }
+
+    /// The grounding to draw for `grounding` under `settings` and `traits`
+    /// (GW-25): under Reduce Transparency the drop and contact shadows only;
+    /// under Increase Contrast the contact shadow only, firmer, as a clearer
+    /// boundary. The caustic (colored light) and the inner shadow are removed
+    /// in both. Reduce Motion changes nothing. Grounding that is not active is
+    /// kept as it is.
+    static func presentedGrounding(
+        for grounding: GlassGrounding,
+        settings: GlassAccessibilitySettings,
+        traits: UITraitCollection
+    ) -> GlassGrounding {
+        guard grounding.isActive else { return grounding }
+        let increaseContrast = traits.accessibilityContrast == .high
+        guard settings.reduceTransparency || increaseContrast else { return grounding }
+        var presented = grounding
+        presented.caustic = .off
+        presented.inner = .off
+        if increaseContrast {
+            presented.drop.opacity = 0
+            presented.contact.opacity = max(grounding.contact.opacity, increasedContrastContactOpacity)
+            presented.contact.width = max(grounding.contact.width, increasedContrastContactWidth)
         }
         return presented
     }

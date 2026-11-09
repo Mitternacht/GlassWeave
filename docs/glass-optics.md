@@ -439,3 +439,143 @@ white surface.
   bound, `setLightOffset` rejection, glow following), the legibility
   sweep, the UIKit accessibility tests, the M5 cost runs, the "Light studio"
   light and dark captures, and device sign-off (see the checklist).
+
+## GW-25: Grounding: shadows and colored caustics
+
+> Experimental. `GlassGrounding`, `GlassParameters.grounding`,
+> `GlassRenderer.PipelineVariant.grounded` and `groundingDrawCount` may change
+> before a stable release.
+
+A glow or a halo is screened light and cannot show on white. On a light page,
+depth comes from the opposite: the glass darkens what is around it and focuses
+a little light. `GlassParameters.grounding: GlassGrounding` (default `.none`)
+adds a drop shadow, a contact shadow, an inner shadow and a colored caustic, all
+analytic from the panel's rounded-rectangle field and all driven by one
+direction: away from the key light. The shader (`Glass.metal`, "Grounding") is
+the reference; there is **no CPU mirror** of the per-pixel code (fast pass).
+
+### API
+
+| Part | Fields | Meaning |
+| --- | --- | --- |
+| `drop` | `offset` (0...64 pt), `blur` (0...64), `spread` (-32...32), `opacity`, `color` | The outline moved away from the light with a Gaussian edge of standard deviation `blur / 2`; multiplies the page. |
+| `contact` | `width` (0...3 pt), `opacity`, `color` | A tight line at the outline, `(1 - d / width)^2`, offset `0.3 width` away from the light; multiplies the page. |
+| `inner` | `offset`, `blur`, `opacity`, `color` | An inset shadow moved away from the light: it shades the glass just inside the outline on the side nearest the light, under the highlights (linear light). |
+| `caustic` | `offset` (-32...64), `radius` (0...48), `intensity`, `color`, `dispersion`, `spectrum` | A band of colored light along the outline moved away from the light, `exp(-(d / radius)^2)`, weighted `facing^2` by how far the outline faces away from the light. `dispersion` parts its red, green and blue bands (0.55 radius each way at 1); `spectrum` turns its hue around the band. Added to the page and to the glass; never darkens a channel. |
+| `lightAzimuth`, `lightElevation` | degrees | The light when `lighting` is off. With `lighting` on, its key light (and `setLightOffset`) sets the direction and the elevation. |
+
+Offsets scale with the light's elevation by `tan 50 / tan elevation`, clamped
+to 0.35...3, so a lower light throws a longer shadow. Colors are sRGB-encoded.
+Normalization follows the rule: a non-finite value throws
+`GlassParameterError.nonFiniteGrounding(_:)` naming the field
+(`dropBlur`, `causticRadius`, ...); finite values are clamped, azimuths reduced
+into one turn.
+
+### Two passes
+
+1. **Pre-pass.** After the background and before any panel body, each grounded
+   panel gets one quad (the panel rectangle grown by `grounding.reach`, which
+   covers the offsets and three standard deviations) that is *blended* onto
+   the target: the shadows multiply (`destination * source`), then the caustic
+   adds. The target is the encoded `bgra8Unorm`, so these are **encoded-space**
+   operations; a multiply there approximates a multiply in linear light (the
+   sRGB toe error was not measured, fast pass). A shadow never raises a
+   channel; a caustic never lowers one.
+2. **Body.** The `grounded` pipeline variant (function constants 0, 1 and 2
+   true) writes premultiplied `(encoded * coverage, coverage)` over the target
+   with `one, oneMinusSourceAlpha` blending. Pixels outside the outline write
+   nothing, so **the body quad does not need to grow and a neighbour's shadow is
+   never erased**; the antialiased ring mixes with whatever the pre-pass left,
+   other panels' shadows included. Inside, the inner shadow multiplies the
+   glass in linear light, and the caustic is added (encoded) over everything,
+   continuing the pre-pass's across the outline. This is why the drop shadow is
+   outside the outline only: it is never drawn through translucent glass.
+
+Why a pre-pass and not a bigger body quad: a body quad is computed from the
+background sample, not from what is under it, so two quads that overlap erase
+each other. A round button 8 pt from a pill, each with a 16 pt shadow, would
+lose the pill's edge or the button's shadow. With the pre-pass the paper desk
+capture shows both bodies whole and the button's shadow falling on the page
+between them.
+
+### Off by default
+
+The grounding code exists only in the `grounded` variant. `.none` (or any
+grounding with all opacities and the caustic intensity at 0) is drawn by the
+`base`, `optics` or `lighting` variant, which are built without function
+constant 2, and no pre-pass quad is drawn (`groundingDrawCount` is 0), so the
+output is the GW-23 shader's, byte for byte (`GlassBaselineGW23Tests` against
+the frozen `GlassBaselineGW23.metal`; the frozen file defines its own record
+types and uses a `gw_gw23_` prefix). `GlassPanelGeometry.quadOutset` includes
+`grounding.reach`, so a panel whose shadow reaches the target is not skipped.
+
+### GPU record
+
+`GWGlassUniforms` grows from 1312 to 1440 bytes, append-only: one
+`GWGroundingUniforms` (128 bytes, alignment 16) at offset 1312, with its own size
+and offset asserts in C, MSL and Swift (`ShaderLayoutTests`). Flags:
+`GWGroundingFlagActive`, `Shadow`, `Caustic`, `Inner`.
+
+### Accessibility
+
+| Setting | Grounding |
+| --- | --- |
+| Reduce Transparency | drop and contact kept (they ground the opaque surface); caustic and inner shadow removed |
+| Increase Contrast | contact only, at least 0.45 dark and 1.5 pt wide, as a clearer boundary; drop, inner and caustic removed |
+| Reduce Motion | no change: grounding is static |
+
+Implemented in `GlassAccessibilityPolicy.presentedGrounding`; no new
+accessibility tests (fast pass).
+
+### Lab
+
+`-lab.paper YES` (or the lab's "Paper desk" button) opens the paper desk: a new
+bench backdrop (page 7, `BenchPage.paperDesk`: warm paper, a faint graph grid,
+printed colored dots, fine grain) with a 76 pt chrome-ring button and a lens
+pill 8 pt apart, and a glass marble below, lit from the upper left (key
+azimuth 315). Drag anywhere to move the light (`setLightOffset`; the shadows and
+caustics swing with it); `-lab.lightAzimuth <deg>` starts with an offset.
+Captures: `docs/evidence/captures/gw-25-paper-desk-*` (the page, the ring and
+pill in detail, Reduce Transparency, Increase Contrast, the light turned).
+Tuned in three rounds after the first render: (1) the first caustic was a neon
+glow that hid the shadow, because a wide, strong additive band sits where the
+shadow is darkest, so the caustic was narrowed to a fringe; (2) the shadows were
+too faint (a 30 pt blur at 0.45 opacity darkened the page by about 11 % at the
+body), so opacity and offset went up and blur down; (3) the caustic was widened
+a little and given the full hue turn so it reads as colored light pooled in the
+shadow, not a rainbow line.
+
+### Compared with the picture it targets
+
+Reference 3 is a polished chrome-banded ring on a light surface with a soft
+shadow. What matches: a soft, bluish shadow under and to one side, a dark
+contact line where the glass meets the page, bodies that stay whole beside a
+close neighbour, prismatic glints on the ring (GW-23). What does not: the ring
+button here is a thin ring around a white face, not a thick banded chrome ring
+(the lens or finish does not model a flat embossed band); the shadow is a
+Gaussian of the outline, with no ambient-occlusion lobe under the whole body;
+the caustic is a thin colored fringe, not a bright patch with a sharp core.
+
+### Deviations and limits
+
+- **Premultiplied blending in the body** instead of the proposal's "body
+  applies its shadow to its antialiasing ring": the body leaves outside pixels
+  alone and the hardware composites the ring over the pre-pass, which also
+  keeps a close neighbour's shadow under the ring.
+- **The drop shadow is outside the outline only.** The proposal's "evaluate the
+  shadow at the refracted position inside" was dropped: darkening a translucent
+  body by its own shadow looks like dirty glass. The inner shadow and the
+  caustic are the inside cues.
+- **Other panels' shadows are not seen through a body**, and a panel with a halo
+  draws the halo opaque over its own shadow (other panels' shadows under the
+  halo are replaced).
+- **`lightAzimuth` and `lightElevation`** are new (the proposal says "the light
+  comes from GW-23"): they carry the direction for a panel with `lighting`
+  off.
+- **Two draws per panel** (shadow multiply, caustic add) instead of one,
+  because a per-channel multiply and an add need different blend factors; a
+  caustic-only or shadow-only panel draws one.
+- **Not done:** the CPU mirror, every numeric acceptance test (channel
+  monotonicity, darkening centroid, seam, two-neighbour readback, CPU
+  encoded-space mirror), the M5 cost run, and the device-only light-mode check
+  (see the checklist).

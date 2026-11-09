@@ -559,16 +559,20 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 **Dependencies:** GW-23. **Scope:** S–M, about 6 files plus tests.
 
 **Acceptance criteria:**
-- [ ] Off is byte-identical, with no pre-pass draw.
-- [ ] Shadows never raise a channel; caustics never lower one (white, gray, colored sources).
-- [ ] Darkening centroid opposite the key azimuth within 3°.
-- [ ] Seam: on a uniform background, the step across the body's quad edge and across the outline is ≤ 1 step.
-- [ ] Two buttons 8 pt apart with 16 pt drop shadows: neither body loses a pixel versus drawing it alone (readback).
-- [ ] Every changed pixel lies inside the CPU pre-pass quad or body quad; the CPU mirror (encoded-space blend) matches within one step.
-- [ ] M5 ≤ +0.10 ms. "Paper desk" capture.
-- [ ] **Device only:** light-mode check.
+- [x] Off is byte-identical, with no pre-pass draw. (`GlassBaselineGW23Tests`: four cases, grounding configured but off, in the `base`, `optics` and `lighting` variants, on a gradient and a checkerboard, against the frozen `GlassBaselineGW23.metal`, plus `groundingDrawCount == 0`; the control with grounding on draws the `grounded` variant, 2 pre-pass quads, and differs.)
+- [ ] Shadows never raise a channel; caustics never lower one (white, gray, colored sources). (fast pass: not tested)
+- [ ] Darkening centroid opposite the key azimuth within 3°. (fast pass: not tested)
+- [ ] Seam: on a uniform background, the step across the body's quad edge and across the outline is ≤ 1 step. (fast pass: not tested)
+- [ ] Two buttons 8 pt apart with 16 pt drop shadows: neither body loses a pixel versus drawing it alone (readback). (fast pass: not tested; the paper desk capture shows the ring and the pill whole, 8 pt apart)
+- [ ] Every changed pixel lies inside the CPU pre-pass quad or body quad; the CPU mirror (encoded-space blend) matches within one step. (fast pass: not tested)
+- [ ] M5 ≤ +0.10 ms. "Paper desk" capture. (fast pass: M5 cost not measured; the paper desk capture exists)
+- [ ] **Device only:** light-mode check. (device-only: not done)
 
-**Evidence:** not started.
+**Evidence:**
+- Exists: `GlassGrounding` (drop, contact and inner shadows, colored caustic with dispersion and spectrum; normalized, `nonFiniteGrounding` errors, light from the GW-23 key light or its own azimuth) in `GlassGrounding.swift`; `GlassParameters.grounding`; the shader's "Grounding" section in `Glass.metal` (function constant 2, the `grounded` pipeline variant composited by premultiplied alpha, and a blended pre-pass: shadow multiply, caustic add) with `GlassRenderer.PipelineVariant.grounded` and `groundingDrawCount`; the record grown append-only from 1312 to 1440 bytes with C, MSL and Swift size and offset asserts; policy rows in `GlassAccessibilityPolicy.presentedGrounding` (Reduce Transparency keeps drop and contact; Increase Contrast keeps a firmer contact only); the lab's "Paper desk" page (`-lab.paper YES`, drag to move the light). Design notes: `docs/glass-optics.md`.
+- Safety test (the only new test): `GlassBaselineGW23Tests`, byte-identical to the frozen GW-23 shader with grounding off, 4 cases, passed. `ShaderLayoutTests` was updated for the new size (1440). Batch runs at the end: package scheme on My Mac 202 passed, 0 failed; on the iPhone 18 Pro simulator 284 passed, 0 failed. No lab UI test was added or changed, so none was run. Xcode MCP could not open a workspace on this Mac, so narrow `xcodebuild` commands were used.
+- Captures (inspected, `docs/evidence/captures/gw-25-paper-desk-*`): the paper desk (ring button and lens pill 8 pt apart, a marble, soft shadows, rainbow caustic), the ring and pill in detail (both whole, the button's shadow on the page between them, no square-quad artifact), Reduce Transparency, Increase Contrast, the light turned to 60 degrees. Tuned in three rounds.
+- Limits: all other criteria are unchecked with the reason "fast pass: not tested"; no CPU mirror; the sRGB-toe error of the encoded-space multiply is not measured. Against reference 3 the shadow and contact line match in feel, but the ring is a thin ring with a white face, not a thick banded chrome ring, and the caustic is a colored fringe. Device items stay open.
 
 **Verification:** As in GW-21.
 

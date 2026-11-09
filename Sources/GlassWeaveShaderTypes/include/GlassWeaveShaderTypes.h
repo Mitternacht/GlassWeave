@@ -257,6 +257,74 @@ typedef struct GWLightingUniforms {
     simd_float2 edgeDirection;
 } GWLightingUniforms;
 
+/// The grounding of one panel (GW-25): its drop, contact and inner shadows
+/// and its colored caustic, resolved on the CPU for one draw. Lengths are
+/// pixels. `flags` 0 (all zero record) means the panel has no grounding and
+/// is drawn by a pipeline variant that does not contain the grounding code.
+///
+/// Colors: the drop, contact and caustic colors are sRGB-encoded (the pre-pass
+/// blends on the encoded target); the inner shadow's color is linear light
+/// (the body works in linear light). Opacities and intensities are 0...1.
+///
+/// - `dropColor`, `contactColor`, `innerColor`: shadow color in `xyz`, opacity
+///   in `w`.
+/// - `causticColor`: color in `xyz`, intensity in `w`.
+/// - `shadowDirection`: the unit vector, in target pixels (x right, y down),
+///   from the panel toward where its shadow falls (away from the light).
+/// - `dropOffset`, `dropSigma`, `dropSpread`: how far the drop shadow moves
+///   along the direction, its Gaussian standard deviation, and how far it
+///   grows past the outline (negative shrinks).
+/// - `contactWidth`, `contactOffset`: the contact shadow's reach beyond the
+///   outline and its small offset along the direction.
+/// - `innerOffset`, `innerSigma`: the inner shadow's offset along the
+///   direction and its standard deviation.
+/// - `causticOffset`, `causticWidth`: the caustic band's distance from the
+///   outline along the direction (negative moves it inside) and its width.
+/// - `causticDispersion`: 0...1, how far the red, green and blue bands part.
+/// - `causticSpectrum`: 0...1, how far the hue turns around the band.
+/// - `reach`: how far the pre-pass quad reaches past the panel rectangle.
+/// - `flags`: `GWGroundingFlag` bits.
+///
+/// Layout in bytes: dropColor 0, contactColor 16, innerColor 32,
+/// causticColor 48, shadowDirection 64, dropOffset 72, dropSigma 76,
+/// dropSpread 80, contactWidth 84, contactOffset 88, innerOffset 92,
+/// innerSigma 96, causticOffset 100, causticWidth 104, causticDispersion 108,
+/// causticSpectrum 112, reach 116, flags 120, explicit padding 124 (set to
+/// zero). Size 128, alignment 16, stride 128.
+typedef struct GWGroundingUniforms {
+    simd_float4 dropColor;
+    simd_float4 contactColor;
+    simd_float4 innerColor;
+    simd_float4 causticColor;
+    simd_float2 shadowDirection;
+    float dropOffset;
+    float dropSigma;
+    float dropSpread;
+    float contactWidth;
+    float contactOffset;
+    float innerOffset;
+    float innerSigma;
+    float causticOffset;
+    float causticWidth;
+    float causticDispersion;
+    float causticSpectrum;
+    float reach;
+    uint32_t flags;
+    float padding0;
+} GWGroundingUniforms;
+
+/// `GWGroundingUniforms.flags`: which parts of the grounding draw.
+typedef enum GWGroundingFlag {
+    /// The panel is grounded: its body is drawn by the grounded variant.
+    GWGroundingFlagActive = 1,
+    /// The pre-pass draws a drop or contact shadow.
+    GWGroundingFlagShadow = 2,
+    /// The pre-pass and the body draw the caustic.
+    GWGroundingFlagCaustic = 4,
+    /// The body draws the inner shadow.
+    GWGroundingFlagInner = 8,
+} GWGroundingFlag;
+
 /// Per-draw parameters for one rounded glass panel, in target pixels.
 ///
 /// Coordinate space: target pixels, origin at the top-left corner of the
@@ -376,6 +444,12 @@ typedef struct GWLightingUniforms {
 /// docs/glass-optics.md for the math.
 /// - `lighting`: a `GWLightingUniforms` record.
 ///
+/// Grounding (GW-25), appended after the GW-23 fields, which keep their
+/// layout. `grounding.flags` 0 disables it (every other field of the record is
+/// then zero); the panel is then drawn by a pipeline variant that does not
+/// contain the grounding code, as it was in GW-23. See docs/glass-optics.md.
+/// - `grounding`: a `GWGroundingUniforms` record.
+///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
 /// maxDisplacement 76, edgeHighlight 80, explicit padding 84, 88, 92 (set
@@ -397,8 +471,8 @@ typedef struct GWLightingUniforms {
 /// lensThickness 1012, lensBevel 1016, lensFieldRadius 1020, lensIOR 1024,
 /// lensMaximumOffset 1028, lensOffsetScale 1032, lensProfileA 1036,
 /// lensProfileB 1040, lensDispersion 1044, lensTapCount 1048, lensInlayCount 1052,
-/// lensInlays 1056 (2 × 48 bytes); lighting 1152 (160 bytes).
-/// Size 1312, alignment 16, stride 1312.
+/// lensInlays 1056 (2 × 48 bytes); lighting 1152 (160 bytes); grounding 1312
+/// (128 bytes). Size 1440, alignment 16, stride 1440.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
     simd_float2 targetSize;
@@ -468,6 +542,7 @@ typedef struct GWGlassUniforms {
     uint32_t lensInlayCount;
     GWLensInlay lensInlays[2];
     GWLightingUniforms lighting;
+    GWGroundingUniforms grounding;
 } GWGlassUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H

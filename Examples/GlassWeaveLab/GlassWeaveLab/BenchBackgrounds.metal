@@ -10,7 +10,7 @@ using namespace metal;
 // `bgra8Unorm_srgb` view of the same texture.
 //
 // Parameters (`constant float4 *`, one block):
-//   x pixels per point, y page (0...5), z width in points, w height in points
+//   x pixels per point, y page (0...7), z width in points, w height in points
 //
 // Pages: 0 dot grid, 1 checkerboard, 2 color ribbons, 3 charcoal stage,
 // 4 light paper, 5 orbs (GW-22: soft shaded spheres on a dusk gradient, an
@@ -18,7 +18,8 @@ using namespace metal;
 // lens's magnification and dispersion), 6 chrome (GW-23: three stacked
 // backdrops for the light model, all original: a pale studio plate for a
 // chrome ring, the orbs for a lens pill, and black with glowing orange liquid
-// for a dark dome).
+// for a dark dome), 7 paper desk (GW-25: warm paper with a graph grid and
+// printed colored dots, for shadows and caustics).
 
 struct BenchVertexOut {
     float4 position [[position]];
@@ -123,6 +124,28 @@ static float3 bench_studio_color(float2 p, float2 size, float2 ring, float pixel
     return color;
 }
 
+/// A paper desk (page 7, GW-25): warm paper with a faint blue graph grid
+/// (14-point cells, every fifth line a little stronger), a scatter of small
+/// printed colored dots (about half the 56-point cells carry one), and a fine
+/// grain. Light and detailed, so a shadow, a caustic, and a lens's magnified
+/// grid all show on it.
+static float3 bench_paper_desk_color(float2 p, float2 size, float pixel) {
+    const float v = saturate(p.y / max(size.y, 1.0));
+    float3 color = mix(float3(0.975, 0.966, 0.945), float3(0.950, 0.942, 0.922), v);
+    const float2 minor = abs(fract(p / 14.0 + 0.5) - 0.5) * 14.0;
+    const float2 major = abs(fract(p / 70.0 + 0.5) - 0.5) * 70.0;
+    const float lines = 0.20 * bench_fill(min(minor.x, minor.y) - 0.3, pixel) + 0.20 * bench_fill(min(major.x, major.y) - 0.5, pixel);
+    color = mix(color, float3(0.60, 0.70, 0.84), lines);
+    const float2 cell = floor(p / 56.0);
+    const float2 jitter = (float2(bench_hash(cell + 11.3), bench_hash(cell + 5.7)) - 0.5) * 20.0;
+    const float2 local = p - (cell + 0.5) * 56.0 - jitter;
+    const float radius = 4.0 + 5.0 * bench_hash(cell + 9.7);
+    const float dot_ = step(0.45, bench_hash(cell + 3.1)) * bench_fill(length(local) - radius, pixel);
+    color = mix(color, bench_hue(bench_hash(cell + 1.7)) * 0.92 + 0.06, dot_ * 0.92);
+    color += (bench_hash(floor(p / (2.0 * pixel))) - 0.5) * 0.014;
+    return color;
+}
+
 /// Black with glowing orange liquid (page 6, bottom): a few smooth blobs of
 /// molten color, bright at their cores and edges, a faint halo around them
 /// on black, and small bubbles. `center` is the middle of the region.
@@ -210,6 +233,10 @@ fragment float4 bench_background_fragment(
     }
     case 5: {
         color = bench_orbs_color(p, size, pixel);
+        break;
+    }
+    case 7: {
+        color = bench_paper_desk_color(p, size, pixel);
         break;
     }
     case 6: {

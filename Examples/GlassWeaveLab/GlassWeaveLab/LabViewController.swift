@@ -105,6 +105,7 @@ final class LabViewController: UIViewController {
     private let lightFieldsButton = UIButton(configuration: .bordered())
     private let lensButton = UIButton(configuration: .bordered())
     private let chromeButton = UIButton(configuration: .bordered())
+    private let paperButton = UIButton(configuration: .bordered())
     /// Whether `-lab.bench` or `-lab.lightFields` has opened its screen yet.
     private var openedBenchAtLaunch = false
     /// The control rows; vertical at accessibility text sizes.
@@ -189,6 +190,9 @@ final class LabViewController: UIViewController {
             if let page = BenchPage.fromBenchArgument {
                 openedBenchAtLaunch = true
                 openBench(.bench, page: page, animated: false)
+            } else if defaults.bool(forKey: "lab.paper") {
+                openedBenchAtLaunch = true
+                openBench(.paper, page: .paperDesk, animated: false)
             } else if defaults.bool(forKey: "lab.chrome") {
                 openedBenchAtLaunch = true
                 openBench(.chrome, page: .chrome, animated: false)
@@ -525,6 +529,10 @@ final class LabViewController: UIViewController {
         chromeButton.accessibilityIdentifier = "lab.openChrome"
         chromeButton.addAction(UIAction { [weak self] _ in self?.openBench(.chrome, page: .chrome, animated: true) }, for: .primaryActionTriggered)
         chromeButton.isHidden = benchmark != nil
+        paperButton.configuration?.title = String(localized: "Paper desk")
+        paperButton.accessibilityIdentifier = "lab.openPaper"
+        paperButton.addAction(UIAction { [weak self] _ in self?.openBench(.paper, page: .paperDesk, animated: true) }, for: .primaryActionTriggered)
+        paperButton.isHidden = benchmark != nil
 
         let tintRow = Self.row([tintControl, UIView(), Self.caption(String(localized: "Enabled")), enabledSwitch])
         let motionRow = Self.row([pauseButton, UIView(), Self.caption(String(localized: "Frame ID")), overlaySwitch])
@@ -547,7 +555,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, lightFieldsButton, lensButton, chromeButton, benchButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, lightFieldsButton, lensButton, chromeButton, paperButton, benchButton, measureButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false

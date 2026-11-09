@@ -26,6 +26,9 @@ enum BenchPage: Int, CaseIterable {
     /// Three stacked backdrops for the light model (GW-23): a pale studio
     /// plate, the orbs, and black with glowing orange liquid.
     case chrome
+    /// Warm paper with a graph grid and printed dots (GW-25), for the
+    /// depth cues of light mode: shadows and colored caustics.
+    case paperDesk
 
     /// The name used on the command line and in accessibility identifiers.
     var identifier: String {
@@ -37,6 +40,7 @@ enum BenchPage: Int, CaseIterable {
         case .paper: "paper"
         case .orbs: "orbs"
         case .chrome: "chrome"
+        case .paperDesk: "paperdesk"
         }
     }
 
@@ -49,12 +53,13 @@ enum BenchPage: Int, CaseIterable {
         case .paper: String(localized: "Paper")
         case .orbs: String(localized: "Orbs")
         case .chrome: String(localized: "Chrome")
+        case .paperDesk: String(localized: "Paper desk")
         }
     }
 
     /// Whether white text reads on the page.
     var isDark: Bool {
-        self != .paper
+        self != .paper && self != .paperDesk
     }
 
     /// The page named by a launch argument value: an identifier or an index.
@@ -192,6 +197,7 @@ final class MaterialBenchViewController: UIViewController {
         case lightFields
         case lens
         case chrome
+        case paper
     }
 
     /// One demo panel: where it goes (in a layout the controller computes),
@@ -228,10 +234,11 @@ final class MaterialBenchViewController: UIViewController {
         self.mode = mode
         self.page = page
         switch mode {
-        case .bench: pages = BenchPage.allCases.filter { $0 != .chrome }
+        case .bench: pages = BenchPage.allCases.filter { $0 != .chrome && $0 != .paperDesk }
         case .lightFields: pages = [.charcoal, .ribbons, .paper]
         case .lens: pages = [.orbs, .dotGrid, .checkerboard, .ribbons]
         case .chrome: pages = [.chrome]
+        case .paper: pages = [.paperDesk]
         }
         pageControl = UISegmentedControl(items: pages.map(\.title))
         stillTime = UserDefaults.standard.object(forKey: "lab.lightTime") == nil
@@ -241,6 +248,7 @@ final class MaterialBenchViewController: UIViewController {
         case .lightFields: demos = Self.lightDemos(timeOffset: 0)
         case .lens: demos = Self.lensDemos
         case .chrome: demos = Self.chromeDemos
+        case .paper: demos = Self.paperDemos
         }
         super.init(nibName: nil, bundle: nil)
     }
@@ -349,6 +357,67 @@ final class MaterialBenchViewController: UIViewController {
                 key: GlassLighting.Light(azimuth: 330, elevation: 45, intensity: 0.9, size: 0.45),
                 environment: .studioDark, finish: .dielectric,
                 fresnel: 0.9, specular: 0.7, reflection: 1, bloom: 0.3, bloomWidth: 6
+            )
+        )),
+    ]
+
+    // MARK: Paper demos (GW-25)
+
+    private static func ink(_ red: Double, _ green: Double, _ blue: Double) -> GlassGrounding.Color {
+        GlassGrounding.Color(red: red, green: green, blue: blue)
+    }
+
+    /// The paper desk's panels: a round chrome-ring button and a lens pill
+    /// about 8 points apart, and a glass marble below, each with a drop,
+    /// contact and inner shadow and a colored caustic, lit from the upper left.
+    private static let paperDemos: [Demo] = [
+        Demo(caption: String(localized: "Ring button"), parameters: GlassParameters(
+            cornerRadius: 999, bezelWidth: 6, refraction: 0.3, edgeHighlight: 0,
+            tint: GlassTint(red: 1, green: 1, blue: 1, strength: 0.2),
+            lighting: GlassLighting(
+                key: GlassLighting.Light(azimuth: 315, elevation: 50, intensity: 1, size: 0.25),
+                environment: .studioLight, finish: .prismatic(spread: 1, saturation: 0.95, phase: 0.02),
+                fresnel: 0.5, specular: 0.9, reflection: 1, bloom: 0.2, bloomWidth: 3
+            ),
+            grounding: GlassGrounding(
+                drop: .init(offset: 10, blur: 18, spread: -2, opacity: 0.75, color: ink(0.12, 0.12, 0.2)),
+                contact: .init(width: 2.5, opacity: 0.65, color: ink(0.05, 0.05, 0.1)),
+                inner: .off,
+                caustic: .init(offset: 7, radius: 6.5, intensity: 0.5, color: ink(1, 0.88, 0.7), dispersion: 0.6, spectrum: 1)
+            )
+        )),
+        Demo(caption: String(localized: "Lens pill, 8 points from the button"), parameters: GlassParameters(
+            cornerRadius: 999, bezelWidth: 34, refraction: 0.6, edgeHighlight: 0.3,
+            lens: GlassLens(
+                profile: .squircle(exponent: 3), thickness: 30, indexOfRefraction: 1.5, maximumOffset: 60, allowsFold: true,
+                dispersion: 0.7, dispersionTaps: .sixTap,
+                inlays: [GlassLens.Inlay(radius: 24, height: 12, profile: .dome, rimLine: 0.6)]
+            ),
+            lighting: GlassLighting(
+                key: GlassLighting.Light(azimuth: 315, elevation: 50, color: color(1, 0.92, 0.82), intensity: 1, size: 0.3),
+                environment: .studioLight, finish: .dielectric,
+                fresnel: 0.8, specular: 0.9, reflection: 0.8, bloom: 0.4, bloomWidth: 6
+            ),
+            grounding: GlassGrounding(
+                drop: .init(offset: 10, blur: 18, spread: -2, opacity: 0.72, color: ink(0.12, 0.14, 0.24)),
+                contact: .init(width: 2.5, opacity: 0.6, color: ink(0.05, 0.05, 0.1)),
+                inner: .init(offset: 2, blur: 6, opacity: 0.18, color: ink(0.1, 0.12, 0.25)),
+                caustic: .init(offset: 7, radius: 6.5, intensity: 0.5, color: ink(1, 0.9, 0.75), dispersion: 0.6, spectrum: 1)
+            )
+        )),
+        Demo(caption: String(localized: "Glass marble: refracted grid, soft shadow, colored caustic"), parameters: GlassParameters(
+            cornerRadius: 999, bezelWidth: 70, refraction: 0.5, edgeHighlight: 0,
+            lens: GlassLens(profile: .dome, thickness: 56, indexOfRefraction: 1.7, maximumOffset: 100, dispersion: 0.5),
+            lighting: GlassLighting(
+                key: GlassLighting.Light(azimuth: 315, elevation: 50, intensity: 1, size: 0.45),
+                environment: .studioLight, finish: .dielectric,
+                fresnel: 0.9, specular: 0.9, reflection: 1, bloom: 0.3, bloomWidth: 5
+            ),
+            grounding: GlassGrounding(
+                drop: .init(offset: 16, blur: 26, spread: -4, opacity: 0.78, color: ink(0.12, 0.14, 0.26)),
+                contact: .init(width: 3, opacity: 0.65, color: ink(0.05, 0.05, 0.1)),
+                inner: .init(offset: 4, blur: 10, opacity: 0.2, color: ink(0.1, 0.12, 0.25)),
+                caustic: .init(offset: 12, radius: 12, intensity: 0.55, color: ink(1, 0.9, 0.7), dispersion: 0.6, spectrum: 1)
             )
         )),
     ]
@@ -502,6 +571,7 @@ final class MaterialBenchViewController: UIViewController {
         case .lightFields: titleLabel.text = String(localized: "Light fields")
         case .lens: titleLabel.text = String(localized: "Thick lens")
         case .chrome: titleLabel.text = String(localized: "Chrome and light")
+        case .paper: titleLabel.text = String(localized: "Paper desk")
         }
         titleLabel.accessibilityTraits.insert(.header)
         closeButton.configuration?.title = String(localized: "Close")
@@ -537,7 +607,7 @@ final class MaterialBenchViewController: UIViewController {
         diagnosticsLabel.accessibilityIdentifier = "bench.diagnostics"
         view.addSubview(pageControl)
         view.addSubview(closeButton)
-        if mode == .chrome {
+        if mode == .chrome || mode == .paper {
             pageControl.isHidden = true
             diagnosticsLabel.isHidden = true
             // Drag anywhere to move the light: across turns the azimuth, up
@@ -629,6 +699,18 @@ final class MaterialBenchViewController: UIViewController {
             frames.append(CGRect(x: left, y: topEnd + (middleEnd - topEnd - pillHeight - 34) / 2, width: width, height: pillHeight))
             let dome: CGFloat = 150
             frames.append(CGRect(x: bounds.midX - dome / 2, y: (middleEnd + bounds.height) / 2 - dome / 2 - 14, width: dome, height: dome))
+        } else if mode == .paper {
+            // The ring button and the pill on one row, 8 points apart, and
+            // the marble below.
+            let bounds = view.bounds
+            let row = min(bounds.width - 2 * margin, 560)
+            let rowLeft = bounds.midX - row / 2
+            let button: CGFloat = 76
+            let rowTop = safe.minY + 110
+            frames.append(CGRect(x: rowLeft, y: rowTop, width: button, height: button))
+            frames.append(CGRect(x: rowLeft + button + 8, y: rowTop, width: row - button - 8, height: button))
+            let marble = min(row * 0.55, 210)
+            frames.append(CGRect(x: bounds.midX - marble / 2, y: rowTop + button + 80, width: marble, height: marble))
         } else if mode == .lens {
             // The pill, then a dome and a ring, then the fold pair.
             let pillHeight: CGFloat = 104
@@ -655,8 +737,9 @@ final class MaterialBenchViewController: UIViewController {
         for index in demos.indices {
             demos[index].frame = frames[index]
             // A caption is at least as wide as a small button's neighbours.
-            let captionWidth = mode == .chrome ? max(frames[index].width, 300) : frames[index].width
-            let captionX = mode == .chrome && frames[index].width < 300 ? frames[index].midX - captionWidth / 2 : frames[index].minX
+            let wide = mode == .chrome || mode == .paper
+            let captionWidth = wide ? max(frames[index].width, 300) : frames[index].width
+            let captionX = wide && frames[index].width < 300 ? frames[index].midX - captionWidth / 2 : frames[index].minX
             captionLabels[index].frame = CGRect(
                 x: max(captionX, 8) + 4, y: frames[index].maxY + 4, width: captionWidth - 8, height: captionHeight + 14
             )

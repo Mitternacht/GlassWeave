@@ -41,6 +41,9 @@ struct GlassPanelGeometry: Equatable {
     /// The light model in target pixels, or `nil` for the original highlight
     /// (GW-23; resolved in GlassLighting.swift).
     var lighting: Lighting?
+    /// The grounding in target pixels, or `nil` for a panel drawn without it
+    /// (GW-25; resolved in GlassGrounding.swift).
+    var grounding: Grounding?
 
     /// A visible ``GlassGlow`` converted to target pixels and linear light.
     struct Glow: Equatable {
@@ -111,6 +114,7 @@ struct GlassPanelGeometry: Equatable {
             parameters.lighting, offset: lightOffset, displayScale: displayScale,
             bezelWidth: bezelWidth, cornerRadius: cornerRadius, halfSize: halfSize, lens: lens
         )
+        grounding = Grounding(parameters.grounding, lighting: lighting, offset: lightOffset, displayScale: displayScale)
         // One light: the glow follows the key light unless told otherwise.
         let glowAngle = lighting.flatMap { $0.drivesGlow ? $0.keyAzimuthDegrees : nil } ?? parameters.glow.lightAngle
         glow = Self.glow(
@@ -288,9 +292,10 @@ struct GlassPanelGeometry: Equatable {
 
     /// How far the panel's quad reaches beyond the panel rectangle on every
     /// side, in pixels: one pixel for the antialiased outline, plus the
-    /// halo radius.
+    /// halo radius; with grounding, at least as far as its pre-pass quad
+    /// (GW-25), which draws the shadows and the caustic.
     var quadOutset: Double {
-        1 + (glow?.haloRadius ?? 0)
+        max(1 + (glow?.haloRadius ?? 0), grounding?.reach ?? 0)
     }
 
     /// Whether the panel's quad (``quadOutset`` around the rectangle) covers
@@ -390,7 +395,8 @@ struct GlassPanelGeometry: Equatable {
             lensTapCount: lens?.tapCount ?? 0,
             lensInlayCount: UInt32(lens?.inlays.count ?? 0),
             lensInlays: lens?.inlayRecords ?? (Lens.Inlay.empty, Lens.Inlay.empty),
-            lighting: lighting?.record ?? Lighting.empty
+            lighting: lighting?.record ?? Lighting.empty,
+            grounding: grounding?.record ?? Grounding.empty
         )
     }
 
