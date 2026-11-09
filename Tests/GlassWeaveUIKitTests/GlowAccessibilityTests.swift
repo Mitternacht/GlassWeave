@@ -343,5 +343,43 @@ struct GlowAccessibilityTests {
         #expect(outside > 10_000)
         #expect(differing == 0)
     }
+
+    // MARK: Interiors (GW-19)
+
+    /// Under Reduce Transparency and Increase Contrast an interior, which
+    /// would move behind text, draws nothing: the presented panel renders
+    /// the same bytes as without it, at any effect time, so the opaque body
+    /// and the legibility rule above still describe what is drawn. Under
+    /// normal settings the same interior does change the panel.
+    @Test(arguments: [GlassInterior.Effect.energy, .rays, .embers])
+    func `Under Reduce Transparency and Increase Contrast an interior draws nothing`(effect: GlassInterior.Effect) async throws {
+        var panel = Self.haloing
+        panel.parameters.interior = GlassInterior(
+            effect: effect,
+            colors: [.init(red: 1, green: 0.4, blue: 0.1), .init(red: 1, green: 0.9, blue: 0.5)],
+            intensity: 1, seed: 3, centerFade: 0
+        )
+        var withoutInterior = panel
+        withoutInterior.parameters.interior = .none
+        let cases: [(GlassAccessibilitySettings, UITraitCollection)] = [
+            (GlassAccessibilitySettings(reduceTransparency: true), Self.traits(.light, .normal)),
+            (GlassAccessibilitySettings(reduceTransparency: true), Self.traits(.dark, .high)),
+            (GlassAccessibilitySettings(), Self.traits(.dark, .high)),
+            (GlassAccessibilitySettings(reduceMotion: true), Self.traits(.light, .high)),
+        ]
+        for (settings, traits) in cases {
+            let presented = GlassAccessibilityPolicy.presentedPanel(for: panel, settings: settings, traits: traits)
+            let reference = GlassAccessibilityPolicy.presentedPanel(for: withoutInterior, settings: settings, traits: traits)
+            let drawn = try await render(presented, effectTime: 2.75)
+            let expected = try await render(reference, effectTime: 2.75)
+            let differing = zip(drawn, expected).count { $0 != $1 }
+            #expect(differing == 0, "\(effect) under \(settings), contrast \(traits.accessibilityContrast.rawValue): \(differing) bytes differ")
+        }
+        // Control: with normal settings the interior lights the panel.
+        let normal = Self.traits(.dark, .normal)
+        let lit = try await render(GlassAccessibilityPolicy.presentedPanel(for: panel, settings: GlassAccessibilitySettings(), traits: normal), effectTime: 2.75)
+        let unlit = try await render(GlassAccessibilityPolicy.presentedPanel(for: withoutInterior, settings: GlassAccessibilitySettings(), traits: normal), effectTime: 2.75)
+        #expect(zip(lit, unlit).count { $0 != $1 } > 200)
+    }
 }
 #endif

@@ -17,14 +17,16 @@ import UIKit
 /// never from a screen or a global scene.
 ///
 /// Effect clock (``isAnimating``): while the presented panel's glow animates
-/// (`GlassGlow.isAnimated`, a pulse) and the view is visible, the view runs
-/// one `UIUpdateLink` created for itself, so it follows its own window's
-/// display. Each update advances the effect time by the update's model time
+/// (`GlassGlow.isAnimated`, a pulse) or its interior does
+/// (`GlassInterior.isAnimated`, a speed above 0), and the view is visible,
+/// the view runs one `UIUpdateLink` created for itself, so it follows its
+/// own window's display. Each update advances the effect time by the update's model time
 /// and calls ``requestFrame()``, so ticks go through the same scheduler as
 /// every other request: they coalesce, wait while hidden, and never exceed
-/// the in-flight bound. Each draw evaluates the glow at the effect time
-/// (`GlassRenderer.effectTime`). The link is removed as soon as the glow no
-/// longer animates (no pulse, or Reduce Motion, which steadies it), the view
+/// the in-flight bound. Each draw evaluates the glow and the interior at the
+/// effect time (`GlassRenderer.effectTime`). The link is removed as soon as
+/// nothing animates any more (no pulse and no moving interior, or Reduce
+/// Motion, which steadies the glow and stills the interior), the view
 /// stops being visible, or it leaves its window; the effect time then
 /// stays where it was and continues from there when the clock runs again.
 ///
@@ -72,8 +74,8 @@ import UIKit
 /// Accessibility settings (``accessibilitySettings``) change what is drawn
 /// as ``GlassAccessibilityPolicy`` documents: under Reduce Transparency the
 /// panel becomes an opaque surface (``presentedPanel``), and under Reduce
-/// Motion a pulsing glow is drawn steady at its mean level, so the effect
-/// clock stops. By default the view follows the system settings and their
+/// Motion a pulsing glow is drawn steady at its mean level and an interior
+/// as its still frame, so the effect clock stops. By default the view follows the system settings and their
 /// change notifications.
 @MainActor
 public final class GlassSurfaceView: UIView {
@@ -142,9 +144,10 @@ public final class GlassSurfaceView: UIView {
     /// can stop its source's nonessential motion under Reduce Motion.
     public var accessibilitySettingsHandler: ((GlassAccessibilitySettings) -> Void)?
 
-    /// Whether the effect clock runs: the presented panel's glow animates
-    /// (a pulse that Reduce Motion has not steadied) and the view is
-    /// visible. While it runs, the view requests a frame on every display
+    /// Whether the effect clock runs: the presented panel's glow or interior
+    /// animates (a pulse that Reduce Motion has not steadied, or an interior
+    /// with a speed above 0 that Reduce Motion has not stilled) and the view
+    /// is visible. While it runs, the view requests a frame on every display
     /// update of its window; otherwise the glow is drawn only when something
     /// else requests a frame.
     public var isAnimating: Bool {
@@ -318,7 +321,8 @@ public final class GlassSurfaceView: UIView {
 
     /// Whether the effect clock should run now.
     private var wantsEffectClock: Bool {
-        isVisible && renderer.panel?.parameters.glow.isAnimated == true
+        guard isVisible, let parameters = renderer.panel?.parameters else { return false }
+        return parameters.glow.isAnimated || parameters.interior.isAnimated
     }
 
     /// Starts or stops the effect clock to match ``wantsEffectClock``.

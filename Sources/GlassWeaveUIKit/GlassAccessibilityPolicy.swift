@@ -11,9 +11,10 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
     /// Reduce Transparency is on: draw an opaque, legible surface instead of
     /// see-through glass.
     public var reduceTransparency: Bool
-    /// Reduce Motion is on. A glow's pulse stops at its mean level (see
-    /// ``GlassAccessibilityPolicy``); the app owns its source's motion and
-    /// should stop nonessential movement there.
+    /// Reduce Motion is on. A glow's pulse stops at its mean level and an
+    /// interior shows a still frame (see ``GlassAccessibilityPolicy``); the
+    /// app owns its source's motion and should stop nonessential movement
+    /// there.
     public var reduceMotion: Bool
 
     public init(reduceTransparency: Bool = false, reduceMotion: Bool = false) {
@@ -39,9 +40,9 @@ public struct GlassAccessibilitySettings: Hashable, Sendable {
 /// | Setting | Behavior |
 /// | --- | --- |
 /// | VoiceOver | The surface is decorative: it and its Metal view expose no accessibility elements, so VoiceOver reaches only the native content placed above it. |
-/// | Reduce Transparency | The panel keeps its frame and corner radius but becomes an opaque surface: no refraction, no edge illumination, and a tint of ``opaqueSurfaceTint(for:)`` at full strength. A glow keeps only its rim, as a crisp, evenly lit, steady band at most ``reducedTransparencyRimWidth`` wide, at its own intensity; its inner glow, center fill, halo, and pulse are removed, so the body is exactly the opaque surface and nothing animates. Native content on it keeps its behavior. |
-/// | Increase Contrast (`accessibilityContrast == .high`) | A glow keeps its rim, evenly lit (directionality 0) as a clearer boundary, and loses its inner glow and center fill, so the interior is exactly the glass without a glow and the legibility rule for its tint still holds for text. Its halo (outside the shape, behind no text) and pulse are kept. |
-/// | Reduce Motion | A glow's pulse stops: the rim, inner glow, and halo stay at the pulse's mean level, `1 − pulseDepth / 2` of their opacity, and nothing animates, so ``GlassSurfaceView`` runs no effect clock. ``GlassSurfaceView`` also reports the setting so the app can stop its source's nonessential motion. |
+/// | Reduce Transparency | The panel keeps its frame and corner radius but becomes an opaque surface: no refraction, no edge illumination, and a tint of ``opaqueSurfaceTint(for:)`` at full strength. A glow keeps only its rim, as a crisp, evenly lit, steady band at most ``reducedTransparencyRimWidth`` wide, at its own intensity; its inner glow, center fill, halo, and pulse are removed, and so is an interior (`GlassInterior`), so the body is exactly the opaque surface and nothing animates. Native content on it keeps its behavior. |
+/// | Increase Contrast (`accessibilityContrast == .high`) | A glow keeps its rim, evenly lit (directionality 0) as a clearer boundary, and loses its inner glow and center fill, and an interior is removed, so the interior is exactly the glass without a glow and the legibility rule for its tint still holds for text. Its halo (outside the shape, behind no text) and pulse are kept. |
+/// | Reduce Motion | A glow's pulse stops: the rim, inner glow, and halo stay at the pulse's mean level, `1 − pulseDepth / 2` of their opacity. An interior shows its still frame: its speed becomes 0, so it is drawn at interior time 0 whatever the effect time. Nothing animates, so ``GlassSurfaceView`` runs no effect clock. ``GlassSurfaceView`` also reports the setting so the app can stop its source's nonessential motion. |
 /// | Light, dark, Increase Contrast | The opaque surface color resolves for the surface's traits. For see-through glass, the app keeps text readable by choosing a tint strength with `GlassTint.minimumStrength(forContrast:againstTextLuminance:)` (GlassWeave). |
 public enum GlassAccessibilityPolicy {
     /// The widest rim a glow keeps under Reduce Transparency, in points.
@@ -60,6 +61,26 @@ public enum GlassAccessibilityPolicy {
             presented.parameters.tint = opaqueSurfaceTint(for: traits)
         }
         presented.parameters.glow = presentedGlow(for: panel.parameters.glow, settings: settings, traits: traits)
+        presented.parameters.interior = presentedInterior(for: panel.parameters.interior, settings: settings, traits: traits)
+        return presented
+    }
+
+    /// The interior to draw for `interior` under `settings` and `traits`:
+    /// none under Reduce Transparency or Increase Contrast (it would move
+    /// behind text), and the still frame (speed 0) under Reduce Motion. An
+    /// interior that draws nothing or does not move is kept as it is.
+    static func presentedInterior(
+        for interior: GlassInterior,
+        settings: GlassAccessibilitySettings,
+        traits: UITraitCollection
+    ) -> GlassInterior {
+        if settings.reduceTransparency || traits.accessibilityContrast == .high {
+            return .none
+        }
+        var presented = interior
+        if settings.reduceMotion, interior.isAnimated {
+            presented.speed = 0
+        }
         return presented
     }
 
@@ -115,6 +136,23 @@ public enum GlassAccessibilityPolicy {
         color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         let unit = { (value: CGFloat) in min(max(Double(value), 0), 1) }
         return GlassTint(red: unit(red), green: unit(green), blue: unit(blue), strength: 1)
+    }
+}
+
+extension GlassInterior.Color {
+    /// An interior color from a UIKit color, resolved for `traits` (so
+    /// dynamic colors follow light, dark, and Increase Contrast) and read as
+    /// sRGB components. Alpha is ignored: the interior's intensity sets its
+    /// opacity. An extended-range component outside 0...1 is kept here and
+    /// clamped by the normalization rule when a renderer accepts the
+    /// interior. Returns `nil` for a color with no RGB components, such as a
+    /// pattern color.
+    public init?(_ color: UIColor, traits: UITraitCollection) {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        guard color.resolvedColor(with: traits).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return nil
+        }
+        self.init(red: Double(red), green: Double(green), blue: Double(blue))
     }
 }
 
