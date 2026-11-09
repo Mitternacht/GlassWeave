@@ -27,6 +27,10 @@ struct GlassPanelGeometry: Equatable {
     /// The glow in target pixels and linear light, or `nil` when the panel's
     /// glow draws nothing.
     var glow: Glow?
+    /// The interior in linear light at the effect time the geometry was
+    /// built for, or `nil` when the panel's interior draws nothing (GW-19;
+    /// the model is in GlassInteriorModel.swift).
+    var interior: Interior?
 
     /// A visible ``GlassGlow`` converted to target pixels and linear light.
     struct Glow: Equatable {
@@ -69,7 +73,7 @@ struct GlassPanelGeometry: Equatable {
     ///   - panel: A panel that has passed ``GlassPanel/normalized()``.
     ///   - displayScale: Pixels per point, finite and positive.
     ///   - effectTime: Seconds on the effect clock, finite; sets the pulse
-    ///     level.
+    ///     level and the interior's phase.
     init(panel: GlassPanel, displayScale: Double, effectTime: Double = 0) {
         precondition(displayScale.isFinite && displayScale > 0, "The display scale must be finite and positive")
         let frame = panel.frame
@@ -91,6 +95,7 @@ struct GlassPanelGeometry: Equatable {
             parameters.glow, displayScale: displayScale, effectTime: effectTime,
             cornerRadius: cornerRadius, halfSize: halfSize
         )
+        interior = Interior(parameters.interior, displayScale: displayScale, effectTime: effectTime)
     }
 
     /// Converts a normalized glow, or returns `nil` when it draws nothing.
@@ -310,8 +315,26 @@ struct GlassPanelGeometry: Equatable {
             padding3: 0,
             glowHaloRadius: Float(glow?.haloRadius ?? 0),
             glowHaloIntensity: Float(glow?.haloIntensity ?? 0),
-            padding4: 0, padding5: 0
+            padding4: 0, padding5: 0,
+            interiorColor0: interiorColorLane(0),
+            interiorColor1: interiorColorLane(1),
+            interiorColor2: interiorColorLane(2),
+            interiorEffect: interior?.effectCode ?? GWInteriorEffectNone.rawValue,
+            interiorColorCount: UInt32(interior?.colorsLinear.count ?? 0),
+            interiorSeed: interior?.seed ?? 0,
+            interiorIntensity: Float(interior?.intensity ?? 0),
+            interiorPhase: interior?.phase ?? 0,
+            interiorCenterFade: Float(interior?.centerFade ?? 0),
+            interiorPixelsPerPoint: Float(interior?.pixelsPerPoint ?? 0),
+            padding6: 0
         )
+    }
+
+    /// One interior ramp color for upload: linear RGB with `w` zero, or zero
+    /// when the color does not exist.
+    private func interiorColorLane(_ index: Int) -> SIMD4<Float> {
+        guard let colors = interior?.colorsLinear, index < colors.count else { return .zero }
+        return SIMD4<Float>(SIMD3<Float>(colors[index]), 0)
     }
 
     /// One stop color for upload: linear RGB with `w` zero, or zero when

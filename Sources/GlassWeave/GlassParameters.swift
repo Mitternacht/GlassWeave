@@ -41,6 +41,7 @@ public struct GlassTint: Hashable, Sendable {
 /// | ``edgeHighlight`` | normalized | 0...1 | Edge illumination. One moves the outline at most ``maximumEdgeHighlight`` of the way to white on the side facing the upper-left light. |
 /// | ``tint`` | normalized | components and strength 0...1 | See ``GlassTint``. |
 /// | ``glow`` | see ``GlassGlow`` | see ``GlassGlow`` | A colored rim, inner glow, and center fill drawn over the glass, an optional halo outside it, and an optional pulse; ``GlassGlow/none`` (the default) draws nothing. |
+/// | ``interior`` | see ``GlassInterior`` | see ``GlassInterior`` | An animated energy, rays, or embers pattern inside the outline, screened over the glass and the glow, fading toward the middle; ``GlassInterior/none`` (the default) draws nothing. |
 ///
 /// **Normalization rule.** When a renderer accepts parameters, a non-finite
 /// value (NaN or infinity) anywhere is rejected with
@@ -48,8 +49,8 @@ public struct GlassTint: Hashable, Sendable {
 /// value. A finite value outside its range is clamped to the nearest valid
 /// value: negative lengths become zero, lengths longer than half the
 /// panel's shorter side become that half, and coefficients and tint
-/// components are clamped to 0...1. ``GlassGlow`` documents the same rule
-/// for its fields. The renderer reports the values it actually uses through
+/// components are clamped to 0...1. ``GlassGlow`` and ``GlassInterior``
+/// document the same rule for their fields. The renderer reports the values it actually uses through
 /// ``GlassRenderer/panel``.
 public struct GlassParameters: Hashable, Sendable {
     /// Outline corner radius, in points.
@@ -65,6 +66,9 @@ public struct GlassParameters: Hashable, Sendable {
     /// A colored glow at the edge, drawn over the glass; ``GlassGlow/none``
     /// for none.
     public var glow: GlassGlow
+    /// An animated pattern inside the outline, drawn over the glass and the
+    /// glow; ``GlassInterior/none`` for none.
+    public var interior: GlassInterior
 
     /// The most edge illumination can brighten the outline: this fraction of
     /// the way from the glass color to white, at ``edgeHighlight`` 1.
@@ -76,7 +80,8 @@ public struct GlassParameters: Hashable, Sendable {
         refraction: Double = 0.6,
         edgeHighlight: Double = 0.5,
         tint: GlassTint = .none,
-        glow: GlassGlow = .none
+        glow: GlassGlow = .none,
+        interior: GlassInterior = .none
     ) {
         self.cornerRadius = cornerRadius
         self.bezelWidth = bezelWidth
@@ -84,6 +89,7 @@ public struct GlassParameters: Hashable, Sendable {
         self.edgeHighlight = edgeHighlight
         self.tint = tint
         self.glow = glow
+        self.interior = interior
     }
 }
 
@@ -138,6 +144,15 @@ public enum GlassParameterError: Error, Hashable, Sendable, CustomStringConverti
         case glowHaloIntensity
         case glowPulsePeriod
         case glowPulseDepth
+        /// A ``GlassInterior/Color/red`` in ``GlassInterior/colors``.
+        case interiorColorRed
+        /// A ``GlassInterior/Color/green`` in ``GlassInterior/colors``.
+        case interiorColorGreen
+        /// A ``GlassInterior/Color/blue`` in ``GlassInterior/colors``.
+        case interiorColorBlue
+        case interiorIntensity
+        case interiorSpeed
+        case interiorCenterFade
         /// The time passed to ``GlassRenderer/setEffectTime(_:)``.
         case effectTime
     }
@@ -171,6 +186,7 @@ extension GlassParameters {
             throw .nonFinite(field)
         }
         let glow = try glow.normalized(maximumLength: maximumLength)
+        let interior = try interior.normalized()
         let length = { (value: Double) in min(max(value, 0), maximumLength) }
         let unit = { (value: Double) in min(max(value, 0), 1) }
         return GlassParameters(
@@ -182,7 +198,8 @@ extension GlassParameters {
                 red: unit(tint.red), green: unit(tint.green), blue: unit(tint.blue),
                 strength: unit(tint.strength)
             ),
-            glow: glow
+            glow: glow,
+            interior: interior
         )
     }
 }

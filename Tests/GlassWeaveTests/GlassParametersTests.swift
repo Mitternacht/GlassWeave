@@ -60,6 +60,10 @@ struct GlassParametersTests {
         panel.parameters.glow = GlassGlow(colors: [
             .init(red: 1, green: 0.5, blue: 0, angle: 0), .init(red: 0, green: 0.5, blue: 1, angle: 180),
         ])
+        // A visible interior with two colors, likewise (GW-19).
+        panel.parameters.interior = GlassInterior(effect: .energy, colors: [
+            .init(red: 0.2, green: 0.6, blue: 1), .init(red: 1, green: 1, blue: 1),
+        ])
         switch field {
         case .frame: panel.frame.size.width = value
         case .cornerRadius: panel.parameters.cornerRadius = value
@@ -86,6 +90,12 @@ struct GlassParametersTests {
         case .glowHaloIntensity: panel.parameters.glow.haloIntensity = value
         case .glowPulsePeriod: panel.parameters.glow.pulsePeriod = value
         case .glowPulseDepth: panel.parameters.glow.pulseDepth = value
+        case .interiorColorRed: panel.parameters.interior.colors[1].red = value
+        case .interiorColorGreen: panel.parameters.interior.colors[0].green = value
+        case .interiorColorBlue: panel.parameters.interior.colors[1].blue = value
+        case .interiorIntensity: panel.parameters.interior.intensity = value
+        case .interiorSpeed: panel.parameters.interior.speed = value
+        case .interiorCenterFade: panel.parameters.interior.centerFade = value
         case .effectTime: Issue.record("Not a panel field")
         }
         #expect(throws: GlassParameterError.nonFinite(field)) {

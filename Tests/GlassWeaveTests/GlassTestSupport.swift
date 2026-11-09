@@ -120,6 +120,12 @@ struct GlassReference {
         if halo > 0 {
             outside = background + glowColorBGR(at: pixel) * halo * (SIMD3(repeating: 1) - background)
         }
+        // Embers' sparks above the outline, screened over the haloed
+        // background (GW-19).
+        let spark = geometry.exteriorSparkLight(at: pixel)
+        if spark.alpha > 0 {
+            outside = outside + Self.bgr(spark.color) * spark.alpha * (SIMD3(repeating: 1) - outside)
+        }
         guard coverage > 0 else { return outside }
         var glass = sample(geometry.samplePosition(at: pixel))
         let tint = SIMD3(geometry.tintLinear.z, geometry.tintLinear.y, geometry.tintLinear.x)
@@ -130,16 +136,27 @@ struct GlassReference {
         if glowAlpha > 0 {
             glass = glass + (glowColorBGR(at: pixel) - glass) * glowAlpha
         }
+        // The interior, screened over the glowing glass (GW-19).
+        let interior = geometry.interiorLight(at: pixel)
+        if interior.alpha > 0 {
+            glass = glass + Self.bgr(interior.color) * interior.alpha * (SIMD3(repeating: 1) - glass)
+        }
         return outside * (1 - coverage) + glass * coverage
     }
 
-    /// Whether the glow or its halo draws at a pixel, so the shader dithers
-    /// it.
+    /// Red, green, blue reordered as blue, green, red.
+    private static func bgr(_ rgb: SIMD3<Double>) -> SIMD3<Double> {
+        SIMD3(rgb.z, rgb.y, rgb.x)
+    }
+
+    /// Whether the glow, its halo, or the interior draws at a pixel, so the
+    /// shader dithers it.
     func isDithered(x: Int, y: Int) -> Bool {
         let pixel = SIMD2(Double(x) + 0.5, Double(y) + 0.5)
         guard let geometry, !geometry.isEmpty else { return false }
-        if haloAlpha(at: pixel) > 0 { return true }
-        return geometry.coverage(at: pixel) > 0 && geometry.glowAlpha(at: pixel) > 0
+        if haloAlpha(at: pixel) > 0 || geometry.exteriorSparkLight(at: pixel).alpha > 0 { return true }
+        return geometry.coverage(at: pixel) > 0
+            && (geometry.glowAlpha(at: pixel) > 0 || geometry.interiorLight(at: pixel).alpha > 0)
     }
 
     /// The predicted output bytes (blue, green, red) on the 0...255 scale,

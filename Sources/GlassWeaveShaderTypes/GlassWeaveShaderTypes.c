@@ -13,7 +13,7 @@ _Static_assert(offsetof(GWBackgroundUniforms, uvOrigin) == 16, "uvOrigin offset"
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMin) == 24, "sampleClampMin offset");
 _Static_assert(offsetof(GWBackgroundUniforms, sampleClampMax) == 32, "sampleClampMax offset");
 
-_Static_assert(sizeof(GWGlassUniforms) == 256, "GWGlassUniforms size");
+_Static_assert(sizeof(GWGlassUniforms) == 336, "GWGlassUniforms size");
 _Static_assert(_Alignof(GWGlassUniforms) == 16, "GWGlassUniforms alignment");
 _Static_assert(offsetof(GWGlassUniforms, background) == 0, "background offset");
 _Static_assert(offsetof(GWGlassUniforms, targetSize) == 40, "targetSize offset");
@@ -45,3 +45,15 @@ _Static_assert(offsetof(GWGlassUniforms, glowHaloRadius) == 240, "glowHaloRadius
 _Static_assert(offsetof(GWGlassUniforms, glowHaloIntensity) == 244, "glowHaloIntensity offset");
 _Static_assert(offsetof(GWGlassUniforms, padding4) == 248, "padding4 offset");
 _Static_assert(offsetof(GWGlassUniforms, padding5) == 252, "padding5 offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorColor0) == 256, "interiorColor0 offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorColor1) == 272, "interiorColor1 offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorColor2) == 288, "interiorColor2 offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorEffect) == 304, "interiorEffect offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorColorCount) == 308, "interiorColorCount offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorSeed) == 312, "interiorSeed offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorIntensity) == 316, "interiorIntensity offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorPhase) == 320, "interiorPhase offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorCenterFade) == 324, "interiorCenterFade offset");
+_Static_assert(offsetof(GWGlassUniforms, interiorPixelsPerPoint) == 328, "interiorPixelsPerPoint offset");
+_Static_assert(offsetof(GWGlassUniforms, padding6) == 332, "padding6 offset");
+_Static_assert(GWInteriorEffectNone == 0 && GWInteriorEffectEnergy == 1 && GWInteriorEffectRays == 2 && GWInteriorEffectEmbers == 3, "GWInteriorEffect values");

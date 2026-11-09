@@ -57,9 +57,9 @@ struct ShaderLayoutTests {
     }
 
     @Test func `Host layout of the glass uniforms matches the documented record`() {
-        #expect(MemoryLayout<GWGlassUniforms>.size == 256)
+        #expect(MemoryLayout<GWGlassUniforms>.size == 336)
         #expect(MemoryLayout<GWGlassUniforms>.alignment == 16)
-        #expect(MemoryLayout<GWGlassUniforms>.stride == 256)
+        #expect(MemoryLayout<GWGlassUniforms>.stride == 336)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.background) == 0)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.targetSize) == 40)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.panelCenter) == 48)
@@ -92,6 +92,21 @@ struct ShaderLayoutTests {
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.glowHaloIntensity) == 244)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding4) == 248)
         #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding5) == 252)
+        // The interior (GW-19) follows the GW-18 fields, which keep their layout.
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorColor0) == 256)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorColor1) == 272)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorColor2) == 288)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorEffect) == 304)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorColorCount) == 308)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorSeed) == 312)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorIntensity) == 316)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorPhase) == 320)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorCenterFade) == 324)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.interiorPixelsPerPoint) == 328)
+        #expect(MemoryLayout<GWGlassUniforms>.offset(of: \.padding6) == 332)
+        // The effect codes the shader switches on.
+        #expect(GWInteriorEffectNone.rawValue == 0 && GWInteriorEffectEnergy.rawValue == 1)
+        #expect(GWInteriorEffectRays.rawValue == 2 && GWInteriorEffectEmbers.rawValue == 3)
     }
 
     @Test func `Shader reads every glass uniform field at the host's offsets`() async throws {
@@ -138,7 +153,18 @@ struct ShaderLayoutTests {
             padding3: -996,
             glowHaloRadius: 36.75,
             glowHaloIntensity: 0.34375,
-            padding4: -995, padding5: -994
+            padding4: -995, padding5: -994,
+            interiorColor0: [0.21875, 0.84375, 0.46875, -5],
+            interiorColor1: [0.71875, 0.09375, 0.53125, -6],
+            interiorColor2: [0.28125, 0.96875, 0.015625, -7],
+            interiorEffect: 3,
+            interiorColorCount: 2,
+            interiorSeed: 0xdeadbeef,
+            interiorIntensity: 0.828125,
+            interiorPhase: 41.25,
+            interiorCenterFade: 0.671875,
+            interiorPixelsPerPoint: 2.5,
+            padding6: -993
         )
         let expected: [Float] = [
             1.5, -2.25, 3.125, -4.0625, 5.5, -6.75, 0.03125, 0.0625, 7.875, -8.5,
@@ -149,10 +175,13 @@ struct ShaderLayoutTests {
             0.0, 0.125, 0.5625, 0.9375, 0.625, -0.78125, 3,
             4.5, 2.75, 0.875, 72.25, 0.4375, 0.1875, 0.65625, 90.5,
             36.75, 0.34375,
+            0.21875, 0.84375, 0.46875, -5, 0.71875, 0.09375, 0.53125, -6, 0.28125, 0.96875, 0.015625, -7,
+            3, 2, 0.828125, 41.25, 0.671875, 2.5,
         ]
         let recordBuffer = try #require(gpu.device.makeBuffer(bytes: &record, length: MemoryLayout<GWGlassUniforms>.stride, options: .storageModeShared))
         let values = try #require(gpu.device.makeBuffer(length: expected.count * MemoryLayout<Float>.stride, options: .storageModeShared))
-        let layout = try #require(gpu.device.makeBuffer(length: 29 * MemoryLayout<UInt32>.stride, options: .storageModeShared))
+        let layout = try #require(gpu.device.makeBuffer(length: 41 * MemoryLayout<UInt32>.stride, options: .storageModeShared))
+        let seed = try #require(gpu.device.makeBuffer(length: MemoryLayout<UInt32>.stride, options: .storageModeShared))
 
         let commandBuffer = try #require(gpu.queue.makeCommandBuffer())
         let encoder = try #require(commandBuffer.makeComputeCommandEncoder())
@@ -160,6 +189,7 @@ struct ShaderLayoutTests {
         encoder.setBuffer(recordBuffer, offset: 0, index: 0)
         encoder.setBuffer(values, offset: 0, index: 1)
         encoder.setBuffer(layout, offset: 0, index: 2)
+        encoder.setBuffer(seed, offset: 0, index: 3)
         let one = MTLSize(width: 1, height: 1, depth: 1)
         encoder.dispatchThreadgroups(one, threadsPerThreadgroup: one)
         encoder.endEncoding()
@@ -167,11 +197,15 @@ struct ShaderLayoutTests {
 
         let readValues = Array(UnsafeBufferPointer(start: values.contents().assumingMemoryBound(to: Float.self), count: expected.count))
         #expect(readValues == expected)
-        let readLayout = Array(UnsafeBufferPointer(start: layout.contents().assumingMemoryBound(to: UInt32.self), count: 29))
+        // The seed is read as an integer, all 32 bits.
+        #expect(seed.contents().load(as: UInt32.self) == 0xdeadbeef)
+        let readLayout = Array(UnsafeBufferPointer(start: layout.contents().assumingMemoryBound(to: UInt32.self), count: 41))
         #expect(readLayout == [
-            256, 16, 0, 40, 48, 56, 64, 68, 72, 76, 80, 96,
+            336, 16, 0, 40, 48, 56, 64, 68, 72, 76, 80, 96,
             112, 128, 144, 160, 176, 192, 200, 204, 208, 212, 216, 220, 224, 228, 232,
             240, 244,
+            256, 272, 288, 304, 308, 312, 316, 320, 324, 328, 332,
+            0,
         ])
     }
 }

@@ -58,6 +58,15 @@ typedef enum GWGlassBindingIndex {
     GWGlassBindingIndexSourceTexture = 0,
 } GWGlassBindingIndex;
 
+/// The procedural interior a glass panel draws (GW-19), stored in
+/// `GWGlassUniforms.interiorEffect`. 0 draws no interior.
+typedef enum GWInteriorEffect {
+    GWInteriorEffectNone = 0,
+    GWInteriorEffectEnergy = 1,
+    GWInteriorEffectRays = 2,
+    GWInteriorEffectEmbers = 3,
+} GWInteriorEffect;
+
 /// Per-draw parameters for one rounded glass panel, in target pixels.
 ///
 /// Coordinate space: target pixels, origin at the top-left corner of the
@@ -109,6 +118,23 @@ typedef enum GWGlassBindingIndex {
 ///   `glowRimIntensity` and `glowInnerIntensity` on the CPU; the shader sees
 ///   no time).
 ///
+/// Interior (GW-19), appended after the GW-18 fields, which keep their
+/// layout. `interiorEffect` 0 disables the whole interior; every other
+/// interior field is then zero. See docs/glow.md for the math.
+/// - `interiorColor0` … `interiorColor2`: the color ramp in linear light
+///   (`xyz`, `w` zero), faintest first; unused colors are zero.
+/// - `interiorEffect`: a `GWInteriorEffect` value.
+/// - `interiorColorCount`: 0 to 3.
+/// - `interiorSeed`: picks the pattern; mixed into every hash.
+/// - `interiorIntensity`: opacity of the brightest parts, 0...1.
+/// - `interiorPhase`: interior time in seconds, in [0, 64): the effect time
+///   times the speed, reduced on the CPU in double precision (every effect
+///   repeats after 64 s of interior time).
+/// - `interiorCenterFade`: 0...1, how much the interior fades toward the
+///   middle.
+/// - `interiorPixelsPerPoint`: the display scale, so the pattern is sized in
+///   points.
+///
 /// Layout in bytes: background 0 (40 bytes), targetSize 40, panelCenter 48,
 /// panelHalfSize 56, cornerRadius 64, bezelWidth 68, normalRadius 72,
 /// maxDisplacement 76, edgeHighlight 80, explicit padding 84, 88, 92 (set
@@ -118,8 +144,12 @@ typedef enum GWGlassBindingIndex {
 /// glowRimIntensity 212, glowInnerRadius 216, glowInnerIntensity 220,
 /// glowCenterOpacity 224, glowDirectionality 228, glowNormalRadius 232,
 /// explicit padding 236 (set to zero); glowHaloRadius 240,
-/// glowHaloIntensity 244, explicit padding 248, 252 (set to zero).
-/// Size 256, alignment 16, stride 256.
+/// glowHaloIntensity 244, explicit padding 248, 252 (set to zero);
+/// interiorColor0 256, interiorColor1 272, interiorColor2 288,
+/// interiorEffect 304, interiorColorCount 308, interiorSeed 312,
+/// interiorIntensity 316, interiorPhase 320, interiorCenterFade 324,
+/// interiorPixelsPerPoint 328, explicit padding 332 (set to zero).
+/// Size 336, alignment 16, stride 336.
 typedef struct GWGlassUniforms {
     GWBackgroundUniforms background;
     simd_float2 targetSize;
@@ -154,6 +184,17 @@ typedef struct GWGlassUniforms {
     float glowHaloIntensity;
     float padding4;
     float padding5;
+    simd_float4 interiorColor0;
+    simd_float4 interiorColor1;
+    simd_float4 interiorColor2;
+    uint32_t interiorEffect;
+    uint32_t interiorColorCount;
+    uint32_t interiorSeed;
+    float interiorIntensity;
+    float interiorPhase;
+    float interiorCenterFade;
+    float interiorPixelsPerPoint;
+    float padding6;
 } GWGlassUniforms;
 
 #endif // GLASSWEAVE_SHADER_TYPES_H
