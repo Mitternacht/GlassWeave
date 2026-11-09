@@ -113,4 +113,58 @@ struct DocumentationExampleTests {
             #expect(worst <= 1, "time \(time)")
         }
     }
+
+    @Test func `The energy orb example lights its inside, keeps its middle clear, and moves`() async throws {
+        let gpu = try GPUContext()
+        // A 61-point circle with 30 points of surface around it, so the
+        // 24-point halo fits.
+        let frame = CGRect(x: 30, y: 30, width: 61, height: 61)
+        let panel = energyOrb(frame: frame)
+        #expect(panel.parameters.interior.isAnimated)
+        let source = Fixture.uniform(width: 121, height: 121, (20, 22, 28))
+        func render(_ panel: GlassPanel, at time: Double) async throws -> RenderedImage {
+            let renderer = try GlassRenderer(commandQueue: gpu.queue)
+            try renderer.setSource(gpu.makeLease(bgra: source.bgra, width: source.width, height: source.height))
+            try renderer.setPanel(panel)
+            #expect(renderer.panel?.parameters.interior == panel.parameters.interior, "In range: drawn as given")
+            try renderer.setEffectTime(time)
+            let target = try gpu.makeTarget(width: source.width, height: source.height)
+            #expect(renderer.draw(targetPixelSize: (source.width, source.height), displayScale: 1) { target } == .submitted(frameID: 1))
+            return try await gpu.readBack(try #require(target.renderPassDescriptor.colorAttachments[0].texture))
+        }
+        var withoutInterior = panel
+        withoutInterior.parameters.interior = .none
+        let early = try await render(panel, at: 0.5)
+        let later = try await render(panel, at: 1.5)
+        let plain = try await render(withoutInterior, at: 0.5)
+        let g = GlassPanelGeometry(panel: try panel.normalized(), displayScale: 1, effectTime: 0.5)
+        var lit = 0, outsideChanged = 0, middleChanged = 0, moved = 0
+        for y in 0..<source.height {
+            for x in 0..<source.width {
+                let pixel = SIMD2(Double(x) + 0.5, Double(y) + 0.5)
+                let changed = early.channels(x: x, y: y) != plain.channels(x: x, y: y)
+                if g.coverage(at: pixel) == 0 {
+                    if changed { outsideChanged += 1 }
+                } else if g.interiorDepthFraction(at: pixel) >= 0.85 {
+                    if changed { middleChanged += 1 }
+                } else if early.channels(x: x, y: y).sum() > plain.channels(x: x, y: y).sum() + 12 {
+                    lit += 1
+                }
+                if early.channels(x: x, y: y) != later.channels(x: x, y: y) { moved += 1 }
+            }
+        }
+        #expect(lit > 100, "Filaments light the inside")
+        #expect(outsideChanged == 0, "Energy draws only inside the circle")
+        #expect(middleChanged == 0, "The middle stays the glass without an interior")
+        #expect(moved > 100, "A second later the filaments moved")
+        // And the image matches the CPU model.
+        let reference = GlassReference(source: source, geometry: g)
+        var worst = 0.0
+        for y in 0..<source.height {
+            for x in 0..<source.width {
+                worst = max(worst, early.channels(x: x, y: y).largestDifference(from: reference.encodedColor(x: x, y: y)))
+            }
+        }
+        #expect(worst <= 1)
+    }
 }

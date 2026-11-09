@@ -29,12 +29,13 @@ performance budget is met or failed; see
   an `MTKView` host that draws on demand, per window scene, with at most two
   frames in flight, hidden from assistive technologies, opaque under Reduce
   Transparency), plus `GlassAccessibilityPolicy`.
-- **Experimental glow** (after the v0.1 candidate, GW-17 and GW-18):
+- **Experimental glow** (after the v0.1 candidate, GW-17 to GW-19):
   `GlassGlow` colors a custom panel's edge in any color or an angular
   gradient, with an inner glow that fades to a see-through middle, a halo of
-  light outside the shape, and a pulse that `GlassSurfaceView` animates only
-  while it is visible and Reduce Motion is off; see
-  [the glow design](docs/glow.md).
+  light outside the shape, and a pulse; `GlassInterior` adds animated
+  energy, rays, or embers inside the shape, fading to a see-through middle.
+  `GlassSurfaceView` animates them only while they are visible and Reduce
+  Motion is off; see [the glow design](docs/glow.md).
 - **The laboratory** (`Examples/GlassWeaveLab`): a UIKit app with the native
   reference beside the custom panel over a deterministic moving background,
   lifecycle and accessibility controls, and the GW-09 benchmark scenario
@@ -56,11 +57,11 @@ Physical-device qualification (GW-09), a Metal 4 backend experiment (GW-11),
 a touch-driven ripple (GW-12), merging of two custom surfaces (GW-13), a
 SwiftUI adapter (GW-15), and external texture interoperability (GW-16). None
 of these is part of v0.1. The glow work (experimental, after v0.1) has a
-colored rim, inner glow, halo, and pulse on the custom panel (GW-17, GW-18)
-and a colored rim and halo around genuine native glass,
-`EnhancedNativeGlassView` (GW-14, pulled forward; simulator and Mac evidence
-only); it continues with animated interiors (GW-19) and a laboratory gallery
-(GW-20). See [the task list](tasks/todo.md).
+colored rim, inner glow, halo, pulse, and animated interiors on the custom
+panel (GW-17 to GW-19) and a colored rim and halo around genuine native
+glass, `EnhancedNativeGlassView` (GW-14, pulled forward); simulator and Mac
+evidence only. It continues with a laboratory gallery (GW-20). See
+[the task list](tasks/todo.md).
 
 ## Modes
 

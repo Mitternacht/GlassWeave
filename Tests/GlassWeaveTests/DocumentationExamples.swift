@@ -56,3 +56,32 @@ func pulsingOrb(frame: CGRect) -> GlassPanel {
         )
     ))
 }
+
+import CoreGraphics
+import GlassWeave
+
+/// A round glass orb with energy filaments inside, a cyan-to-violet rim and
+/// halo that pulse, and a clear middle.
+func energyOrb(frame: CGRect) -> GlassPanel {
+    GlassPanel(frame: frame, parameters: GlassParameters(
+        cornerRadius: min(frame.width, frame.height) / 2,
+        glow: GlassGlow(
+            colors: [
+                .init(red: 0.3, green: 0.85, blue: 1, angle: 0),
+                .init(red: 0.7, green: 0.35, blue: 1, angle: 180),
+            ],
+            innerGlowRadius: 14, innerGlowIntensity: 0.5,
+            haloRadius: 24, haloIntensity: 0.8,
+            pulsePeriod: 2, pulseDepth: 0.4
+        ),
+        interior: GlassInterior(
+            effect: .energy,
+            colors: [
+                .init(red: 0.25, green: 0.3, blue: 1),
+                .init(red: 0.3, green: 0.85, blue: 1),
+                .init(red: 0.95, green: 0.98, blue: 1),
+            ],
+            intensity: 0.9, speed: 1, seed: 7
+        )
+    ))
+}

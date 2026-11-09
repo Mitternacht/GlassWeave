@@ -239,6 +239,59 @@ func pulsingOrb(frame: CGRect) -> GlassPanel {
 }
 ```
 
+### Animated interiors (experimental)
+
+> Note: Added after the v0.1 candidate at the user's request (GW-19).
+> Experimental and not part of the v0.1 scope.
+
+``GlassParameters/interior`` draws an animated pattern inside the outline:
+``GlassInterior/Effect/energy`` filaments, ``GlassInterior/Effect/rays``
+from the center, or ``GlassInterior/Effect/embers`` (flame tongues and
+sparks that may rise into the glow's halo). Its colors are a ramp of one to
+three ``GlassInterior/Color`` values from the pattern's faintest to its
+brightest parts. Like the halo, the interior is light: it is screened over
+the glass in linear light, so it shows best on darker glass. With
+``GlassInterior/centerFade`` at 1 (the default) the middle stays exactly
+the glass without an interior. Every frame is a deterministic function of
+the ``GlassInterior/seed`` and the interior time, ``GlassRenderer/effectTime``
+times ``GlassInterior/speed``; the pattern repeats every
+``GlassInterior/loopDuration`` seconds of interior time. `GlassSurfaceView`
+runs its effect clock while a visible interior moves and stops it when the
+interior is still, the surface is hidden, or Reduce Motion is on, which
+shows the still frame (interior time 0). Reduce Transparency and Increase
+Contrast remove the interior.
+
+```swift
+import CoreGraphics
+import GlassWeave
+
+/// A round glass orb with energy filaments inside, a cyan-to-violet rim and
+/// halo that pulse, and a clear middle.
+func energyOrb(frame: CGRect) -> GlassPanel {
+    GlassPanel(frame: frame, parameters: GlassParameters(
+        cornerRadius: min(frame.width, frame.height) / 2,
+        glow: GlassGlow(
+            colors: [
+                .init(red: 0.3, green: 0.85, blue: 1, angle: 0),
+                .init(red: 0.7, green: 0.35, blue: 1, angle: 180),
+            ],
+            innerGlowRadius: 14, innerGlowIntensity: 0.5,
+            haloRadius: 24, haloIntensity: 0.8,
+            pulsePeriod: 2, pulseDepth: 0.4
+        ),
+        interior: GlassInterior(
+            effect: .energy,
+            colors: [
+                .init(red: 0.25, green: 0.3, blue: 1),
+                .init(red: 0.3, green: 0.85, blue: 1),
+                .init(red: 0.95, green: 0.98, blue: 1),
+            ],
+            intensity: 0.9, speed: 1, seed: 7
+        )
+    ))
+}
+```
+
 ### Native glass with a glow (experimental)
 
 > Note: Added after the v0.1 candidate at the user's request (GW-14, pulled
@@ -439,6 +492,7 @@ func measure(_ renderer: GlassRenderer) -> () -> Double? {
 - ``GlassParameters``
 - ``GlassTint``
 - ``GlassGlow``
+- ``GlassInterior``
 - ``GlassParameterError``
 
 ### Background source

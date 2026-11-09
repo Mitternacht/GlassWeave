@@ -170,10 +170,9 @@ values.
 
 ## Accessibility mapping
 
-Implemented for the GW-17 and GW-18 rows. `GlassAccessibilityPolicy` applies
-these to the presented panel (the app's panel is kept unchanged) and, through
-the same function, to the rim and halo of `EnhancedNativeGlassView` (GW-14);
-the GW-19 row is the plan:
+Implemented. `GlassAccessibilityPolicy` applies these to the presented panel
+(the app's panel is kept unchanged) and, through the same function, to the
+rim and halo of `EnhancedNativeGlassView` (GW-14), which draws no interior:
 
 | Feature | Reduce Transparency | Increase Contrast | Reduce Motion |
 | --- | --- | --- | --- |
@@ -182,7 +181,7 @@ the GW-19 row is the plan:
 | Inner glow, center fill (GW-17) | Removed: the body is exactly the opaque legible surface | Removed: the interior is exactly the GW-08 glass, so the legibility rule for text still holds | Unchanged (the inner glow steady at the pulse's mean level) |
 | Halo (GW-18) | Removed (`haloRadius` 0) | Kept (outside the shape, behind no text), evenly lit like the rim | Kept, steady at the pulse's mean level |
 | Pulse (GW-18) | Removed (`pulseDepth` 0); the rim stays at its own intensity | Kept | Removed: the rim, inner glow, and halo opacities are multiplied by `1 − pulseDepth / 2` and the depth becomes 0, so the surface runs no clock |
-| Interiors (GW-19) | Removed | Removed (they would move behind text) | A fixed still frame (effect time 0) |
+| Interiors (GW-19) | Removed | Removed (they would move behind text) | The still frame: speed 0, so the interior is drawn at interior time 0 whatever the effect time; an interior that draws nothing or does not move is kept as it is |
 
 The legibility rule (`GlassTint.minimumStrength`) covers the interior when
 the center fill is 0, which Increase Contrast enforces. A center fill above 0
@@ -344,6 +343,212 @@ glow − panel +0.258 to +0.263 ms (pooled +0.260). Every run drew all 3,600
 ticks with no deferral at the bound. The full report is in
 [the glow characterization record](evidence/glow-characterization.md).
 This describes an Apple M5 Mac rendering offscreen, not an iPhone or iPad.
+
+## GW-19: animated interiors (implemented)
+
+### Where it lives
+
+`GlassParameters` gains `interior: GlassInterior` (default `.none`), beside
+`glow` rather than inside it. The checklist describes interiors "in the glow
+colors"; the implementation gives the interior its own colors instead, for
+two reasons: an interior's color follows its brightness (a flame is red at
+its edges and yellow at its core), which an angular gradient cannot express,
+and a `GlassGlow` without stops normalizes to `.none`, so an interior inside
+the glow could not exist without a rim. An app that wants the glow's colors
+passes them (the laboratory's presets use matching system colors). Native
+mode (`EnhancedNativeGlassView`) takes a `GlassGlow` only and draws no
+interior.
+
+### Public type
+
+`GlassInterior` (`Sources/GlassWeave/GlassInterior.swift`) is `Hashable` and
+`Sendable`:
+
+| Field | Unit | Range | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `effect` | `GlassInterior.Effect` | `.none`, `.energy`, `.rays`, `.embers` | — | The pattern. |
+| `colors` | `[GlassInterior.Color]` (sRGB 0...1) | 0 to `maximumColors` (3) | none | A ramp from the pattern's faintest to its brightest parts, in linear light: one color, or two or three spread evenly. |
+| `intensity` | normalized | 0...1 | 0.8 | Opacity of the brightest parts. |
+| `speed` | multiple of the effect's pace | 0 to `maximumSpeed` (3) | 1 | Interior time runs at `effectTime × speed`; 0 is still. |
+| `seed` | `UInt32` | any | 0 | Picks the pattern. |
+| `centerFade` | normalized | 0...1 | 1 | Opacity times `1 − centerFade × smoothstep(0.3, 0.85, w)`, `w` the depth over half the shorter side. At 1 every pixel deeper than 85 % is exactly the glass without an interior. |
+
+The normalization rule applies: a NaN or infinite color component,
+intensity, speed, or center fade is rejected naming
+`interiorColorRed`/`Green`/`Blue`, `interiorIntensity`, `interiorSpeed`, or
+`interiorCenterFade`, even when the effect is `.none`; finite values are
+clamped; only three colors are kept; no effect or no colors normalizes to
+`.none`. `isVisible` (an effect, a color, and an intensity above 0) and
+`isAnimated` (visible with a speed above 0) say what an interior does, and
+`phase(at:)` gives the interior time: `t × speed` reduced into
+`0..<loopDuration` (64 s) in double precision. `GlassInterior.Color(_:traits:)`
+in GlassWeaveUIKit reads a color from a `UIColor`.
+
+### Shader math
+
+Per pixel in `gw_glass_fragment`, mirrored on the CPU by
+`GlassInteriorModel.swift`, which the tests compare with the GPU:
+
+1. **Where.** Inside the outline (coverage above 0), wherever the fade
+   `1 − centerFade × smoothstep(0.3, 0.85, w)` is above 0; the pattern is not
+   evaluated elsewhere. Patterns are laid out in points (`u` = pixel offset
+   from the center over the display scale).
+2. **Value.** The effect gives a value `e` in 0...1 (below).
+3. **Light.** `L = ramp(e) × e × intensity × fade`, screened over the
+   glowing glass in linear light, `G + L(1 − G)`, after the glow layer and
+   before the outline's antialiasing. Like the halo it is light: it never
+   darkens the glass, never exceeds 1, and shows best on darker glass; over
+   light glass it washes toward white (see the light capture).
+4. **Sparks outside.** For embers with a halo, sparks above the panel's
+   center line (`q.y < 0`), outside the outline and within the halo radius,
+   are screened over the haloed background with `(1 − s / haloRadius)²` in
+   place of the fade. Nothing else of an interior is drawn outside.
+5. **Dither.** Pixels the interior lights get the GW-17 ordered dither;
+   every other pixel keeps the bytes it has without an interior.
+6. **Numbers.** Every division is by a size that is positive for a drawn
+   panel or by a constant; there are no texture reads beyond the source and
+   every loop has a fixed count (3 octaves, 12 sparks), so the outputs are
+   finite (checked against the model, which is finite everywhere, including
+   1-point, 1.5-point-tall, and 2-point-wide panels).
+
+The effects use value noise on an integer lattice with the lowbias32 hash
+(exact on CPU and GPU) and smoothstep interpolation:
+
+- **Energy.** A field `p` scaled by `max(half the shorter side, 12 pt)`,
+  turning once per 64 s and twisted by up to 0.9 rad out to that size, is
+  warped by two single-octave 3D noises and fed to a three-octave fbm `n`;
+  filaments are where `n` crosses one half: `core = 1 − smoothstep(0, 0.045,
+  |n − ½|)`, `haze = 1 − smoothstep(0, 0.16, |n − ½|)`,
+  `e = saturate(0.85 core² + 0.3 haze²) × (0.45 + 0.55 (1 − w))`, brighter
+  toward the rim.
+- **Rays.** One ray per angular cell (13 soft beams and 29 thin rays per
+  turn, turning two and one turns per 64 s in opposite directions), each at
+  a random offset and width within its cell, drawn at least 0.75 pt wide
+  and dimmed by the same factor (so thin rays fade instead of aliasing near
+  the center), twinkling with 1D noise in time; brightness flows outward
+  with a 2D noise; the rays fade in from the center where the thin rays'
+  spacing reaches 1.5 pt.
+- **Embers.** Flames: a tongue height `top = 0.45 + 0.9 × noise` along the
+  bottom edge and three octaves of rising turbulence (9 × 30 pt cells,
+  0.5 cells a second) give `v = (1 − y / top) + 0.8 (n − ½)` and heat
+  `smoothstep(0, 1.25, v)`; above `1.4 × top` the heat is 0 and the
+  turbulence is skipped. Sparks: twelve, computed on the CPU once per draw
+  (they depend only on the seed and the interior time) and uploaded; each
+  rises from 8 % of the height above the bottom edge to the halo's radius
+  above the top a whole number of times (12 to 32) per 64 s, sways, fades in
+  over 5 % and out over the last 30 % of its rise, and is drawn as a core
+  `(1 − d²/r²)²` (radius 1.6 to 2.8 pt) with a glow `0.45 (1 − d²/9r²)²`.
+  `e = max(flames, sparks)`.
+
+**Time and periodicity.** Interior time enters only through lattice axes
+whose period (a power of two, applied with a mask) is the number of cells
+the pattern moves in 64 s, through turns that complete a whole number of
+times in 64 s, and through sparks that rise a whole number of times in 64 s.
+The CPU reduces `effectTime × speed` modulo 64 in double precision, so a
+long-running clock keeps its accuracy and the pattern has no seam when the
+phase wraps (a test compares the change across the wrap with ordinary
+millisecond steps). At speed 1 every noise moves at most 0.5 lattice cells a
+second, at most 1.5 at the maximum speed of 3, below the three flashes a
+second of WCAG 2.3.1.
+
+**Cost reduction.** The first version used integer division for every
+lattice wrap and hashed the sparks per pixel; short Debug passes put energy
+and embers at about +2.3 and +2.0 ms a frame on the Apple M5. Masks for
+power-of-two periods (spatial axes do not wrap), CPU-computed sparks,
+single-octave warps for energy, culled flame turbulence, and 1D twinkle for
+the rays brought the Release characterization to the figures below.
+
+### GPU record
+
+`GWGlassUniforms` keeps its first 256 bytes (the GW-18 layout) and appends
+`interiorColor0`…`interiorColor2` (256, 272, 288; linear RGB, `w` 0),
+`interiorEffect` (304; a `GWInteriorEffect`, 0 is none), `interiorColorCount`
+(308), `interiorSeed` (312), `interiorIntensity` (316), `interiorPhase`
+(320; seconds in [0, 64)), `interiorCenterFade` (324),
+`interiorPixelsPerPoint` (328), padding (332), and `interiorSparks` (336;
+twelve `float4`: center x, y in points from the panel's center, radius in
+points, brightness; zero except for embers). Size 528, alignment 16. C
+`_Static_assert`s, MSL `static_assert`s, Swift `MemoryLayout` checks, and
+the GPU round trip with distinctive values (including every spark lane and
+the seed read as an integer) cover it. Without an interior every interior
+field is zero and the shader skips the whole block: a frozen copy of the
+GW-18 shader (`Tests/GlassWeaveTests/Shaders/GlassBaselineGW18.metal`)
+renders identical bytes.
+
+### Clock and accessibility
+
+`GlassSurfaceView` runs its GW-18 effect clock while the presented glow
+pulses *or* the presented interior moves (`GlassInterior.isAnimated`) and
+the view is visible; ticks remain ordinary frame requests through the GW-07
+scheduler, so they coalesce, wait while hidden, and keep the two-frame
+in-flight bound, and a still or removed interior draws once and then
+nothing. The accessibility row above applies through
+`GlassAccessibilityPolicy.presentedPanel`. GW-04's open item (the
+main-thread drawable wait) is unchanged: a moving interior draws more often,
+within the same bound; it is not fixed here.
+
+### Laboratory
+
+`-lab.interior energy|rays|embers` (`LabInterior.swift`) gives the custom
+panel an interior in system colors resolved for the appearance (energy:
+indigo, cyan, white; rays: orange, yellow, warm white; embers: red, orange,
+yellow), with the center fade at 1; it combines with `-lab.glow` (the
+captures use `energy` + `energy`, `amber` + `rays`, `ember` + `embers`, whose
+sparks rise into the ember halo). The Interior motion switch
+(`lab.interiorMotion`) stills it, and the diagnostics print an `Interior:`
+line. The panel's title and button sit partly over the faded part of the
+interior; Increase Contrast and Reduce Transparency remove it. Over the
+laboratory's bright, saturated backgrounds the screened light is subtle
+(orange sparks over orange stripes all but vanish, and in light appearance
+the energy filaments wash toward white); it shows as designed over darker
+backgrounds.
+
+### Cost (Apple M5 Mac offscreen characterization, not device evidence)
+
+The characterization gained energy, rays, and embers modes: the GW-18 glow
+mode's 320 × 180 pt panel at scale 3 plus each interior (laboratory
+intensity 0.85, speed 1, center fade 1, moving with the ticks). Scheme
+`GlassWeaveCharacterization` (Release, no validation), three interleaved
+60 s runs per mode, thermal state nominal: pooled p95 GPU time over the
+glow mode +0.600 ms (energy), +0.318 ms (rays), +0.515 ms (embers), each
+within 0.02 ms across runs; every run drew all 3,600 ticks with no deferral
+at the bound. [The interior characterization record](evidence/interior-characterization.md)
+has the full report. This describes an Apple M5 Mac rendering offscreen,
+not an iPhone or iPad.
+
+## Testing strategy (GW-19)
+
+- Parameter tests: defaults, visibility and animation rules, pass-through,
+  clamping and the three-color limit, `.none` for no effect or colors,
+  rejection of NaN and ±infinity naming each field (also without an
+  effect), the phase (speed, negative and long-running times, non-finite
+  input), the conversion to the record (effect code, linear colors, phase,
+  sparks), and the renderer's report.
+- GPU readback on My Mac (Apple M5) with Metal API Validation: byte identity
+  with the frozen GW-18 shader without an interior (five cases including an
+  effect without colors, colors without an effect, and intensity 0); each
+  effect against the CPU model within one 8-bit step at four times
+  (including a circle with a pulsing halo, a tinted rounded rectangle, a
+  capsule whose sparks rise into the halo, and display scale 2); extreme
+  panels, seeds, and times within the model and finite; nothing outside the
+  shape except embers' sparks above the center line within the halo (a
+  rounded rectangle and a circle, with and without a halo, at eight
+  instants); the middle exactly see-through at center fade 1 (and lit at
+  0); light only added; determinism (same seed and time identical bytes,
+  other times and seeds different, speed scaling time, speed 0 the still
+  frame); no seam at the loop.
+- UIKit tests on the iPhone 18 Pro simulator with a controlled clock: when
+  the clock runs, one frame per tick at the advanced phase, stilling and
+  removing, hiding and resuming, Reduce Motion on and off (the still frame
+  at interior time 0), coalescing at the in-flight bound, the policy
+  mapping, `UIColor` conversion, and offscreen renders under Reduce
+  Transparency and Increase Contrast identical to the panel without the
+  interior.
+- Laboratory UI tests counting submissions with the real update link
+  (moving, stilled, stage hidden, backgrounded, Reduce Motion, Reduce
+  Transparency) and comparing screenshots of each interior's still frame
+  with the panel without one (the band around the panel and the middle
+  unchanged).
 
 ## GW-20 plan: several shapes in one pass
 

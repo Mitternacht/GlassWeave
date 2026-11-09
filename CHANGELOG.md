@@ -32,6 +32,20 @@ evidence only.
   Reduce Motion (GW-18).
 - The laboratory's `-lab.glow ember|energy` presets with a Pulse switch, and
   a glow mode in the Mac characterization (GW-18).
+- `GlassInterior` (`GlassParameters.interior`, default `.none`): an animated
+  energy, rays, or embers pattern inside a custom panel's outline, in a ramp
+  of one to three colors, with intensity, speed, a seed, and a center fade
+  that keeps the middle exactly see-through; deterministic for a seed and
+  time, repeating every 64 s of interior time, screened over the glass as
+  light; embers' sparks may rise into the glow's halo. `GWGlassUniforms`
+  grows to 528 bytes; panels without an interior render byte-identical
+  output to the GW-18 shader (GW-19).
+- `GlassSurfaceView` runs its effect clock while a visible interior moves;
+  `GlassAccessibilityPolicy` removes interiors under Reduce Transparency and
+  Increase Contrast and shows the still frame under Reduce Motion;
+  `GlassInterior.Color(_:traits:)` reads a `UIColor` (GW-19).
+- The laboratory's `-lab.interior energy|rays|embers` with an Interior
+  motion switch, and interior modes in the Mac characterization (GW-19).
 
 ## Unreleased: v0.1 pre-alpha candidate
 
