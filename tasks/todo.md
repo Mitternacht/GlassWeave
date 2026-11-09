@@ -491,22 +491,26 @@ The user approved building all nine tasks of [the proposal](../docs/proposals/gl
 **Dependencies:** GW-22. **Scope:** M, about 7 files plus tests.
 
 **Acceptance criteria:**
-- [ ] `.legacy` is byte-identical.
-- [ ] At `N.z = 1` the reflected fraction equals `F0` (1e-3 CPU; one step GPU; black source, white environment), increasing monotonically to the outline.
-- [ ] Specular peak on a dome within 2° of the light azimuth and 1 px of the CPU radius, for 8 azimuths.
-- [ ] A 90° light rotation rotates a circular panel's image over a uniform source within one step (panel centered on a pixel corner).
-- [ ] Prismatic:
+- [x] `.legacy` is byte-identical. (`GlassBaselineGW22Tests`: three cases, with the light model configured but off and a light offset set, in the `base` and `optics` variants, on a gradient and a checkerboard; the control shows a chrome panel is drawn by `lighting` and differs.)
+- [ ] At `N.z = 1` the reflected fraction equals `F0` (1e-3 CPU; one step GPU; black source, white environment), increasing monotonically to the outline. (fast pass: not tested)
+- [ ] Specular peak on a dome within 2° of the light azimuth and 1 px of the CPU radius, for 8 azimuths. (fast pass: not tested)
+- [ ] A 90° light rotation rotates a circular panel's image over a uniform source within one step (panel centered on a pixel corner). (fast pass: not tested)
+- [ ] Prismatic: (fast pass: not tested)
   - hue at 12 angles within 2° of the CPU, for 3 film values;
   - deeper pixels byte-identical;
   - darkest band ≥ 1.3:1 on white.
-- [ ] Knee monotonic and C1; outputs finite and ≤ 1. Bloom never lowers a channel and is exactly 0 beyond its width.
-- [ ] `setLightOffset` changes only light terms and rejects non-finite values.
-- [ ] Glow light follows the key light when not set explicitly (test).
-- [ ] Legibility holds over 1,000 backgrounds; Increase Contrast and Reduce Transparency UIKit tests pass.
-- [ ] M5 ≤ +0.15 ms p95. "Light studio" captures in light and dark.
+- [ ] Knee monotonic and C1; outputs finite and ≤ 1. Bloom never lowers a channel and is exactly 0 beyond its width. (fast pass: not tested)
+- [ ] `setLightOffset` changes only light terms and rejects non-finite values. (fast pass: not tested)
+- [ ] Glow light follows the key light when not set explicitly (test). (fast pass: not tested)
+- [ ] Legibility holds over 1,000 backgrounds; Increase Contrast and Reduce Transparency UIKit tests pass. (fast pass: not tested)
+- [ ] M5 ≤ +0.15 ms p95. "Light studio" captures in light and dark. (fast pass: not tested)
 - [ ] **Device only:** chrome ring sign-off; cost.
 
-**Evidence:** not started.
+**Evidence:**
+- Exists: `GlassLighting` (key and rim light, studio presets, dielectric, chrome and prismatic finishes, Fresnel, specular, reflection, bloom, soft knee; normalized, `nonFiniteLighting` errors) in `GlassLighting.swift`; `GlassRenderer.setLightOffset(azimuth:elevation:)`; the shader's light model in `Glass.metal` behind function constant 1 (`PipelineVariant.lighting`, all three pipelines built at initialization); the record grown append-only from 1152 to 1312 bytes with C, MSL and Swift size and offset asserts; the glow and the edge highlight follow the key light (`drivesGlow`); policy rows in `GlassAccessibilityPolicy.presentedLighting` (Reduce Transparency: thin crisp rim; Increase Contrast: no reflections or bloom); the lab's chrome page (`-lab.chrome`, drag to move the light). Design notes: `docs/glass-optics.md`.
+- Safety test (the only new test): `GlassBaselineGW22Tests`, byte-identical to the frozen `GlassBaselineGW22.metal` with `.legacy` lighting, in `base` and `optics`, plus a control that chrome differs: 3 cases, passed. The layout test's expected size was updated (1312). Batch runs at the end: package scheme on My Mac 201 passed, 0 failed; on the iPhone 18 Pro simulator 283 passed, 0 failed. No lab UI test was added or changed, so none was run.
+- Captures (inspected, `docs/evidence/captures/gw-23-*`): the chrome page (ring with chrome rim and prismatic glints, lens pill with top streak and warm bloom, smoky dome with studio strips), the light turned 90 degrees (streak and strips move with it), Increase Contrast, Reduce Transparency, the ring in detail. Tuned in three rounds.
+- Limits: all other criteria are unchecked with the reason "fast pass: not tested"; there is no CPU mirror of the light model. The "Light studio" captures in light and dark are not made (the chrome page shows the light and dark presets). Under Increase Contrast a panel with a white page behind it keeps only a hairline. Device items stay open.
 
 **Verification:** As in GW-21.
 

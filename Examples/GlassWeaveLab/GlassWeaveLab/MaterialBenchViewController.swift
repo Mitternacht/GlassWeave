@@ -3,7 +3,7 @@ import GlassWeaveUIKit
 import Metal
 import UIKit
 
-/// One of the material bench's five procedural backgrounds (GW-21): 8-bit
+/// One of the material bench's procedural backgrounds (GW-21): 8-bit
 /// sRGB pages that a glass look is shown over, so it is judged against a
 /// known backdrop. `-lab.bench <page>` opens the bench on one; the
 /// light-fields demo uses the same pages as its backdrops
@@ -23,6 +23,9 @@ enum BenchPage: Int, CaseIterable {
     /// Soft shaded spheres on a dusk gradient (GW-22): strong colored edges
     /// and fine structure, so a lens's magnification and dispersion show.
     case orbs
+    /// Three stacked backdrops for the light model (GW-23): a pale studio
+    /// plate, the orbs, and black with glowing orange liquid.
+    case chrome
 
     /// The name used on the command line and in accessibility identifiers.
     var identifier: String {
@@ -33,6 +36,7 @@ enum BenchPage: Int, CaseIterable {
         case .charcoal: "charcoal"
         case .paper: "paper"
         case .orbs: "orbs"
+        case .chrome: "chrome"
         }
     }
 
@@ -44,6 +48,7 @@ enum BenchPage: Int, CaseIterable {
         case .charcoal: String(localized: "Charcoal")
         case .paper: String(localized: "Paper")
         case .orbs: String(localized: "Orbs")
+        case .chrome: String(localized: "Chrome")
         }
     }
 
@@ -186,6 +191,7 @@ final class MaterialBenchViewController: UIViewController {
         case bench
         case lightFields
         case lens
+        case chrome
     }
 
     /// One demo panel: where it goes (in a layout the controller computes),
@@ -222,9 +228,10 @@ final class MaterialBenchViewController: UIViewController {
         self.mode = mode
         self.page = page
         switch mode {
-        case .bench: pages = BenchPage.allCases
+        case .bench: pages = BenchPage.allCases.filter { $0 != .chrome }
         case .lightFields: pages = [.charcoal, .ribbons, .paper]
         case .lens: pages = [.orbs, .dotGrid, .checkerboard, .ribbons]
+        case .chrome: pages = [.chrome]
         }
         pageControl = UISegmentedControl(items: pages.map(\.title))
         stillTime = UserDefaults.standard.object(forKey: "lab.lightTime") == nil
@@ -233,6 +240,7 @@ final class MaterialBenchViewController: UIViewController {
         case .bench: demos = Self.benchDemos
         case .lightFields: demos = Self.lightDemos(timeOffset: 0)
         case .lens: demos = Self.lensDemos
+        case .chrome: demos = Self.chromeDemos
         }
         super.init(nibName: nil, bundle: nil)
     }
@@ -290,6 +298,58 @@ final class MaterialBenchViewController: UIViewController {
         Demo(caption: String(localized: "Fold on: the edge mirrors"), parameters: GlassParameters(
             cornerRadius: 28, bezelWidth: 32, refraction: 0.6, edgeHighlight: 0.5,
             lens: GlassLens(profile: .squircle(exponent: 3), thickness: 44, indexOfRefraction: 1.8, maximumOffset: 120, allowsFold: true)
+        )),
+    ]
+
+    // MARK: Chrome demos (GW-23)
+
+    private static func color(_ red: Double, _ green: Double, _ blue: Double) -> GlassLighting.Color {
+        GlassLighting.Color(red: red, green: green, blue: blue)
+    }
+
+    /// The chrome page's panels: a round ring button with a chrome rim and
+    /// prismatic glints (the studio on a light plate), a thick lens pill with
+    /// a warm top streak, and a dark smoky dome with studio strips on its rim.
+    private static let chromeDemos: [Demo] = [
+        Demo(caption: String(localized: "Round button: chrome ring, prismatic glints"), parameters: GlassParameters(
+            cornerRadius: 999, bezelWidth: 6, refraction: 0.3, edgeHighlight: 0,
+            tint: GlassTint(red: 1, green: 1, blue: 1, strength: 0.16),
+            lighting: GlassLighting(
+                key: GlassLighting.Light(azimuth: 0, elevation: 50, intensity: 1, size: 0.25),
+                environment: .studioLight, finish: .prismatic(spread: 1, saturation: 0.95, phase: 0.02),
+                fresnel: 0.5, specular: 0.9, reflection: 1, bloom: 0.25, bloomWidth: 3
+            )
+        )),
+        Demo(caption: String(localized: "Lens pill: top specular streak, warm highlight, bloom"), parameters: GlassParameters(
+            cornerRadius: 999, bezelWidth: 40, refraction: 0.6, edgeHighlight: 0.3,
+            light: GlassLight(
+                emitters: [GlassLight.Emitter(
+                    placement: .band(angle: 180, reach: 0.9),
+                    colors: [stop(1.0, 0.60, 0.16), stop(1.0, 0.38, 0.82), stop(0.62, 0.44, 1.0), stop(0.22, 0.88, 1.0)],
+                    intensity: 0.85
+                )],
+                piping: 0.6
+            ),
+            lens: GlassLens(
+                profile: .squircle(exponent: 3), thickness: 40, indexOfRefraction: 1.5, maximumOffset: 80, allowsFold: true,
+                dispersion: 1, dispersionTaps: .sixTap,
+                inlays: [GlassLens.Inlay(radius: 40, height: 16, profile: .dome, rimLine: 0.6)]
+            ),
+            lighting: GlassLighting(
+                key: GlassLighting.Light(azimuth: 0, elevation: 55, color: color(1, 0.88, 0.70), intensity: 1, size: 0.3),
+                environment: .studioLight, finish: .dielectric,
+                fresnel: 0.8, specular: 0.9, reflection: 0.8, bloom: 0.6, bloomWidth: 8
+            )
+        )),
+        Demo(caption: String(localized: "Smoky dome: studio strips on the rim"), parameters: GlassParameters(
+            cornerRadius: 999, bezelWidth: 75, refraction: 0.5, edgeHighlight: 0,
+            tint: GlassTint(red: 0.02, green: 0.02, blue: 0.035, strength: 0.62),
+            lens: GlassLens(profile: .dome, thickness: 60, indexOfRefraction: 1.6, maximumOffset: 100, dispersion: 0.3),
+            lighting: GlassLighting(
+                key: GlassLighting.Light(azimuth: 330, elevation: 45, intensity: 0.9, size: 0.45),
+                environment: .studioDark, finish: .dielectric,
+                fresnel: 0.9, specular: 0.7, reflection: 1, bloom: 0.3, bloomWidth: 6
+            )
         )),
     ]
 
@@ -441,6 +501,7 @@ final class MaterialBenchViewController: UIViewController {
         case .bench: titleLabel.text = String(localized: "Material bench")
         case .lightFields: titleLabel.text = String(localized: "Light fields")
         case .lens: titleLabel.text = String(localized: "Thick lens")
+        case .chrome: titleLabel.text = String(localized: "Chrome and light")
         }
         titleLabel.accessibilityTraits.insert(.header)
         closeButton.configuration?.title = String(localized: "Close")
@@ -476,6 +537,36 @@ final class MaterialBenchViewController: UIViewController {
         diagnosticsLabel.accessibilityIdentifier = "bench.diagnostics"
         view.addSubview(pageControl)
         view.addSubview(closeButton)
+        if mode == .chrome {
+            pageControl.isHidden = true
+            diagnosticsLabel.isHidden = true
+            // Drag anywhere to move the light: across turns the azimuth, up
+            // and down the elevation.
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(movedLight(_:)))
+            view.addGestureRecognizer(pan)
+            let defaults = UserDefaults.standard
+            lightAzimuth = defaults.double(forKey: "lab.lightAzimuth")
+            lightElevation = defaults.double(forKey: "lab.lightElevation")
+        }
+    }
+
+    private var lightAzimuth = 0.0
+    private var lightElevation = 0.0
+    private var panStart = (azimuth: 0.0, elevation: 0.0)
+
+    /// The light offset (GW-23) follows a drag: `GlassRenderer.setLightOffset`.
+    @objc private func movedLight(_ gesture: UIPanGestureRecognizer) {
+        if gesture.state == .began { panStart = (lightAzimuth, lightElevation) }
+        let translation = gesture.translation(in: view)
+        lightAzimuth = panStart.azimuth + Double(translation.x) * 0.6
+        lightElevation = min(max(panStart.elevation - Double(translation.y) * 0.25, -50), 40)
+        applyLightOffset()
+    }
+
+    private func applyLightOffset() {
+        guard let surface else { return }
+        try? surface.renderer.setLightOffset(azimuth: lightAzimuth, elevation: lightElevation)
+        surface.requestFrame()
     }
 
     /// Text and controls to match the page: white on the dark pages.
@@ -527,6 +618,17 @@ final class MaterialBenchViewController: UIViewController {
             frames.append(CGRect(x: left + side + gap, y: y, width: side, height: side))
             y += side + captionHeight + gap + 10
             frames.append(CGRect(x: left, y: y, width: width, height: min(160, max(safe.maxY - y - 70, 110))))
+        } else if mode == .chrome {
+            // The ring button on the plate, the lens pill over the orbs, and
+            // the dome over the liquid, each in its band of the backdrop.
+            let bounds = view.bounds
+            let inset = bounds.width * 0.04
+            let topEnd = bounds.height * 0.33, middleEnd = bounds.height * 0.66
+            frames.append(CGRect(x: inset + 14, y: 130, width: 84, height: 84))
+            let pillHeight: CGFloat = 104
+            frames.append(CGRect(x: left, y: topEnd + (middleEnd - topEnd - pillHeight - 34) / 2, width: width, height: pillHeight))
+            let dome: CGFloat = 150
+            frames.append(CGRect(x: bounds.midX - dome / 2, y: (middleEnd + bounds.height) / 2 - dome / 2 - 14, width: dome, height: dome))
         } else if mode == .lens {
             // The pill, then a dome and a ring, then the fold pair.
             let pillHeight: CGFloat = 104
@@ -552,8 +654,11 @@ final class MaterialBenchViewController: UIViewController {
         }
         for index in demos.indices {
             demos[index].frame = frames[index]
+            // A caption is at least as wide as a small button's neighbours.
+            let captionWidth = mode == .chrome ? max(frames[index].width, 300) : frames[index].width
+            let captionX = mode == .chrome && frames[index].width < 300 ? frames[index].midX - captionWidth / 2 : frames[index].minX
             captionLabels[index].frame = CGRect(
-                x: frames[index].minX + 4, y: frames[index].maxY + 4, width: frames[index].width - 8, height: captionHeight + 14
+                x: max(captionX, 8) + 4, y: frames[index].maxY + 4, width: captionWidth - 8, height: captionHeight + 14
             )
         }
         diagnosticsLabel.frame = CGRect(x: left, y: safe.maxY - 36, width: width, height: 32)
@@ -563,6 +668,7 @@ final class MaterialBenchViewController: UIViewController {
             label.frame.size = CGSize(width: min(fitted.width + 14, label.frame.width), height: min(fitted.height + 6, label.frame.height))
         }
         applyPanels(elapsed: currentElapsed)
+        applyLightOffset()
         // The panels are in place, so the surface can say whether they move.
         updateLink()
         updateDiagnostics()

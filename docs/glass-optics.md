@@ -281,3 +281,161 @@ pair. Captures are in `docs/evidence/captures/gw-22-*`.
   centroid and magnification tests, dispersion tests beyond the lab pictures,
   the pipeline census, the temporal stability run and the M5 cost runs (see
   the checklist).
+
+## GW-23: Light model
+
+> Experimental. `GlassLighting`, `GlassRenderer.setLightOffset(azimuth:elevation:)`
+> and the `lighting` pipeline variant may change before a stable release.
+
+One movable light gives the glass a Fresnel outline, a specular streak, an
+analytic photo studio reflected on the rim, a chrome or prismatic finish, and
+a soft bloom. The shader (`Glass.metal`, "Light model") is the reference of
+the model; there is **no CPU mirror** of the per-pixel code (fast pass).
+
+### API
+
+`GlassParameters.lighting: GlassLighting`, default `.legacy`: no light model,
+the original edge highlight, byte for byte (see "Off by default" below).
+Otherwise:
+
+| Field | Meaning |
+| --- | --- |
+| `key`, `rim?` | `Light`: azimuth (0 = top, clockwise, degrees), elevation (0...90), color, intensity, size (0 pinpoint, 1 broad). The key light also turns the studio. The rim light adds a specular streak only. |
+| `environment` | `.studioLight` (pale sky, dark floor, white boxes) or `.studioDark` (near-black room, gray boxes). |
+| `finish` | `.dielectric`, `.chrome(tint:)`, `.prismatic(spread:saturation:phase:)`. |
+| `indexOfRefraction` | 1...2.4; sets `F0 = ((n - 1) / (n + 1))^2`. |
+| `fresnel`, `specular`, `reflection`, `bloom` | strengths, 0...1. |
+| `bloomWidth` | 0...24 pt. `bandWidth`: how deep the light terms reach; `nil` is the surface's bevel. |
+| `drivesGlow` | the glow's `lightAngle` follows the key light (default `true`). |
+| `crispOutline` | the Fresnel outline is a hairline that contrasts with the glass (used by the accessibility rows). |
+
+`GlassRenderer.setLightOffset(azimuth:elevation:)` adds an offset (degrees) to
+the key and rim lights each draw (a dragged light, tilt, or a sweep); it turns
+the studio, the original edge highlight and the glow's light with the key
+light, and nothing a panel without lighting draws depends on it. A non-finite
+value throws `GlassParameterError.nonFiniteLighting(_:)` naming
+`lightOffsetAzimuth` or `lightOffsetElevation` and leaves the offset as it was.
+Every other field follows the normalization rule: non-finite values throw
+`nonFiniteLighting(_:)` with the field's name; finite values clamp (azimuths
+and the prismatic phase reduce into one turn).
+
+### The model
+
+The surface is the panel's own height field: the lens's (host profile and
+inlays) or, with no lens profile, a quarter-round edge as wide as `bezelWidth`.
+`N = normalize(-grad h, 1)`, viewer `V = (0, 0, 1)`, `L = (sin az cos el,
+-cos az cos el, sin el)` (x right, y down, z toward the viewer).
+
+- **Fresnel.** Schlick, `F = F0 + (1 - F0)(1 - N.z)^5`. The outline is
+  `fresnel * (1 - N.z)^5` in the key color, a thin line where the surface turns
+  edge-on, a little stronger on the lit side.
+- **Specular.** Blinn-Phong `(N.H)^p` with `H = normalize(L + V)`, `p` from
+  `size` (400 for 0, 12 for 1). The lobe is never narrower than one pixel's
+  change of normal: with `f = 1.2 / bevelPixels` radians per pixel,
+  `p' = 1 / (1/p + f^2)` and the peak is scaled by `(p' + 2) / (p + 2)`, so the
+  widened lobe keeps its energy (no derivatives are used). With the default
+  50 degree elevation a top light draws its streak about two thirds of the way
+  into the bevel along the top edge.
+- **Studio.** `R = reflect(-V, N) = (2 N.z N.xy, 2 N.z^2 - 1)` indexes a
+  sky/horizon/floor gradient and three softboxes in (azimuth, elevation): a
+  wide key box above (azimuth 0) and two tall strips at +-96 degrees, all turned
+  by the key light's azimuth. Across a bevel `R` runs from the floor at the
+  outline, through a bright horizon line, to the sky.
+- **Dielectric.** `glass = glass (1 - a) + knee(studio) a`, with
+  `a = saturate(F0 + (F - F0)(1 + 4 reflection)) reflection`: the part of the
+  reflectance that grows toward the outline is boosted up to five times, so a
+  studio shows on glass as in a photograph of it. At `N.z = 1` it is `F0`.
+- **Chrome.** `glass = mix(glass, knee(studio * tint * (0.85 + 0.15 F)), a)`
+  with `a = reflection * smoothstep(0.005, 0.08, 1 - N.z)`: it covers the
+  tilted rim and fades into the flat face. It can darken, as polished metal
+  does.
+- **Prismatic.** The chrome finish with the thin-film palette
+  `0.5 + 0.5 cos(2 pi (h + (0, 1/3, 2/3)))` multiplying the softboxes (the
+  strips fully, the key box half, the base faintly, by `saturation`), where
+  `h = phase + spread * (angle of N around the rim, relative to the light) +
+  0.5 (1 - N.z)`. With the strips at the sides, glints appear left and right
+  of a round ring, each a different hue.
+- **Soft knee.** `K(x) = x` up to 0.8 and `0.8 + 0.2 (1 - e^(-5 (x - 0.8)))`
+  above: C1 at 0.8, monotonic, below 1. The lines (Fresnel outline,
+  specular) and the bloom pass through it as `G + (1 - G) K(E)`, which never
+  darkens a channel and never exceeds 1.
+- **Bloom.** The bright lines are re-evaluated at three distances
+  (`bloomWidth * 1/4, 2/4, 3/4`) on either side along the outline's normal,
+  weighted `(1 - k/4)^2`, taps outside the outline skipped, and added at
+  `0.6 * bloom`: distance-based, in the same pass, exactly zero beyond
+  `3/4 bloomWidth` from a line, and it spreads only inside the panel (the quad
+  does not grow).
+- **Legibility.** Every light term lives inside `bandWidth` of the outline
+  (smoothly cut over its outer quarter); the bloom reaches `bloomWidth` past
+  it. The panel's flat interior is untouched, so the tint bound of
+  `GlassLegibility` holds there; a `.dome` lens has no flat interior, so its
+  band is the whole dome.
+
+### Off by default
+
+The light code exists only in the `lighting` pipeline variant, built with
+function constant 1 (`gw_lighting_constant`; the variant also sets constant 0,
+the thick-lens code, which stays dormant for a rim profile). `.legacy` panels
+are drawn by the `base` and `optics` variants, which are compiled without the
+code, so their output is the GW-22 shader's, byte for byte
+(`GlassBaselineGW22Tests`, against the frozen `GlassBaselineGW22.metal`).
+`GlassRenderer.PipelineVariant.lighting` is new; all three pipelines are built
+at initialization. With the light model on, the original edge highlight's and
+the inlays' rim-line light follow the key light (they come from the upper left
+otherwise).
+
+### GPU record
+
+`GWGlassUniforms` grows from 1152 to 1312 bytes, append-only: one
+`GWLightingUniforms` (160 bytes, alignment 16) at offset 1152, with its own
+size and offset asserts in C (`GlassWeaveShaderTypes.c`), MSL (`Glass.metal`)
+and Swift (`ShaderLayoutTests` checks the new record size). Enums:
+`GWLightingFinish`, `GWLightingEnvironment`.
+
+### Accessibility
+
+| Setting | Light model |
+| --- | --- |
+| Reduce Transparency | a thin crisp rim: the Fresnel outline as a contrasting hairline (light on dark, dark on light) within 2 pt of the outline, no reflections, specular, rim light, finish or bloom (the panel is the opaque surface) |
+| Increase Contrast | the same hairline in the bevel band, evenly lit; reflections, specular, rim light, finish and bloom removed |
+| Reduce Motion | no change: the light moves only when the app moves it |
+
+Implemented in `GlassAccessibilityPolicy.presentedLighting`. Under Increase
+Contrast the hairline replaces an additive outline that would not show on a
+white surface; the glow's rim is still the other way to mark a boundary.
+
+### Lab
+
+`-lab.chrome YES` (or the lab's "Chrome and light" button) opens the chrome
+page: one new bench page of three original backdrops (a pale studio plate, the
+orbs, black with glowing orange liquid) and three panels: a round ring button
+with a chrome rim and prismatic glints, a thick lens pill with a warm top
+streak, bloom, a pooled colored light and an inlaid dome, and a dark smoky dome
+with gray studio strips on its rim. Drag anywhere to move the light
+(`setLightOffset`); `-lab.lightAzimuth <deg>` and `-lab.lightElevation <deg>`
+start with an offset. Captures: `docs/evidence/captures/gw-23-*` (the page, the
+light turned 90 degrees, Increase Contrast, Reduce Transparency, the ring in
+detail). Tuned in three rounds: the first showed an overexposed liquid and no
+strips on the dome (fixed by the reflection boost and a smaller, darker
+liquid), the second a dark outer band and weak glints on the ring (lighter
+floor, brighter and wider strips), the third added the contrasting hairline,
+because the first accessibility captures showed no rim at all on an opaque or
+white surface.
+
+### Deviations and limits
+
+- **`drivesGlow` instead of "unless the glow sets `lightAngle`".** `lightAngle`
+  is a plain `Double` (0 is a valid explicit value), so the glow cannot tell
+  "unset"; a flag on the lighting says whether it follows the key light.
+- **`crispOutline`** is new (not in the proposal): the accessibility rows
+  needed a rim that shows on a white or opaque surface.
+- **No `GlassOptics.h`, no `GlassLegibility` change:** the code is in
+  `Glass.metal`, and the light stays in the band, so the legibility functions
+  are unchanged.
+- **Rim lights are specular only**; an HDR or EDR path and caustic bloom
+  (GW-25) are not here.
+- **Not done:** the CPU mirror, every numeric acceptance test (reflected
+  fraction, specular peak, 90 degree rotation, prismatic hue, knee, bloom
+  bound, `setLightOffset` rejection, glow following), the legibility
+  sweep, the UIKit accessibility tests, the M5 cost runs, the "Light studio"
+  light and dark captures, and device sign-off (see the checklist).
