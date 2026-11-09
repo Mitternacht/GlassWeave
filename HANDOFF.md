@@ -9,6 +9,78 @@ open; [the task checklist](tasks/todo.md) records what is verified. The rest
 of this page is the original handoff. The user deliberately reserved
 implementation for Claude.
 
+## Pick up here (2026-11-09)
+
+**Branches.** Nothing is merged into `main`.
+
+- `implement/milestone-1`: the v0.1 candidate, GW-01 to GW-10.
+- `implement/glow`: that candidate plus the user-requested glow work, GW-14 and GW-17
+  to GW-20. Continue on this branch.
+
+**The user's goal.** GlassWeave's own Metal glass must be far more capable and more
+colorful than Apple's glass. Native glass takes one flat tint and nothing you can
+shape or animate. The native and enhanced-native modes are a comparison baseline.
+The custom mode is the product. Read [the scope change](tasks/plan.md) and
+[the glow design](docs/glow.md).
+
+**What the glow work delivers.** All of it is off by default, and the output stays
+byte-identical when it is off.
+
+- **GW-17:** rims in any sRGB color or a gradient of up to 4 stops, an inner glow,
+  and a body that fades to a fully clear middle.
+- **GW-18:** a halo outside the shape and a deterministic pulse on one effect clock.
+- **GW-19:** animated interiors: energy, rays and embers.
+- **GW-14:** a Core Animation rim and halo around genuine `UIGlassEffect`.
+- **GW-20:** a "Glow gallery" screen in the lab.
+
+The last full runs, on the iPhone 18 Pro simulator with iOS 27.2:
+
+- Package scheme: 280 of 280 passed.
+- Package scheme on My Mac (Apple M5): 198 of 198 passed.
+- Lab UI tests: 46 passed, 1 skipped (iPad only).
+
+Two independent reviews found 7 issues. All 7 are fixed; see the GW-20 "Review update"
+in [the checklist](tasks/todo.md).
+
+**Still open.**
+
+1. Every physical-device item: the GW-09 qualification, the glow device costs, and a
+   live VoiceOver pass.
+2. GW-04 item 3: `MTKView.currentRenderPassDescriptor` can block the main thread for
+   up to 1 s when every drawable is in flight.
+3. CI has never run on GitHub.
+4. GW-11, GW-12, GW-13, GW-15 and GW-16 have not started.
+
+**Next round.** [The proposal](docs/proposals/glass-beyond-native.md) plans GW-21 to
+GW-29, aimed at four target looks the user shared:
+
+- a glowing liquid inside thick glass;
+- a frosted capsule with dispersion;
+- a prismatic ring button;
+- a thick lens pill with a pooled colored glow.
+
+The reference images are third-party work and are kept privately, outside this
+repository; the user knows where they are. Never commit them. The proposal is **not
+approved**. The user's open choice is "build all nine" or "build the first four, then
+review". Ask before starting.
+
+**Working rules learned the hard way.**
+
+- In Xcode MCP, open only `Examples/GlassWeave.xcworkspace`. The package folder or a
+  bare `.xcodeproj` leaves a stale package root, and builds then fail with "Missing
+  package product".
+- After a scheme switch, set the destination explicitly:
+  - "My Mac" for GPU tests;
+  - an iPhone simulator for UIKit tests and the lab.
+- Count tests with `xcrun xcresulttool get test-results summary`. The MCP summary can
+  merge stale results.
+- Swift Testing exit tests run only on macOS.
+- After a mutation run, rebuild and reinstall the lab before taking screenshots.
+- This is a public repository:
+  - commit with the account's GitHub noreply address;
+  - keep personal paths, team IDs and device identifiers out of tracked files;
+  - never add a signing team.
+
 ## Read in order
 
 1. [AGENTS.md](AGENTS.md) — repository and Apple-tool requirements.
