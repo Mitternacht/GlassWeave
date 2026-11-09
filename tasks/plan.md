@@ -60,7 +60,7 @@ The user explicitly asked for glass that can take tints and glows at its edges i
 - The work is experimental and post-v0.1. It does not change the v0.1 candidate's scope, its release notes, or its open device items, and nothing in it counts as GW-09 device evidence.
 - Glow is off by default, and the default panel must render exactly what it rendered before the change.
 - It pulls GW-14 (enhanced-native) forward and extends it with color: a colored halo and rim drawn around genuine native glass, because `UIGlassEffect` cannot be recolored at its edge or made transparent in the middle.
-- GW-11, GW-12, GW-13, GW-15, and GW-16 keep their order and remain unstarted.
+- GW-11, GW-12, GW-13, GW-15, and GW-16 keep their order. (Update, 2026-11-09: GW-12, GW-13 and GW-15 were built afterwards, see the round summary below; GW-11 and GW-16 remain unstarted.)
 
 | Stage | Tasks | Result |
 | --- | --- | --- |
@@ -76,7 +76,7 @@ Proposed next round, in this order:
 2. **Test the skipped groups**, each opt-in effect against a CPU mirror: lens and dispersion, light model, frost (calibration and temporal stability), shadows, shapes, fill; the 1,000-background legibility sweeps; the accessibility audit and largest-text runs for the studies.
 3. **Close the visual gaps** named in the final verdict (HANDOFF.md): a chunkier chrome ring, a stronger lens bend over detailed content, a dome button that overlaps a pill's end, the white-hot sheet edges and the specular spot on the liquid's surface.
 4. **Clear the known test issues** (see HANDOFF.md): give the gallery's dark audit the skip guard its sibling audits have (or fix the header colors), fix the race in `FrameLifecycleTests` "100 hide and show cycles...", consider building the extra renderer pipelines lazily or in the background, then run the CI workflow on GitHub for the first time.
-5. **Resume the unstarted tasks**: GW-11, GW-12, GW-13, GW-15, GW-16.
+5. **Resume the unstarted tasks**: GW-11 and GW-16. GW-12 (touch response), GW-13 (merging two custom surfaces) and GW-15 (the optional SwiftUI product) are built on `implement/glass-beyond`, experimental and unreleased: see [interaction](../docs/interaction.md) and [swiftui](../docs/swiftui.md). Their open items (device tap, drag and cancel checks, cost, frost and fill under touch, two simultaneous touches, live VoiceOver through the adapter) are listed with reasons in [the checklist](todo.md).
 
 ## Dependency map
 

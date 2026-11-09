@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: glass beyond native (experimental, GW-21 to GW-29)
+## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15)
 
 Requested by the user on 2026-11-09, on the branch `implement/glass-beyond`
 (nothing merged into `main`, nothing tagged). Every API is experimental, every
@@ -8,9 +8,39 @@ new parameter is off by default and renders the previous shader's bytes when
 off (frozen-shader readback tests), and the evidence is simulator and Mac
 only. Design notes: [glass optics](docs/glass-optics.md),
 [frost](docs/frost.md), [presentation](docs/presentation.md),
-[studies](docs/studies.md).
+[studies](docs/studies.md), [interaction](docs/interaction.md),
+[the SwiftUI adapter](docs/swiftui.md).
 
 ### Added
+
+- Touch response (GW-12): `GlassTouch` (`GlassParameters.touch`, default
+  `.none`, `.standard`), `GlassTouchPoint`, `GlassTouchState` (a pure function of
+  the touch and the time), `GlassRenderer.setTouches(_:)` (up to two), a soft
+  finger light, one travelling ring that moves the backdrop sample by at most
+  `ripple x 8` points, and a rim gleam. `GlassTouchObserver` (a gesture
+  recognizer that never recognizes, delays or cancels, so native controls keep
+  their taps) and `GlassSurfaceView.beginTouch/moveTouch/endTouch/cancelTouch`.
+  The effect clock stops when the touch settles. New records `GWTouchUniforms`
+  (128 bytes) and `GWTouchPoint` (48), with size asserts in C and MSL.
+- Merging two surfaces (GW-13): `GlassSurfaceMerge` (two surfaces, each a
+  circle or capsule apart and merged; `blob(progress:)`), drawn as one blob
+  panel through the GW-26 path so lens, light, frost, fill and shadow follow
+  the merged outline; `GlassBlob.interiorSmoothness`, `GlassShape.Field.mergeProgress`,
+  and `SurfaceTransition` (UIKit): an interruptible, reversible spring on the
+  effect clock that settles to on-demand rendering and jumps under Reduce
+  Motion. `GWShapeUniforms` keeps its 336 bytes (`depthSmoothness` takes the
+  padding word).
+- `GlassWeaveSwiftUI` (GW-15), a new optional library product: `GlassSurface`
+  (a SwiftUI view over `GlassSurfaceView`), `GlassSurfaceConfiguration` and
+  `GlassSurfaceContent`. Configuration updates reach the UIKit host without
+  recreating the renderer; a new view identity builds a new one; the
+  accessibility policy is the host's. It compiles to nothing on macOS. The
+  core gained one read-only SPI (`@_spi(Census) GlassRendererCensus`) that
+  the example and the test use to count renderers. The core and UIKit
+  products do not import the adapter.
+- Laboratory pages: Touch (`-lab.touch YES`), Merge (`-lab.merge YES`) and the
+  SwiftUI example (`-lab.swiftui YES`), each with a menu button (see the
+  README for the other arguments).
 
 - `GlassLight` (`GlassParameters.light`): up to four emitters of colored
   light inside the glass (edge band, arc, orb, four corners), with piping,
@@ -67,6 +97,9 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   configuration..." and `FrameLifecycleTests` "100 hide and show cycles...",
   a race in the test itself) fail now and then. `GlassRenderer` now builds 16 pipeline
   variants at creation (about 6 to 15 ms, 1 to 4 ms before); see HANDOFF.md.
+- The touch response draws no ring on frost and fill panels (those pipeline
+  variants carry no touch code), and the observer was never driven by a real
+  finger. Merging was captured without frost, fill or touch on the merged panel.
 - No physical device, no M5 cost run, no live VoiceOver pass; the acceptance
   items that need them or a test beyond the one safety test per task stay
   unchecked in `tasks/todo.md`.
@@ -193,10 +226,13 @@ has been measured; see [the pre-alpha notes](docs/evidence/pre-alpha.md).
 - One source format (`bgra8Unorm_srgb`, opaque); no wide color, HDR,
   transparency, or video.
 - Same-queue ordering only; no cross-queue or external producer.
-- No macOS view; no SwiftUI adapter.
+- No macOS view; no SwiftUI adapter (in the v0.1 candidate; the experimental adapter is a later addition, above).
 - The CI workflow has not run on GitHub.
 
 ### Not included in v0.1
 
 Touch ripple, custom/custom merging, enhanced-native effects, a SwiftUI
 adapter, external producer or texture interoperability, and a Metal 4 backend.
+(Later, experimental and unreleased: enhanced-native effects, the touch
+ripple, custom/custom merging and the SwiftUI adapter exist on the glow and
+glass-beyond branches, described above.)

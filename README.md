@@ -41,6 +41,11 @@ performance budget is met or failed; see
   light with chrome and prismatic finishes, frost, shadows, freeform shapes,
   a liquid fill, presentation tiers, four studies and an Apple vs GlassWeave
   screen; see [Glass beyond native](#glass-beyond-native-experimental-unreleased).
+- **Experimental interaction and SwiftUI** (GW-12, GW-13, GW-15): a touch
+  response (finger light, one travelling ring, a rim gleam), two custom
+  surfaces that merge into one pill under a spring, and an optional
+  `GlassWeaveSwiftUI` product with a `GlassSurface` view; see
+  [interaction](docs/interaction.md) and [the SwiftUI adapter](docs/swiftui.md).
 - **The laboratory** (`Examples/GlassWeaveLab`): a UIKit app with the native
   reference beside the custom panel over a deterministic moving background,
   lifecycle and accessibility controls, and the GW-09 benchmark scenario
@@ -59,10 +64,11 @@ performance budget is met or failed; see
 ### What is planned, not built
 
 Physical-device qualification (GW-09), a Metal 4 backend experiment (GW-11),
-a touch-driven ripple (GW-12), merging of two custom surfaces (GW-13), a
-SwiftUI adapter (GW-15), and external texture interoperability (GW-16). None
-of these is part of v0.1. The glow work (experimental, after v0.1) is
-described below. See [the task list](tasks/todo.md).
+and external texture interoperability (GW-16). None of these is part of v0.1.
+The glow work, the glass-beyond work, the touch response (GW-12), merging of
+two custom surfaces (GW-13) and the SwiftUI adapter (GW-15) are experimental
+and built after v0.1; they are described below. See
+[the task list](tasks/todo.md).
 
 ## Glow (experimental)
 
@@ -103,7 +109,7 @@ glow. See [the glow design](docs/glow.md) and the evidence in
 ## Glass beyond native (experimental, unreleased)
 
 Built after the glow work, on the branch `implement/glass-beyond` (GW-21 to
-GW-29; nothing is merged into `main`, nothing is tagged or released). The aim:
+GW-29, then GW-12, GW-13 and GW-15; nothing is merged into `main`, nothing is tagged or released). The aim:
 glass in the same family as Apple's Liquid Glass (a mostly clear body, one
 light, a thin rim, calm shadows), with things native glass cannot show.
 Every new parameter is off by default, and a panel that does not use one
@@ -122,6 +128,9 @@ no physical device, no M5 cost run, no live VoiceOver pass.
 | A luminous liquid or gel in a glass vessel, with a surface that sloshes (GW-28) | `GlassFill`, `GlassFillSlosh` | [glass-optics](docs/glass-optics.md) |
 | Drawables taken off the main thread, interaction frame rates, quality tiers (GW-27) | `GlassMotionClass`, `GlassQuality`, `GlassSurfaceView.beginInteraction()` | [presentation](docs/presentation.md) |
 | Native glass in the `.clear` style for comparison (GW-29) | `NativeGlassView.Configuration.style` | [studies](docs/studies.md) |
+| Touch response: a soft finger light, one travelling ring that bends the backdrop by at most `ripple x 8` points, a rim gleam; an observer that never takes the touch from native controls (GW-12) | `GlassTouch` (`GlassParameters.touch`), `GlassTouchObserver`, `GlassSurfaceView.beginTouch(id:at:)` | [interaction](docs/interaction.md) |
+| Two custom surfaces that merge into one pill and separate again, drawn as one panel so every effect follows the outline; an interruptible spring on the effect clock (GW-13) | `GlassSurfaceMerge`, `SurfaceTransition` | [interaction](docs/interaction.md#merging-two-surfaces-gw-13), [glass-optics](docs/glass-optics.md) |
+| A SwiftUI view over the UIKit host, in an optional product (GW-15) | `GlassSurface`, `GlassSurfaceConfiguration`, `GlassSurfaceContent` (product `GlassWeaveSwiftUI`) | [swiftui](docs/swiftui.md) |
 
 Reduce Transparency, Increase Contrast and Reduce Motion each have a
 documented row for every effect in `GlassAccessibilityPolicy`.
@@ -149,6 +158,9 @@ dev.glassweave.GlassWeaveLab <arguments>`):
 | Native vs refined glass | `-lab.compare YES` (`-lab.compareBackdrop <page>`) |
 | Presentation | `-lab.presentation YES` |
 | Glow gallery | `-lab.gallery YES` |
+| Touch (GW-12) | `-lab.touch YES` (`-lab.touchBackdrop orbs`, `stage` or `grid`; `-lab.touch.pin "pill:0.3:0.55:0.18;round:0.55:0.5:0.12"` freezes synthetic touches for a capture; `-lab.touch.boost <factor>`; `-lab.touch.auto YES` taps once through the surface API) |
+| Merge (GW-13) | `-lab.merge YES` (`-lab.mergeBackdrop stage` or `orbs`; `-lab.merge.progress <0...1>` pins the progress; `-lab.merge.auto YES` merges, reverses and settles) |
+| GlassSurface in SwiftUI (GW-15) | `-lab.swiftui YES` (`-lab.swiftui.strength <0...1>`, `-lab.swiftui.light NO`, `-lab.swiftui.quality balanced` or `minimal`) |
 
 `-lab.reduceMotion YES`, `-lab.reduceTransparency YES`, `-lab.increaseContrast
 YES` and `-lab.appearance dark|light` fix the accessibility settings for a
@@ -181,7 +193,9 @@ revision and expect breaking changes:
 ```
 
 Then depend on the `GlassWeave` product (core) and, for the views,
-`GlassWeaveUIKit`. Build with Xcode: SwiftPM's command-line `swift build`
+`GlassWeaveUIKit`. `GlassWeaveSwiftUI` is an optional third product
+(experimental, GW-15): a SwiftUI view over the UIKit host that nothing else
+in the package imports. Build with Xcode: SwiftPM's command-line `swift build`
 cannot compile the package's Metal shaders. Start with the DocC catalog's
 overview and the laboratory.
 
@@ -197,7 +211,9 @@ overview and the laboratory.
 - [Support matrix](docs/support.md)
 - [Architecture](docs/architecture.md), with the design notes
   [glass optics](docs/glass-optics.md), [frost](docs/frost.md),
-  [presentation](docs/presentation.md) and [studies](docs/studies.md)
+  [presentation](docs/presentation.md), [studies](docs/studies.md),
+  [interaction](docs/interaction.md) (touch response, merging) and
+  [the SwiftUI adapter](docs/swiftui.md)
 - [Validation protocol](docs/validation.md) and
   [Milestone 1 report](docs/evidence/milestone-1.md)
 - [Pre-alpha notes](docs/evidence/pre-alpha.md) and [changelog](CHANGELOG.md)

@@ -10,9 +10,10 @@ Nothing is released, and no physical device has been measured. `tasks/todo.md` i
 only completion checklist; it records which acceptance items are verified and why the
 others are open. Read `HANDOFF.md`, `README.md`, `tasks/plan.md`, `tasks/todo.md`, and
 the relevant architecture section before implementation. The branch `implement/glass-beyond` adds the experimental GW-21 to GW-29 effects; they are
-unreleased and unmeasured on devices. Do not treat planned tasks (GW-11, GW-12, GW-13,
-GW-15, GW-16), their APIs and examples, or provisional performance budgets as existing
-functionality. Distinguish implemented behavior from planned capabilities in
+unreleased and unmeasured on devices, as are GW-12 (touch response), GW-13 (merging two
+custom surfaces) and GW-15 (the optional `GlassWeaveSwiftUI` product), now built on the
+same branch. Do not treat planned tasks (GW-11, GW-16), their APIs and examples, or
+provisional performance budgets as existing functionality. Distinguish implemented behavior from planned capabilities in
 documentation and reports.
 
 Work on small, unblocked slices. Preserve existing work and unchecked tasks. Update

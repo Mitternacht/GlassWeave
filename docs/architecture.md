@@ -33,7 +33,7 @@ Introduce targets as real implementation slices require them. Do not create empt
 ```mermaid
 flowchart TD
     APP[Consumer app] --> UI[GlassWeaveUIKit]
-    APP --> SW[GlassWeaveSwiftUI: later]
+    APP --> SW[GlassWeaveSwiftUI: optional, experimental]
     SW --> UI
     UI --> CORE[GlassWeave]
     CORE --> METAL[Metal / simd]
@@ -44,7 +44,7 @@ flowchart TD
 | --- | --- | --- |
 | `GlassWeave` | Surface/optical descriptors, source-frame contract, renderer, resource lifetime, deterministic effect state | UIKit/SwiftUI layout, native controls, scene graph, asset loader. |
 | `GlassWeaveUIKit` | Native-glass wrapper, `MTKView` presentation, native content container, lifecycle and accessibility policies | Per-frame scene reconstruction, replacement button semantics. |
-| `GlassWeaveSwiftUI` | Later SwiftUI configuration and view identity adapter over UIKit | Simulation clock, GPU resources, independent renderer. |
+| `GlassWeaveSwiftUI` | Implemented (GW-15, experimental, optional): a SwiftUI configuration and view identity adapter over UIKit (`GlassSurface`); see [swiftui.md](swiftui.md) | Simulation clock, GPU resources, independent renderer. Compiles to nothing on macOS. |
 
 The native path may share configuration types with the custom path, but it must not instantiate a custom renderer or run a custom display loop. The core can import Metal without requiring a device to exist during module loading. Avoid global devices, implicit command queues, and eager pipeline compilation.
 
@@ -225,8 +225,8 @@ see [the glow design](glow.md#gw-20-several-shapes-in-one-pass-and-the-gallery-i
 On the branch `implement/glass-beyond`, custom panels gained opt-in effects
 on `GlassParameters`, each off by default and rendering the previous shader's
 bytes when off. The shader is one source with function-constant pipeline
-variants (base, optics, lighting, grounded, shaped, frosted, filled), all
-built at initialization; the shared records in `GlassWeaveShaderTypes` grew
+variants (base, optics, lighting, grounded, shaped, frosted, filled, and since
+GW-12 touched), all built at initialization; the shared records in `GlassWeaveShaderTypes` grew
 append-only with size asserts in C, MSL and Swift. The design notes:
 
 - [glass-optics.md](glass-optics.md): light fields (`GlassLight`), the thick
@@ -239,6 +239,12 @@ append-only with size asserts in C, MSL and Swift. The design notes:
   classes and quality tiers (`GlassMotionClass`, `GlassQuality`).
 - [studies.md](studies.md): the four material studies and the Apple vs
   GlassWeave screen in the laboratory.
+- [interaction.md](interaction.md): the touch response (`GlassTouch`, a finger
+  light, one travelling ring, a rim gleam; `GlassTouchObserver`) and the merging
+  of two custom surfaces (`GlassSurfaceMerge`, `SurfaceTransition`), with the
+  layout and hit-test policy for native content (GW-12, GW-13).
+- [swiftui.md](swiftui.md): the optional SwiftUI adapter `GlassWeaveSwiftUI`
+  (`GlassSurface`), what runs where, its lifecycle and accessibility (GW-15).
 
 ## Scheduling and resources
 
