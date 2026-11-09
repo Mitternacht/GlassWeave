@@ -66,6 +66,18 @@ The user explicitly asked for glass that can take tints and glows at its edges i
 | --- | --- | --- |
 | Glow effects (user-requested) | GW-17–GW-20, with GW-14 | Colored rims and halos in custom and enhanced-native modes, animated glow on demand, and a laboratory gallery. |
 
+## Round summary (2026-11-09): glass beyond native, and the next round
+
+The user approved building GW-21 to GW-29 ([the proposal](../docs/proposals/glass-beyond-native.md)) as a fast pass, to make GlassWeave's own Metal glass more capable and more interesting than Apple's `UIGlassEffect`, in Apple's own restraint (a mostly clear body, one light, a thin rim, calm shadows). They are built, merged on `implement/glass-beyond`, and unreleased: light fields, thick lens with dispersion, one light with chrome and prismatic finishes, frost, shadows, freeform shapes, a liquid fill, non-blocking presentation with quality tiers, four studies and an Apple vs GlassWeave screen. The design notes are [glass-optics](../docs/glass-optics.md), [frost](../docs/frost.md), [presentation](../docs/presentation.md) and [studies](../docs/studies.md); the evidence is in [the checklist](todo.md).
+
+Proposed next round, in this order:
+
+1. **Measure.** One combined M5 characterization run (every effect's cost, per tier), then a physical baseline device: the cost and shimmer sign-offs, the GW-27 120 Hz trace, and a live VoiceOver pass. No performance claim exists until then.
+2. **Test the skipped groups**, each opt-in effect against a CPU mirror: lens and dispersion, light model, frost (calibration and temporal stability), shadows, shapes, fill; the 1,000-background legibility sweeps; the accessibility audit and largest-text runs for the studies.
+3. **Close the visual gaps** named in the final verdict (HANDOFF.md): a chunkier chrome ring, a stronger lens bend over detailed content, a dome button that overlaps a pill's end, the white-hot sheet edges and the specular spot on the liquid's surface.
+4. **Clear the known test issues** (see HANDOFF.md): give the gallery's dark audit the skip guard its sibling audits have (or fix the header colors), fix the race in `FrameLifecycleTests` "100 hide and show cycles...", consider building the extra renderer pipelines lazily or in the background, then run the CI workflow on GitHub for the first time.
+5. **Resume the unstarted tasks**: GW-11, GW-12, GW-13, GW-15, GW-16.
+
 ## Dependency map
 
 ```mermaid

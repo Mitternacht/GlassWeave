@@ -9,77 +9,153 @@ open; [the task checklist](tasks/todo.md) records what is verified. The rest
 of this page is the original handoff. The user deliberately reserved
 implementation for Claude.
 
-## Pick up here (2026-11-09)
+## Pick up here (2026-11-09, after the glass-beyond round)
 
-**Branches.** Nothing is merged into `main`.
+**Branches.** Nothing is merged into `main`, nothing is pushed, nothing is tagged.
 
 - `implement/milestone-1`: the v0.1 candidate, GW-01 to GW-10.
-- `implement/glow`: that candidate plus the user-requested glow work, GW-14 and GW-17
-  to GW-20. Continue on this branch.
+- `implement/glow`: that candidate plus the glow work, GW-14 and GW-17 to GW-20.
+- `implement/glass-beyond`: **continue here.** The glow branch plus GW-21 to GW-29,
+  the REFINE and ENHANCE-LOOK looks, and the amber vessel. The vessel work was built on
+  `implement/glass-host` and joined with a real merge commit.
+- `implement/glass-host`: already merged into `glass-beyond`. Its sibling worktree
+  folder still exists next to the main checkout; remove it after review.
 
 **The user's goal.** GlassWeave's own Metal glass must be far more capable and more
-colorful than Apple's glass. Native glass takes one flat tint and nothing you can
-shape or animate. The native and enhanced-native modes are a comparison baseline.
-The custom mode is the product. Read [the scope change](tasks/plan.md) and
-[the glow design](docs/glow.md).
+visually interesting than Apple's `UIGlassEffect`, in Apple's own restraint: a mostly
+clear body, one light, a thin rim, calm shadows, color as a quiet tint or pooled
+light, never bubbly or fake. The native and enhanced-native modes are a comparison
+baseline; the custom mode is the product. The four private reference pictures
+(third-party work) stay outside this repository; never commit them, a crop, or their
+path.
 
-**What the glow work delivers.** All of it is off by default, and the output stays
-byte-identical when it is off.
+**What exists (all experimental, unreleased, off by default, byte-identical when off).**
+Read [the README](README.md#glass-beyond-native-experimental-unreleased) for the list
+and for how to open every lab page with its launch argument, and
+[glass-optics](docs/glass-optics.md), [frost](docs/frost.md),
+[presentation](docs/presentation.md) and [studies](docs/studies.md) for the design.
 
-- **GW-17:** rims in any sRGB color or a gradient of up to 4 stops, an inner glow,
-  and a body that fades to a fully clear middle.
-- **GW-18:** a halo outside the shape and a deterministic pulse on one effect clock.
-- **GW-19:** animated interiors: energy, rays and embers.
-- **GW-14:** a Core Animation rim and halo around genuine `UIGlassEffect`.
-- **GW-20:** a "Glow gallery" screen in the lab.
+- GW-21 light fields; GW-22 thick lens, dispersion and inlays; GW-23 light model;
+  GW-24 frost (pyramid and shader); GW-25 shadows and caustics; GW-26 freeform shapes;
+  GW-27 non-blocking presentation and quality tiers (closes GW-04 item 3); GW-28 liquid
+  and gel fill (the curved amber vessel); GW-29 four studies and the Apple vs GlassWeave
+  screen.
+- Each task has one safety test (the new path off is byte-identical to a frozen copy of
+  the previous shader). Every other acceptance item that needs a further test, a CPU
+  mirror, an M5 run or a device is unchecked in [the checklist](tasks/todo.md) with a
+  reason (fast pass: not tested, device only, ...).
 
-The last full runs, on the iPhone 18 Pro simulator with iOS 27.2:
+**Final verification run (VERIFY-FINAL, one quiet batch, `xcresulttool` counts).**
 
-- Package scheme: 280 of 280 passed.
-- Package scheme on My Mac (Apple M5): 198 of 198 passed.
-- Lab UI tests: 46 passed, 1 skipped (iPad only).
+Xcode MCP could not open a workspace here, so everything used `xcodebuild`; counts are from
+`xcresulttool`.
 
-Two independent reviews found 7 issues. All 7 are fixed; see the GW-20 "Review update"
-in [the checklist](tasks/todo.md).
+| Destination | Result |
+| --- | --- |
+| Package scheme, My Mac | 206 passed, 0 failed; three later runs: 206, 205 passed with 1 failed (`FrameLifecycleTests`, below), 206 |
+| Package scheme, iPhone 18 Pro simulator (iOS 27.2) | first run 287 passed, 1 failed (the pulse check below); after the test fix 288 passed, 0 failed, three runs in a row |
+| All lab UI tests, iPhone 18 Pro simulator | 50 results: 46 passed, 1 failed (the gallery dark audit below), 3 skipped (two dark audits that skip because the system appearance does not reach the app on this simulator, and the iPad-only two-scene test) |
+| Studies and versus smoke, iPad Pro 13-inch (M5) simulator | 2 passed, 0 failed |
+
+All seven frozen-shader safety suites (`GlassBaselineGW20` to `GW25` and `GW28`) pass on both
+package destinations.
 
 **Still open.**
 
-1. Every physical-device item: the GW-09 qualification, the glow device costs, and a
-   live VoiceOver pass.
-2. GW-04 item 3: `MTKView.currentRenderPassDescriptor` can block the main thread for
-   up to 1 s when every drawable is in flight.
-3. CI has never run on GitHub.
-4. GW-11, GW-12, GW-13, GW-15 and GW-16 have not started.
+1. Every physical-device item: the GW-09 qualification, every effect's cost and
+   shimmer, the GW-27 120 Hz trace, a live VoiceOver pass.
+2. One combined M5 characterization run for all effects and tiers; no cost claim exists.
+3. The skipped test groups: CPU-mirror comparisons for the lens, dispersion, light
+   model, frost, shadows, shapes and fill; the 1,000-background legibility sweeps; the
+   accessibility audit, largest-text and right-to-left runs for the studies; the
+   controlled-clock UIKit tests; the numeric tests for the refined and enhanced terms.
+4. The gallery's dark accessibility audit (pre-existing) and two timing-sensitive tests, below.
+5. CI has never run on GitHub.
+6. GW-11, GW-12, GW-13, GW-15 and GW-16 have not started.
+7. Visual gaps against the references: see [the plan](tasks/plan.md).
 
-**Next round.** [The proposal](docs/proposals/glass-beyond-native.md) plans GW-21 to
-GW-29, aimed at four target looks the user shared:
+**The two known failures.**
 
-- a glowing liquid inside thick glass;
-- a frosted capsule with dispersion;
-- a prismatic ring button;
-- a thick lens pill with a pooled colored glow.
+- **`GlowGalleryUITests` `testAccessibilityAuditPassesInLightAndDark`**: a pre-existing
+  environment issue. It fails identically (the dark audit flags the "Energy orb" header) on
+  the shipped glow tip `d1f9b81` and here, alone 3 of 3. The system appearance does not reach
+  the app on this simulator; the two sibling audits skip for that reason and this test has no
+  such guard. Not changed. Fix: add the same skip guard, or fix the header colors for the
+  gallery's dark theme.
+- **`EnhancedNativeGlassViewTests` "The pulse resumes where it stopped"**: not a flake. It
+  passed on `d1f9b81` (full scheme, 280 of 280, three runs) and failed in every full run here
+  (resume offsets 0.74 to 0.80 s against a 0.55 s bound). Cause: this round made
+  `GlassRenderer.init` about 6 times slower (16 pipeline variants built eagerly, 6 to 15 ms
+  against 1 to 4 ms), about 45 UIKit tests create one at once, and the shared main actor is
+  busy for about 0.45 s just as this wall-clock test's 300 ms sleep ends. The test now measures
+  how long the pulse really ran and expects the resume offset within 0.1 s of it. The eager
+  build was left as GW-22 decided; building the extra variants lazily or in the background is
+  a possible follow-up. Two more timing-sensitive tests fail now and then and were not changed: "A new corner
+  configuration..." (UIKit layout timing) and `FrameLifecycleTests` "100 hide and show
+  cycles..." (a race in the test: it reads the scheduler's in-flight count while a GPU
+  completion handler can change it; the test and `FrameScheduler` are unchanged since GW-07;
+  1 of 7 simulator runs and 1 of 4 My Mac runs, passes alone 3 of 3).
 
-The reference images are third-party work and are kept privately, outside this
-repository; the user knows where they are. Never commit them. The proposal is **not
-approved**. The user's open choice is "build all nine" or "build the first four, then
-review". Ask before starting.
+**Visual verdict (simulator captures `docs/evidence/captures/gw-final-*`, compared with a real
+`UIGlassEffect` on the same backdrop and, locally, with the four private references).**
+
+- *Better than Apple's.* Hues inside the material: the pill is a clear lens body with a deep
+  pink-to-violet pool along its bottom, where native glass takes one flat tint. A lens bevel with
+  real dispersion and a frost with a clear center (the shelf capsule over a rainbow). A polished
+  banded chrome ring with glints, freeform pebbles, and a curved luminous liquid in thick smoky
+  glass (Amber). It stays in the same family as native: one light, a thin rim, soft shadows,
+  calm color, no bubbles or neon.
+- *Still short of Apple's.* No live bending of whatever is behind it (the backdrop must be
+  supplied), no touch response or morphing, no system integration, and every look is tuned by
+  eye per backdrop, where native adapts to any content.
+- *Still short of the references.* Reference 1 (liquid): ours is smoother and more diffuse, with
+  no white-hot sheet edges, no specular spot on the liquid's own curved surface, no parallax and
+  no gray studio reflections on the rim (the last on purpose). Reference 2 (frosted capsule):
+  the blur is gentler and the fringes subtler. Reference 3 (ring): ours is a smaller
+  steel-silver ring with fainter prismatic glints than the chunky polished chrome. Reference 4
+  (lens pill): the bend at the edges is weak over soft backdrops, the pooled glow is quieter, and
+  the dome button sits inside the pill instead of overlapping its end.
+
+**How to build and run here.** The Xcode MCP bridge times out when it opens a workspace
+on this Mac (`XcodeOpenWorkspace` after 10 s, on every path), so the whole round used
+narrow `xcodebuild` commands with a private derived-data folder:
+
+- Build the lab for a simulator, then install and launch it with launch arguments:
+
+  ```sh
+  cd Examples
+  xcodebuild build -workspace GlassWeave.xcworkspace -scheme GlassWeaveLab \
+    -destination 'platform=iOS Simulator,id=<UDID>' -derivedDataPath <BUILD> > <BUILD>/logs/lab.log 2>&1
+  xcrun simctl install <UDID> <BUILD>/Build/Products/Debug-iphonesimulator/GlassWeaveLab.app
+  xcrun simctl launch <UDID> dev.glassweave.GlassWeaveLab -lab.study pill -lab.studyTime 20 -lab.studyTwin YES
+  xcrun simctl io <UDID> screenshot pill.png
+  ```
+
+- The four studies: `-lab.study pill|pearl|shelf|vessel`; `-lab.studyTime <s>` pins the
+  script (a capture is repeatable), `-lab.studyTwin YES` adds a real `UIGlassEffect`
+  beside it. The versus screen: `-lab.versus YES -lab.versusAnimate NO`.
+- Tests: `xcodebuild test -workspace GlassWeave.xcworkspace -scheme GlassWeave
+  -destination 'platform=macOS' -derivedDataPath <BUILD> -resultBundlePath
+  <BUILD>/results/<unique name>.xcresult`, the same with an iPhone simulator
+  destination, and `-scheme GlassWeaveLab` for the lab UI tests (`-only-testing:` to
+  narrow). The result bundle path must not exist yet. Redirect the output to a log and
+  grep it; count with `xcrun xcresulttool get test-results summary --path <bundle>`.
+- Package scheme on My Mac takes about 45 s; the whole lab UI suite about 20 minutes.
 
 **Working rules learned the hard way.**
 
-- In Xcode MCP, open only `Examples/GlassWeave.xcworkspace`. The package folder or a
-  bare `.xcodeproj` leaves a stale package root, and builds then fail with "Missing
-  package product".
-- After a scheme switch, set the destination explicitly:
-  - "My Mac" for GPU tests;
-  - an iPhone simulator for UIKit tests and the lab.
-- Count tests with `xcrun xcresulttool get test-results summary`. The MCP summary can
-  merge stale results.
+- In Xcode MCP (when it works), open only `Examples/GlassWeave.xcworkspace`. The package
+  folder or a bare `.xcodeproj` leaves a stale package root, and builds then fail with
+  "Missing package product".
+- After a scheme switch, set the destination explicitly: "My Mac" for GPU tests, an
+  iPhone simulator for UIKit tests and the lab.
 - Swift Testing exit tests run only on macOS.
-- After a mutation run, rebuild and reinstall the lab before taking screenshots.
-- This is a public repository:
-  - commit with the account's GitHub noreply address;
-  - keep personal paths, team IDs and device identifiers out of tracked files;
-  - never add a signing team.
+- After a code change, rebuild and reinstall the lab before taking screenshots.
+- Do not run the test suites between edits while iterating; build, look at a capture,
+  tune, and run the tests once at the end.
+- This is a public repository: commit with the account's GitHub noreply address; keep
+  personal paths, team IDs and device identifiers out of tracked files; never add a
+  signing team; never write a reference picture's path into a tracked file.
 
 ## Read in order
 

@@ -1,5 +1,76 @@
 # Changelog
 
+## Unreleased: glass beyond native (experimental, GW-21 to GW-29)
+
+Requested by the user on 2026-11-09, on the branch `implement/glass-beyond`
+(nothing merged into `main`, nothing tagged). Every API is experimental, every
+new parameter is off by default and renders the previous shader's bytes when
+off (frozen-shader readback tests), and the evidence is simulator and Mac
+only. Design notes: [glass optics](docs/glass-optics.md),
+[frost](docs/frost.md), [presentation](docs/presentation.md),
+[studies](docs/studies.md).
+
+### Added
+
+- `GlassLight` (`GlassParameters.light`): up to four emitters of colored
+  light inside the glass (edge band, arc, orb, four corners), with piping,
+  slow flow and drift, `.light` and `.paint` blends; the middle stays clear
+  (GW-21). `GWGlassUniforms` grew append-only from 528 to 1776 bytes
+  (GW-21 to GW-26), with size asserts in C, MSL and Swift.
+- `GlassLens`: thick-lens profiles (rim, dome, ring), index of refraction,
+  thickness, optional fold, chromatic dispersion with three or six taps, and
+  up to two inlays, such as a dome button on a pill (GW-22).
+- `GlassLighting`: one movable key light (`GlassRenderer.setLightOffset`),
+  Fresnel, specular, studio reflections, chrome and prismatic finishes,
+  bloom, a refined look and an enhanced look (`edgeDepth`, `banding`,
+  `glints`) (GW-23, REFINE, ENHANCE-LOOK).
+- `GlassFrost` (`GlassParameters.frost`): a blur pyramid with uniform,
+  clear-center, clear-rim and vertical-ramp profiles, grain, saturation and
+  a legibility scrim that guarantees a text contrast ratio (GW-24).
+- `GlassGrounding`: drop, contact and inner shadows and a colored caustic
+  (GW-25).
+- `GlassShape` and `GlassBlob`: ellipses, superellipses and smooth blobs of
+  up to six primitives with a loop-locked wobble; every effect follows the
+  outline (GW-26).
+- `GlassFill` and `GlassFillSlosh`: a luminous liquid or gel inside a glass
+  vessel, curved and lit by the key light, with contour sheets, bubbles, a
+  meniscus and a deterministic slosh; its own 784-byte record (GW-28).
+- Presentation (GW-27): `GlassSurfaceView` takes its drawable on a
+  background queue (a held drawable no longer stalls the main thread),
+  `GlassMotionClass` with `beginInteraction()` and `endInteraction()`, and
+  `GlassQuality` tiers with Low Power Mode and thermal downgrades through an
+  injectable environment (default: no change).
+- `NativeGlassView.Configuration.style` (`.regular`, `.clear`) maps to
+  `UIGlassEffect.Style`.
+- `GlassAccessibilityPolicy` rows for every new effect under Reduce
+  Transparency, Increase Contrast and Reduce Motion.
+- The laboratory: Apple vs GlassWeave, four material studies (Focus, Camera,
+  Open Air, Amber), the material bench, light fields, thick lens, chrome and
+  light, paper desk, shapes, liquid vessels, frosted glass, frost pyramid,
+  native vs refined glass, and presentation pages, each with a launch
+  argument (see the README).
+
+### Changed
+
+- `GlassSurfaceView` runs its effect clock while any presented panel is
+  animated (`GlassParameters.isAnimated`: glow, interior, light, wobble,
+  fill), and `isEffectClockPaused` holds it for pinned captures.
+- GW-04 item 3 (the drawable stall) is closed by the GW-27 heartbeat test.
+- The `EnhancedNativeGlassViewTests` check "The pulse resumes where it stopped" measures how long the pulse ran instead of assuming 0.3 s, so a busy main actor no longer fails it.
+
+### Known issues
+
+- `GlowGalleryUITests.testAccessibilityAuditPassesInLightAndDark` fails in the
+  dark audit (the Energy orb header) on this simulator, identically on the
+  shipped glow tip: the system appearance does not reach the app. Two more
+  timing-sensitive package tests (`EnhancedNativeGlassViewTests` "A new corner
+  configuration..." and `FrameLifecycleTests` "100 hide and show cycles...",
+  a race in the test itself) fail now and then. `GlassRenderer` now builds 16 pipeline
+  variants at creation (about 6 to 15 ms, 1 to 4 ms before); see HANDOFF.md.
+- No physical device, no M5 cost run, no live VoiceOver pass; the acceptance
+  items that need them or a test beyond the one safety test per task stay
+  unchecked in `tasks/todo.md`.
+
 ## Unreleased: after the v0.1 candidate (experimental glow)
 
 Requested by the user on 2026-11-09 and outside the v0.1 candidate's scope;

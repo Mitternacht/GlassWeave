@@ -220,6 +220,26 @@ accessibility policy to each panel and runs the effect clock while any of
 them animates and reaches the drawable. The laboratory's glow gallery draws its five shapes this way;
 see [the glow design](glow.md#gw-20-several-shapes-in-one-pass-and-the-gallery-implemented).
 
+### Implemented glass beyond native (GW-21 to GW-29, experimental, unreleased)
+
+On the branch `implement/glass-beyond`, custom panels gained opt-in effects
+on `GlassParameters`, each off by default and rendering the previous shader's
+bytes when off. The shader is one source with function-constant pipeline
+variants (base, optics, lighting, grounded, shaped, frosted, filled), all
+built at initialization; the shared records in `GlassWeaveShaderTypes` grew
+append-only with size asserts in C, MSL and Swift. The design notes:
+
+- [glass-optics.md](glass-optics.md): light fields (`GlassLight`), the thick
+  lens and dispersion (`GlassLens`), the light model with its refined and
+  enhanced looks (`GlassLighting`), shadows and caustics (`GlassGrounding`),
+  freeform shapes (`GlassShape`), and the liquid and gel fill (`GlassFill`).
+- [frost.md](frost.md): the blur pyramid, the frost profiles and the
+  legibility scrim (`GlassFrost`).
+- [presentation.md](presentation.md): the non-blocking drawable, frame-rate
+  classes and quality tiers (`GlassMotionClass`, `GlassQuality`).
+- [studies.md](studies.md): the four material studies and the Apple vs
+  GlassWeave screen in the laboratory.
+
 ## Scheduling and resources
 
 - Render static surfaces on demand; use continuous drawing only while a source or effect is changing.

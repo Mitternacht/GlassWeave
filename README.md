@@ -36,6 +36,11 @@ performance budget is met or failed; see
   energy, rays, or embers inside the shape, fading to a see-through middle.
   `GlassSurfaceView` animates them only while they are visible and Reduce
   Motion is off; see [the glow design](docs/glow.md).
+- **Experimental glass beyond native** (GW-21 to GW-29, branch
+  `implement/glass-beyond`): light fields, a thick lens with dispersion, one
+  light with chrome and prismatic finishes, frost, shadows, freeform shapes,
+  a liquid fill, presentation tiers, four studies and an Apple vs GlassWeave
+  screen; see [Glass beyond native](#glass-beyond-native-experimental-unreleased).
 - **The laboratory** (`Examples/GlassWeaveLab`): a UIKit app with the native
   reference beside the custom panel over a deterministic moving background,
   lifecycle and accessibility controls, and the GW-09 benchmark scenario
@@ -95,6 +100,61 @@ pass. The clean-consumer check still pins the v0.1 candidate and covers no
 glow. See [the glow design](docs/glow.md) and the evidence in
 [the task list](tasks/todo.md#glow-effects-user-requested-2026-11-09).
 
+## Glass beyond native (experimental, unreleased)
+
+Built after the glow work, on the branch `implement/glass-beyond` (GW-21 to
+GW-29; nothing is merged into `main`, nothing is tagged or released). The aim:
+glass in the same family as Apple's Liquid Glass (a mostly clear body, one
+light, a thin rim, calm shadows), with things native glass cannot show.
+Every new parameter is off by default, and a panel that does not use one
+renders exactly what it rendered before; frozen-shader readback tests check
+that. Every API below is experimental. Evidence is simulator and My Mac only:
+no physical device, no M5 cost run, no live VoiceOver pass.
+
+| Capability | API | Design note |
+| --- | --- | --- |
+| Colored light inside the glass: pooled along an edge or arc, an orb, or four corners; it flows slowly and the middle stays clear (GW-21) | `GlassLight` | [glass-optics](docs/glass-optics.md) |
+| Thick lens: rim, dome and ring profiles, index of refraction, thickness, dispersion with three or six taps, an inlaid dome button (GW-22) | `GlassLens` | [glass-optics](docs/glass-optics.md) |
+| One light: Fresnel outline, specular, studio reflections, chrome and prismatic finishes, bloom; a refined look and an enhanced look (slab depth, polished bands, glints) (GW-23) | `GlassLighting` | [glass-optics](docs/glass-optics.md) |
+| Depth on light pages: drop, contact and inner shadows, a colored caustic (GW-25) | `GlassGrounding` | [glass-optics](docs/glass-optics.md) |
+| Ellipses, squircles and smooth blobs that every effect follows (GW-26) | `GlassShape`, `GlassBlob` | [glass-optics](docs/glass-optics.md) |
+| Frost: variable blur with a clear center or a clear rim, grain, and a legibility scrim (GW-24) | `GlassFrost` | [frost](docs/frost.md) |
+| A luminous liquid or gel in a glass vessel, with a surface that sloshes (GW-28) | `GlassFill`, `GlassFillSlosh` | [glass-optics](docs/glass-optics.md) |
+| Drawables taken off the main thread, interaction frame rates, quality tiers (GW-27) | `GlassMotionClass`, `GlassQuality`, `GlassSurfaceView.beginInteraction()` | [presentation](docs/presentation.md) |
+| Native glass in the `.clear` style for comparison (GW-29) | `NativeGlassView.Configuration.style` | [studies](docs/studies.md) |
+
+Reduce Transparency, Increase Contrast and Reduce Motion each have a
+documented row for every effect in `GlassAccessibilityPolicy`.
+
+### Open the lab pages
+
+Build the `GlassWeaveLab` scheme for an iPhone simulator. Every page opens
+from a button on the lab's main screen, and each also opens at launch with a
+launch argument (Xcode scheme arguments, or `xcrun simctl launch <device>
+dev.glassweave.GlassWeaveLab <arguments>`):
+
+| Page (button on the main screen) | Launch arguments |
+| --- | --- |
+| Apple vs GlassWeave | `-lab.versus YES` (`-lab.versusAnimate NO`, `-lab.versusScroll <points>`) |
+| Material studies menu: Focus (pill), Camera (pearl), Open Air (shelf), Amber (vessel) | `-lab.study pill`, `pearl`, `shelf` or `vessel` (`-lab.studyTime <seconds>` pins the script, `-lab.studyTwin YES` adds a real `UIGlassEffect` beside it, `-lab.studyDiagnostics YES`) |
+| Material bench | `-lab.bench dots`, `checkerboard`, `ribbons`, `charcoal`, `paper`, `orbs`, `chrome`, `paperdesk`, `prism` or `stage` |
+| Light fields | `-lab.lightFields YES` (`-lab.lightBackdrop <page>`, `-lab.lightTime <seconds>`) |
+| Thick lens | `-lab.lens YES` (`-lab.lensBackdrop <page>`) |
+| Chrome and light | `-lab.chrome YES` (`-lab.lightAzimuth`, `-lab.lightElevation`) |
+| Paper desk | `-lab.paper YES` |
+| Shapes | `-lab.shapes YES` (`-lab.shapesBackdrop <page>`, `-lab.shapesTime <seconds>`) |
+| Liquid vessels | `-lab.vessel YES` (`-lab.vesselNudge <seconds>`) |
+| Frosted glass | `-lab.frostBench YES` |
+| Frost pyramid | `-lab.frost YES` |
+| Native vs refined glass | `-lab.compare YES` (`-lab.compareBackdrop <page>`) |
+| Presentation | `-lab.presentation YES` |
+| Glow gallery | `-lab.gallery YES` |
+
+`-lab.reduceMotion YES`, `-lab.reduceTransparency YES`, `-lab.increaseContrast
+YES` and `-lab.appearance dark|light` fix the accessibility settings for a
+capture, on the pages that read them. Inspected captures are in `docs/evidence/captures/`; the newest are
+named `gw-final-*`.
+
 ## Modes
 
 - **Native:** genuine Apple glass, configured through public API, with no
@@ -135,7 +195,9 @@ overview and the laboratory.
 ## Documentation
 
 - [Support matrix](docs/support.md)
-- [Architecture](docs/architecture.md)
+- [Architecture](docs/architecture.md), with the design notes
+  [glass optics](docs/glass-optics.md), [frost](docs/frost.md),
+  [presentation](docs/presentation.md) and [studies](docs/studies.md)
 - [Validation protocol](docs/validation.md) and
   [Milestone 1 report](docs/evidence/milestone-1.md)
 - [Pre-alpha notes](docs/evidence/pre-alpha.md) and [changelog](CHANGELOG.md)
