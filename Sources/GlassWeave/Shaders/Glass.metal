@@ -361,7 +361,7 @@ static float gw_interior_flames(float2 u, float2 halfSize, float phase, uint see
 /// Embers: twelve sparks rising from near the bottom edge to `exitHeight`
 /// points above the top edge (each a whole number of times per 64 s),
 /// swaying, each a bright core with a faint glow three times its radius,
-/// fading out over the last 45 % of the rise; the brightest spark at a
+/// fading out over the last 30 % of the rise; the brightest spark at a
 /// point, 0...1.
 static float gw_interior_sparks(float2 u, float2 halfSize, float exitHeight, float phase, uint seed) {
     const float start = 0.16 * halfSize.y;
@@ -378,13 +378,13 @@ static float gw_interior_sparks(float2 u, float2 halfSize, float exitHeight, flo
         const float above = start + life * travel;
         const float sway = (2.0 + 4.0 * r2) * gw_wave(above / (16.0 + 14.0 * r2) + r3);
         const float2 center = float2((r0 * 2.0 - 1.0) * max(halfSize.x - 3.0, 0.0) + sway, halfSize.y - above);
-        const float radius = 1.3 + 1.0 * r3;
+        const float radius = 1.6 + 1.2 * r3;
         const float2 d = u - center;
         const float dd = dot(d, d) / (radius * radius);
         if (dd < 9.0) {
             const float core = dd < 1.0 ? (1.0 - dd) * (1.0 - dd) : 0.0;
             const float glow = (1.0 - dd / 9.0) * (1.0 - dd / 9.0);
-            const float fade = smoothstep(0.0, 0.05, life) * (1.0 - smoothstep(0.55, 1.0, life));
+            const float fade = smoothstep(0.0, 0.05, life) * (1.0 - smoothstep(0.7, 1.0, life));
             spark = max(spark, max(core, 0.45 * glow) * fade);
         }
     }

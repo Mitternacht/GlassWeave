@@ -296,13 +296,13 @@ enum InteriorPattern {
             let above = start + life * travel
             let sway = (2 + 4 * r2) * wave(above / (16 + 14 * r2) + r3)
             let center = SIMD2((r0 * 2 - 1) * max(half.x - 3, 0) + sway, half.y - above)
-            let radius = 1.3 + 1.0 * r3
+            let radius = 1.6 + 1.2 * r3
             let d = u - center
             let dd = (d.x * d.x + d.y * d.y) / (radius * radius)
             if dd < 9 {
                 let core = dd < 1 ? (1 - dd) * (1 - dd) : 0
                 let glow = (1 - dd / 9) * (1 - dd / 9)
-                let fade = smoothstep(0, 0.05, life) * (1 - smoothstep(0.55, 1, life))
+                let fade = smoothstep(0, 0.05, life) * (1 - smoothstep(0.7, 1, life))
                 spark = max(spark, max(core, 0.45 * glow) * fade)
             }
         }
