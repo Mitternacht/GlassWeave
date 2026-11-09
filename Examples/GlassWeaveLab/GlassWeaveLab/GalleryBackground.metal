@@ -98,9 +98,10 @@ fragment float4 gallery_background_fragment(
             const float lit = step(0.78, gallery_hash(starCell));
             night += lit * gallery_fill(length(starLocal) - 0.7, pixel) * float3(0.75, 0.78, 0.9);
             float3 sky = mix(day, night, theme);
-            // Inset: darker under the top edge, a fine light line at the bottom.
+            // Inset: darker under the top edge, a fine light line along the
+            // bottom that fades in up the sides (no hard end at mid-height).
             sky = mix(sky, sky * float3(0.88, 0.90, 0.95), saturate(1.0 - (-d) / 5.0) * saturate(1.0 - w * 1.6));
-            sky = mix(sky, float3(1.0), 0.35 * saturate(1.0 - abs(d + 0.75) / 0.75) * step(0.5, w));
+            sky = mix(sky, float3(1.0), 0.35 * saturate(1.0 - abs(d + 0.75) / 0.75) * smoothstep(0.4, 0.7, w));
             color = mix(color, sky, coverage);
         }
     }
@@ -151,7 +152,8 @@ fragment float4 gallery_background_fragment(
         }
     }
 
-    // Orb bar: a dark rounded bar with a faint top highlight.
+    // Orb bar: a dark rounded bar with a faint top highlight, a hairline
+    // that fades out down the sides (no hard end at mid-height).
     const float4 bar = parameters[kGalleryBar];
     if (bar.z > 0.0) {
         const float d = gallery_rounded_rect(p, bar, 28.0);
@@ -160,7 +162,7 @@ fragment float4 gallery_background_fragment(
             const float w = saturate((p.y - bar.y) / bar.w);
             float3 fill = mix(float3(0.070, 0.066, 0.120), float3(0.025, 0.024, 0.050), w);
             fill = mix(fill, fill + float3(0.03, 0.03, 0.05), theme);
-            fill = mix(fill, float3(0.42, 0.44, 0.58), 0.4 * saturate(1.0 - abs(d + 0.6) / 0.6) * step(w, 0.5));
+            fill = mix(fill, float3(0.42, 0.44, 0.58), 0.4 * saturate(1.0 - abs(d + 0.6) / 0.6) * (1.0 - smoothstep(0.3, 0.6, w)));
             color = mix(color, fill, coverage);
         }
     }
