@@ -70,7 +70,7 @@ enum GalleryElement: Int, CaseIterable {
         switch self {
         case .ember: 0.95
         case .corona: 0.9
-        case .eddy: 0.7
+        case .eddy: 0.55
         }
     }
 
@@ -106,11 +106,11 @@ enum GalleryStyle {
         let color = mix(day, night, theme)
         return GlassParameters(
             cornerRadius: diameter / 2, bezelWidth: 14, refraction: 0.95, edgeHighlight: 0.7,
-            tint: GlassTint(red: mix(1.0, 0.12, theme), green: mix(1.0, 0.13, theme), blue: mix(1.0, 0.22, theme), strength: mix(0.10, 0.18, theme)),
+            tint: GlassTint(red: mix(1.0, 0.12, theme), green: mix(1.0, 0.13, theme), blue: mix(1.0, 0.22, theme), strength: mix(0.3, 0.22, theme)),
             glow: GlassGlow(
                 colors: [.init(red: color.x, green: color.y, blue: color.z)],
                 rimWidth: 1.5, rimSoftness: 2.5, rimIntensity: 1,
-                innerGlowRadius: 13, innerGlowIntensity: mix(0.6, 0.5, theme),
+                innerGlowRadius: 13, innerGlowIntensity: mix(0.7, 0.5, theme),
                 centerOpacity: 0, lightAngle: 0, directionality: 0.92,
                 haloRadius: knobHalo, haloIntensity: mix(0.8, 0.65, theme)
             )
@@ -129,7 +129,7 @@ enum GalleryStyle {
         let interior: GlassInterior = s > 0.001
             ? GlassInterior(
                 effect: element.interiorEffect, colors: element.interiorColors,
-                intensity: element.interiorIntensity * s, speed: 1, seed: element.seed, centerFade: 0.5
+                intensity: element.interiorIntensity * s, speed: 1, seed: element.seed, centerFade: 0.6
             )
             : .none
         return GlassParameters(
@@ -138,7 +138,7 @@ enum GalleryStyle {
             glow: GlassGlow(
                 colors: element.stops,
                 rimWidth: mix(1.25, 2.5, s), rimSoftness: 2, rimIntensity: mix(0.8, 1, s),
-                innerGlowRadius: mix(14, 34, s), innerGlowIntensity: mix(0.3, 0.8, s),
+                innerGlowRadius: mix(14, 24, s), innerGlowIntensity: mix(0.3, 0.75, s),
                 centerOpacity: 0.16 * s, lightAngle: 0, directionality: mix(0.45, 0.3, s),
                 haloRadius: mix(capsuleCalmHalo, capsuleSelectedHalo, s), haloIntensity: mix(0.35, 0.9, s)
             ),

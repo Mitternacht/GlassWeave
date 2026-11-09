@@ -427,8 +427,10 @@ final class GlowGalleryViewController: UIViewController {
         content.setCustomSpacing(32, after: nativeColumn)
 
         let frame = scroll.frameLayoutGuide
+        // 600 points wide where the window allows, otherwise its full width
+        // less the margins: above every arranged subview's hugging.
         let readable = content.widthAnchor.constraint(equalToConstant: 600)
-        readable.priority = .defaultHigh
+        readable.priority = .required - 1
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -482,7 +484,9 @@ final class GlowGalleryViewController: UIViewController {
     /// gap between them, at most 96 points wide, 1.6 times as tall.
     private func layoutCapsules() {
         let large = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
-        let available = content.bounds.width > 0 ? content.bounds.width : view.bounds.width - 32
+        // The content's width, from local bounds: 600 points, or the safe
+        // area less the margins.
+        let available = min(600, view.bounds.inset(by: view.safeAreaInsets).width - 32)
         let width: CGFloat = large ? 72 : min(max(((available - 2 * Self.stageInset - 2 * Self.capsuleGap) / 3).rounded(.down), 56), 96)
         let size = CGSize(width: width, height: (width * 1.6).rounded())
         cards.forEach { $0.setCapsuleSize(size) }

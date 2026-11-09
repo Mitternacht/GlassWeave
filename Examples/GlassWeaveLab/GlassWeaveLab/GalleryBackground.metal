@@ -99,7 +99,7 @@ fragment float4 gallery_background_fragment(
             night += lit * gallery_fill(length(starLocal) - 0.7, pixel) * float3(0.75, 0.78, 0.9);
             float3 sky = mix(day, night, theme);
             // Inset: darker under the top edge, a fine light line at the bottom.
-            sky = mix(sky, sky * float3(0.80, 0.84, 0.92), saturate(1.0 - (-d) / 6.0) * saturate(1.0 - w * 1.6));
+            sky = mix(sky, sky * float3(0.88, 0.90, 0.95), saturate(1.0 - (-d) / 5.0) * saturate(1.0 - w * 1.6));
             sky = mix(sky, float3(1.0), 0.35 * saturate(1.0 - abs(d + 0.75) / 0.75) * step(0.5, w));
             color = mix(color, sky, coverage);
         }
