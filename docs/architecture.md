@@ -191,8 +191,9 @@ outside the outline, fading to exactly zero at the radius; without a halo
 the output is byte-identical to the GW-17 shader (a second frozen copy). The
 pulse is a function of `GlassRenderer.effectTime`, folded into the uploaded
 intensities on the CPU. `GlassSurfaceView` owns the one effect clock: a
-`UIUpdateLink` for the view itself that exists only while the presented glow
-animates and the view is visible, and whose ticks are ordinary
+`UIUpdateLink` for the view itself that exists only while a presented glow
+animates on a panel that can change a pixel of the drawable, the view has a
+source or a producer, and the view is visible, and whose ticks are ordinary
 `requestFrame()` calls through the GW-07 scheduler (see the lifecycle table).
 The panel shader discards nothing, so the GPU can still skip the background
 fragments under the opaque panel quad.
@@ -214,7 +215,7 @@ as a list renders the same bytes as `setPanel(_:)`. Each quad is computed
 from the background sample, so where quads overlap the later panel wins;
 callers keep quads apart. `GlassSurfaceView.setPanels(_:)` applies the
 accessibility policy to each panel and runs the effect clock while any of
-them animates. The laboratory's glow gallery draws its five shapes this way;
+them animates and reaches the drawable. The laboratory's glow gallery draws its five shapes this way;
 see [the glow design](glow.md#gw-20-several-shapes-in-one-pass-and-the-gallery-implemented).
 
 ## Scheduling and resources
@@ -240,7 +241,7 @@ public) bounds a producer's textures; the laboratory's moving source uses it.
 
 | Rule | Implementation |
 | --- | --- |
-| On demand | The `MTKView` is paused with `enableSetNeedsDisplay`. A draw happens only after a request (new source, panel, pixel size, display scale, producer, `requestFrame()`, or, since GW-18, a tick of the surface's effect clock, which runs only while a visible presented glow pulses or, since GW-19, a visible presented interior moves, and Reduce Motion is off). Requests before the next display pass merge into one (`FrameStatistics.coalesced`). A display pass with nothing requested (one UIKit starts itself, or a second wake-up for a request an earlier pass drew) draws nothing and calls no producer, so a stationary source with a settled surface submits nothing. |
+| On demand | The `MTKView` is paused with `enableSetNeedsDisplay`. A draw happens only after a request (new source, panel, pixel size, display scale, producer, `requestFrame()`, or, since GW-18, a tick of the surface's effect clock, which runs only while a visible presented glow pulses or, since GW-19, a visible presented interior moves, on a panel that can change a pixel of the drawable, with a source or producer, and Reduce Motion is off). Requests before the next display pass merge into one (`FrameStatistics.coalesced`). A display pass with nothing requested (one UIKit starts itself, or a second wake-up for a request an earlier pass drew) draws nothing and calls no producer, so a stationary source with a settled surface submits nothing. |
 | Visibility per host | A surface draws only while it is in a window, neither it nor an ancestor is hidden or at alpha ≈ 0, and its *own* window scene is `foregroundActive` or `foregroundInactive` (an inactive scene beside an active one is still on screen). It observes only that scene's `UIScene` messages (typed `NotificationCenter` messages, re-subscribed in `didMoveToWindow`), so another scene's state never affects it. Requests while not visible leave one pending frame, drawn once when visible again. An ancestor's `isHidden` is not observable; it is checked on every request, layout pass, and draw. |
 | In-flight bound | At most `GlassSurfaceView.maximumFramesInFlight` (2) frames are committed and not completed. A display pass at the bound is deferred (`deferredAtLimit`) and its frame stays pending; the next completion schedules it. A request or completion that arrives during a draw (from the producer or `renderObserver`) leaves its wake-up to the end of the draw: a committed draw's completion schedules the pending frame, and a skipped draw, which has no completion, schedules it itself before `renderObserver` runs. Display passes asked for from inside a draw are requested after the draw returns. Nothing queues and nothing waits. Two leaves one of the layer's three drawables free while one is on screen; a completed frame not yet presented can still make the next drawable wait for a display refresh, never for GPU work. |
 | Texture bound | `FrameTexturePool` holds at most `capacity` textures, counting those in use, and takes a texture back only when GlassWeave releases its frame (after the last GPU use). With every texture in use, `checkout` returns `nil` and the producer skips that frame. A new size discards free textures of the old size at once and in-use ones when released; `trim()` discards free textures and marks in-use ones. |

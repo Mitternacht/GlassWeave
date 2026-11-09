@@ -242,4 +242,56 @@ struct GlassPanelListTests {
         try renderer.setPanel(nil)
         #expect(renderer.panels.isEmpty)
     }
+
+    @Test func `A panel whose quad misses the target leaves every byte unchanged`() async throws {
+        // What a host's effect clock relies on (GlassSurfaceView): a panel
+        // that does not reach the target cannot change a pixel, whatever its
+        // pulse or interior does. The ember capsule has a 12-pixel halo, so
+        // its quad reaches 13 pixels beyond its rectangle at scale 1.
+        let gpu = try GPUContext()
+        let source = Self.source
+        let background = try await render(gpu, panels: [])
+        let size = (width: source.width, height: source.height)
+        let missing: [CGRect] = [
+            CGRect(x: -48 - 13, y: 30, width: 48, height: 100),         // left, quad ends at 0
+            CGRect(x: 240 + 13, y: 30, width: 48, height: 100),         // right, quad starts at 240
+            CGRect(x: 100, y: -100 - 13.5, width: 48, height: 100),     // above
+            CGRect(x: 100, y: 160 + 13.5, width: 48, height: 100),      // below
+            CGRect(x: 100, y: 30, width: 0, height: 100),               // no area
+        ]
+        for frame in missing {
+            let panel = try Self.emberCapsule(frame).normalized()
+            #expect(!panel.reachesTarget(pixelWidth: size.width, pixelHeight: size.height, displayScale: 1), "\(frame)")
+            for time in [0.0, 0.4, 1.9] {
+                let image = try await render(gpu, panels: [panel], effectTime: time)
+                #expect(Self.differingBytes(image, background) == 0, "\(frame) at \(time) s")
+            }
+        }
+        // One pixel more and the quad covers a column or row of the target.
+        let reaching: [CGRect] = [
+            CGRect(x: -48 - 12, y: 30, width: 48, height: 100),
+            CGRect(x: 240 + 12, y: 30, width: 48, height: 100),
+            CGRect(x: 100, y: -100 - 12.5, width: 48, height: 100),
+            CGRect(x: 100, y: 160 + 12.5, width: 48, height: 100),
+        ]
+        for frame in reaching {
+            let panel = try Self.emberCapsule(frame).normalized()
+            #expect(panel.reachesTarget(pixelWidth: size.width, pixelHeight: size.height, displayScale: 1), "\(frame)")
+        }
+        // A panel well inside changes pixels, and reaches the target.
+        let inside = try Self.emberCapsule(CGRect(x: 100, y: 30, width: 48, height: 100)).normalized()
+        #expect(inside.reachesTarget(pixelWidth: size.width, pixelHeight: size.height, displayScale: 1))
+        #expect(Self.differingBytes(try await render(gpu, panels: [inside]), background) > 1000)
+
+        // In points at scale 2: the one-pixel outset is half a point; no
+        // target, or a scale that is not positive and finite, reaches nothing.
+        let right = try Self.emberCapsule(CGRect(x: 120 + 12.25, y: 10, width: 24, height: 50)).normalized()
+        #expect(right.reachesTarget(pixelWidth: 240, pixelHeight: 160, displayScale: 2))
+        let beyond = try Self.emberCapsule(CGRect(x: 120 + 12.75, y: 10, width: 24, height: 50)).normalized()
+        #expect(!beyond.reachesTarget(pixelWidth: 240, pixelHeight: 160, displayScale: 2))
+        #expect(!inside.reachesTarget(pixelWidth: 0, pixelHeight: 160, displayScale: 1))
+        for scale in [0.0, -1, .infinity, .nan] {
+            #expect(!inside.reachesTarget(pixelWidth: 240, pixelHeight: 160, displayScale: scale))
+        }
+    }
 }

@@ -266,6 +266,17 @@ struct GlassPanelGeometry: Equatable {
         1 + (glow?.haloRadius ?? 0)
     }
 
+    /// Whether the panel's quad (``quadOutset`` around the rectangle) covers
+    /// part of a target of `width` × `height` pixels. A panel without area
+    /// covers nothing.
+    func quadOverlapsTarget(width: Int, height: Int) -> Bool {
+        guard !isEmpty, width > 0, height > 0 else { return false }
+        let reach = halfSize + quadOutset
+        let minimum = center - reach
+        let maximum = center + reach
+        return maximum.x > 0 && maximum.y > 0 && minimum.x < Double(width) && minimum.y < Double(height)
+    }
+
     /// The 4 × 4 ordered-dither (Bayer) matrix, row by row.
     static let bayer: [Double] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
 

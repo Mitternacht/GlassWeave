@@ -19,19 +19,24 @@ import UIKit
 /// not overlap). The view sizes its drawable from its own bounds and
 /// `traitCollection.displayScale`, never from a screen or a global scene.
 ///
-/// Effect clock (``isAnimating``): while any presented panel's glow animates
-/// (`GlassGlow.isAnimated`, a pulse) or its interior does
-/// (`GlassInterior.isAnimated`, a speed above 0), and the view is visible,
-/// the view runs one `UIUpdateLink` created for itself, so it follows its
-/// own window's display. Each update advances the effect time by the update's model time
+/// Effect clock (``isAnimating``): while any presented panel whose glow
+/// animates (`GlassGlow.isAnimated`, a pulse) or whose interior does
+/// (`GlassInterior.isAnimated`, a speed above 0) can change a pixel of the
+/// drawable (it has area, and its quad, the panel grown by one pixel and its
+/// halo radius, overlaps the view's bounds), the view has a source or a
+/// frame producer, and the view is visible, the view runs one `UIUpdateLink`
+/// created for itself, so it follows its own window's display. Each update advances the effect time by the update's model time
 /// and calls ``requestFrame()``, so ticks go through the same scheduler as
 /// every other request: they coalesce, wait while hidden, and never exceed
 /// the in-flight bound. Each draw evaluates the glow and the interior at the
 /// effect time (`GlassRenderer.effectTime`). The link is removed as soon as
 /// nothing animates any more (no pulse and no moving interior, or Reduce
-/// Motion, which steadies the glow and stills the interior), the view
-/// stops being visible, or it leaves its window; the effect time then
-/// stays where it was and continues from there when the clock runs again.
+/// Motion, which steadies the glow and stills the interior), every animated
+/// panel lies outside the bounds or has no area, the source and the producer
+/// are gone, the view stops being visible, or it leaves its window; the
+/// effect time then stays where it was and continues from there when the
+/// clock runs again. The view looks again whenever its panels, bounds,
+/// display scale, source, producer, settings, or visibility change.
 ///
 /// Scheduling (``frameStatistics`` reports each step):
 /// - Requests made before the next display pass merge into one draw.
@@ -149,10 +154,11 @@ public final class GlassSurfaceView: UIView {
 
     /// Whether the effect clock runs: a presented panel's glow or interior
     /// animates (a pulse that Reduce Motion has not steadied, or an interior
-    /// with a speed above 0 that Reduce Motion has not stilled) and the view
-    /// is visible. While it runs, the view requests a frame on every display
-    /// update of its window; otherwise the glow is drawn only when something
-    /// else requests a frame.
+    /// with a speed above 0 that Reduce Motion has not stilled) and that
+    /// panel can change a pixel of the drawable, the view has a source or a
+    /// frame producer, and the view is visible. While it runs, the view
+    /// requests a frame on every display update of its window; otherwise the
+    /// glow is drawn only when something else requests a frame.
     public var isAnimating: Bool {
         effectLink != nil
     }
@@ -258,6 +264,7 @@ public final class GlassSurfaceView: UIView {
         try renderer.setSource(lease)
         metalView.isHidden = false
         scheduleFrame()
+        updateEffectClock()
     }
 
     /// The first panel the app set, in this view's points, after the
@@ -350,11 +357,17 @@ public final class GlassSurfaceView: UIView {
         }
     }
 
-    /// Whether the effect clock should run now: the view is visible and a
-    /// presented panel's glow or interior animates.
+    /// Whether the effect clock should run now: the view is visible, has a
+    /// source or a producer, and a presented panel whose glow or interior
+    /// animates can change a pixel of the drawable. A tick for a panel that
+    /// cannot would only present the same pixels again.
     private var wantsEffectClock: Bool {
-        guard isVisible else { return false }
-        return renderer.panels.contains { $0.parameters.glow.isAnimated || $0.parameters.interior.isAnimated }
+        guard isVisible, renderer.currentFrame != nil || frameProducer != nil else { return false }
+        let scale = Double(traitCollection.displayScale)
+        return renderer.panels.contains { panel in
+            (panel.parameters.glow.isAnimated || panel.parameters.interior.isAnimated)
+                && panel.reachesTarget(pixelWidth: pixelSize.width, pixelHeight: pixelSize.height, displayScale: scale)
+        }
     }
 
     /// Starts or stops the effect clock to match ``wantsEffectClock``.
@@ -407,6 +420,7 @@ public final class GlassSurfaceView: UIView {
         } else if renderer.currentFrame == nil {
             metalView.isHidden = true
         }
+        updateEffectClock()
     }
 
     /// Requests one draw. Requests before the next display pass coalesce
@@ -429,6 +443,7 @@ public final class GlassSurfaceView: UIView {
             // renderer would return before touching a drawable.
             record(.skipped(.missingSource))
         }
+        updateEffectClock()
     }
 
     override public func layoutSubviews() {
@@ -538,8 +553,10 @@ public final class GlassSurfaceView: UIView {
     }
 
     /// Recomputes the target size from local bounds and the display scale,
-    /// and requests a draw when it changed.
+    /// requests a draw when it changed, and looks again at whether a panel's
+    /// animation can reach the drawable.
     private func updatePixelSize() {
+        defer { updateEffectClock() }
         let scale = traitCollection.displayScale
         let width = Int((bounds.width * scale).rounded())
         let height = Int((bounds.height * scale).rounded())

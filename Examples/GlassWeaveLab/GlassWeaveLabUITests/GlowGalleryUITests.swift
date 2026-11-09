@@ -236,6 +236,53 @@ final class GlowGalleryUITests: XCTestCase {
         report(lines, name: "gallery-submissions.txt")
     }
 
+    /// A selected capsule scrolled off the screen (its halo too) cannot
+    /// change a pixel, so its interior runs no clock and the gallery submits
+    /// nothing; scrolled back, it moves again.
+    @MainActor
+    func testAnAnimatedCapsuleScrolledOffScreenSubmitsNothing() throws {
+        let (app, diagnostics) = launch(["-lab.gallerySelect", "ember"])
+        XCTAssertTrue(wait(for: diagnostics, toContain: "selected ember"), diagnostics.label)
+        XCTAssertTrue(wait(for: diagnostics, toContain: "1 moving · quads apart · effect clock running"), diagnostics.label)
+        // Landscape is short enough to scroll the stage out of the window.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date.now.addingTimeInterval(5)
+        while window.frame.width < window.frame.height, Date.now < deadline {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        let scroll = app.scrollViews["gallery.scroll"]
+        let ember = card(app, "ember")
+        // The card's bottom is its caption, more than the capsule's 24-point
+        // halo below the capsule, so a card above the window has no pixel in
+        // it.
+        for _ in 0..<6 where ember.frame.maxY >= 0 {
+            scroll.swipeUp()
+        }
+        XCTAssertLessThan(ember.frame.maxY, 0, "The capsule is still on screen: \(ember.frame)")
+        var lines = ["ember card at \(ember.frame) in a \(window.frame.size) window"]
+        XCTAssertTrue(wait(for: diagnostics, toContain: "1 moving · quads apart · effect clock stopped"), diagnostics.label)
+        Thread.sleep(forTimeInterval: 1)
+        let away = try framesOver(2, app, diagnostics)
+        lines.append("scrolled away: \(away.frames) frames in about 2 s")
+        XCTAssertEqual(away.frames, 0, diagnostics.label)
+
+        // Back on screen it moves again. (The native button that refreshes
+        // the diagnostics is now off screen; while something moves they
+        // refresh by themselves, about four times a second.)
+        for _ in 0..<6 where ember.frame.minY < 0 {
+            scroll.swipeDown()
+        }
+        XCTAssertGreaterThanOrEqual(ember.frame.minY, 0, "The capsule did not come back: \(ember.frame)")
+        XCTAssertTrue(wait(for: diagnostics, toContain: "effect clock running"), diagnostics.label)
+        let start = try LabDiagnostics(diagnostics.label)
+        let moved = try waitForDiagnostics(diagnostics, timeout: 5) { $0.submitted >= start.submitted + 30 }
+        lines.append("scrolled back: \(moved.submitted - start.submitted) frames since the clock restarted")
+        XCTAssertGreaterThanOrEqual(moved.submitted - start.submitted, 30, diagnostics.label)
+        report(lines, name: "offscreen-submissions.txt")
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     @MainActor
     func testReduceMotionStopsEveryAnimation() throws {
         let (app, diagnostics) = launch(["-lab.reduceMotion", "YES"])

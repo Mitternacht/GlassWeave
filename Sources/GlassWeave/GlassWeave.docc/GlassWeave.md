@@ -211,8 +211,10 @@ with ``GlassGlow/pulsePeriod``: ``GlassGlow/pulseLevel(at:)`` scales their
 opacity at the renderer's ``GlassRenderer/effectTime`` (set it with
 ``GlassRenderer/setEffectTime(_:)`` when you draw yourself). The center fill
 does not pulse. `GlassSurfaceView` runs its own effect clock while a visible
-glow pulses, requests frames through its usual scheduler (never more than
-two in flight), and stops it when the pulse is removed, the surface is
+glow pulses on a panel that can change a pixel of its drawable (with a
+source or a frame producer to draw over), requests frames through its usual
+scheduler (never more than two in flight), and stops it when the pulse is
+removed, the panel and its halo leave the surface's bounds, the surface is
 hidden, or Reduce Motion is on, which holds the glow at the pulse's mean
 level, `1 − pulseDepth / 2`. Reduce Transparency removes the halo and the
 pulse; Increase Contrast keeps both.

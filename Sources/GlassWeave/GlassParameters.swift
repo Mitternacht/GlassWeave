@@ -230,4 +230,17 @@ extension GlassPanel {
         let parameters = try parameters.normalized(maximumLength: min(width, height) / 2)
         return GlassPanel(frame: frame, parameters: parameters)
     }
+
+    /// Whether drawing this normalized panel can change any pixel of a
+    /// target of `pixelWidth` × `pixelHeight` at `displayScale` pixels per
+    /// point: it has area and its quad (the rectangle grown by one pixel and
+    /// the glow's halo radius, as ``GlassRenderer`` draws it) covers part of
+    /// the target. When it returns `false`, the target is exactly what it
+    /// would be without the panel, whatever its glow or interior does. A
+    /// display scale that is not finite and positive reaches nothing.
+    package func reachesTarget(pixelWidth: Int, pixelHeight: Int, displayScale: Double) -> Bool {
+        guard displayScale.isFinite, displayScale > 0 else { return false }
+        return GlassPanelGeometry(panel: self, displayScale: displayScale)
+            .quadOverlapsTarget(width: pixelWidth, height: pixelHeight)
+    }
 }

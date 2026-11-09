@@ -292,6 +292,10 @@ struct GlowAnimationTests {
             let surface = GlassSurfaceView(renderer: try GlassRenderer(commandQueue: queue))
             surface.sceneStateOverride = .foregroundActive
             surface.frame = CGRect(x: 0, y: 0, width: 100, height: 80)
+            // The clock runs only for a panel it can draw: with a size and a
+            // source.
+            surface.layoutIfNeeded()
+            try surface.setSource(makeLease())
             try surface.setPanel(Self.panel(Self.pulsing))
             #expect(surface.isAnimating)
             released = surface

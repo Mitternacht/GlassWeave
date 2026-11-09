@@ -287,9 +287,17 @@ the image matches the CPU model).
   it follows that view's window and display, never a global link, and
   activates only while the view is in a visible window. Its handler holds the
   view weakly (a test shows a surface with a running clock is freed). It
-  exists only while (1) the presented glow `isAnimated` and (2) the surface
-  is visible by the GW-07 rule; Reduce Motion removes the pulse from the
-  presented panel, so it covers (3). It asks for continuous updates at
+  exists only while (1) the presented glow `isAnimated`, (2) the surface
+  is visible by the GW-07 rule, (3) that panel can change a pixel of the
+  drawable (it has area and its quad, the rectangle grown by one pixel and
+  the halo radius, overlaps the bounds: `GlassPanel.reachesTarget`, package
+  API, the renderer's own quad), and (4) the surface has a source or a frame
+  producer to draw over; Reduce Motion removes the pulse from the presented
+  panel, so it covers the accessibility row. The surface looks again when
+  its panels, bounds, display scale, source, producer, settings, or
+  visibility change. (Conditions 3 and 4 were added after a review: a
+  pulsing panel scrolled out of the surface, or a surface without a source,
+  kept the clock submitting identical frames at 60 Hz.) It asks for continuous updates at
   30 to 60 Hz (60 preferred): a slow pulse gains nothing from 120 Hz.
   `isAnimating` reports it. MTKView's own timer was not used: an unpaused
   `MTKView` draws continuously, outside the GW-07 scheduler.
@@ -302,9 +310,10 @@ the image matches the CPU model).
   `FrameLedger` and `FrameScheduler` are unchanged.
 - **The draw uses the clock's time.** `render(in:)` hands the clock's time
   to the renderer (`setEffectTime`) before each draw.
-- **Settling.** Removing the pulse, hiding the surface (or an ancestor),
-  backgrounding its scene, removing it from its window, or turning on Reduce
-  Motion removes the link at once; a changed panel is drawn once (one
+- **Settling.** Removing the pulse, moving every animated panel (with its
+  halo) out of the bounds, removing the source and producer, hiding the
+  surface (or an ancestor), backgrounding its scene, removing it from its
+  window, or turning on Reduce Motion removes the link at once; a changed panel is drawn once (one
   frame), and then nothing is submitted. The effect time stays where it was
   and continues from there, so a pulse resumes where it stopped instead of
   jumping.
@@ -480,8 +489,9 @@ renders identical bytes.
 ### Clock and accessibility
 
 `GlassSurfaceView` runs its GW-18 effect clock while the presented glow
-pulses *or* the presented interior moves (`GlassInterior.isAnimated`) and
-the view is visible; ticks remain ordinary frame requests through the GW-07
+pulses *or* the presented interior moves (`GlassInterior.isAnimated`) on a
+panel that can change a pixel of the drawable, the view has a source or a
+producer, and the view is visible; ticks remain ordinary frame requests through the GW-07
 scheduler, so they coalesce, wait while hidden, and keep the two-frame
 in-flight bound, and a still or removed interior draws once and then
 nothing. The accessibility row above applies through
@@ -575,7 +585,7 @@ same bytes. One surface per shape was rejected:
 | `GlassRenderer.maximumPanelCount` | 8. The most panels one draw renders; it bounds a draw's work (each panel is one quad whose fragments evaluate the glass, glow, and interior). |
 | `GlassRenderer.setPanels(_:)` | Sets the panels in drawing order. Every panel follows the `GlassParameters` rule: a non-finite value anywhere in the list, even past the maximum, throws `GlassParameterError.nonFinite(field)` and keeps the current panels; only the first eight are kept, as `GlassGlow` keeps its first four stops. |
 | `GlassRenderer.panels` | The panels as drawn (normalized). `panel` is the first, or `nil`. |
-| `GlassSurfaceView.setPanels(_:)`, `panels`, `presentedPanels` | The same in a surface's points. The accessibility policy applies to each panel; a change draws once; the effect clock runs while **any** presented panel animates. `panel`, `presentedPanel`, and `setPanel(_:)` keep their meaning for one panel. |
+| `GlassSurfaceView.setPanels(_:)`, `panels`, `presentedPanels` | The same in a surface's points. The accessibility policy applies to each panel; a change draws once; the effect clock runs while **any** presented panel animates and can change a pixel of the drawable. `panel`, `presentedPanel`, and `setPanel(_:)` keep their meaning for one panel. |
 
 Nothing in the shader changed: each draw uploads one panel's record. Each
 panel's fragment composites its body and halo over the background sample,
@@ -637,7 +647,8 @@ shows its still frame), the transition link does not exist, and the surface
 submits nothing. While a capsule is selected or the orb surges, the surface's
 own effect clock (GW-18) runs, through the GW-07 scheduler and its
 two-frame bound; it stops when the gallery is hidden, backgrounded, or
-covered. GW-04's open item (the main-thread drawable wait) is unchanged: the
+covered, and when the moving shape (with its halo) is scrolled out of the
+window. GW-04's open item (the main-thread drawable wait) is unchanged: the
 gallery draws more often only while something moves, within the same bound.
 
 ### Accessibility in the gallery

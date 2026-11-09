@@ -49,7 +49,9 @@ struct PanelListSurfaceTests {
         ]
     }
 
-    private func makeSurface(settings: GlassAccessibilitySettings = GlassAccessibilitySettings()) throws -> GlassSurfaceView {
+    private func makeSurface(
+        settings: GlassAccessibilitySettings = GlassAccessibilitySettings(), withSource: Bool = true
+    ) throws -> GlassSurfaceView {
         let surface = GlassSurfaceView(renderer: try GlassRenderer(commandQueue: queue))
         surface.sceneStateOverride = .foregroundActive
         surface.accessibilitySettingsSource = .fixed(settings)
@@ -57,8 +59,18 @@ struct PanelListSurfaceTests {
         surface.frame = CGRect(x: 0, y: 0, width: 190, height: 100)
         surface.updateTraitsIfNeeded()
         surface.layoutIfNeeded()
-        try surface.setSource(makeLease())
+        if withSource {
+            try surface.setSource(makeLease())
+        }
         return surface
+    }
+
+    /// One pulsing panel with a moving interior and an 8-point halo at
+    /// `frame`.
+    static func animatedPanel(_ frame: CGRect) -> GlassPanel {
+        GlassPanel(frame: frame, parameters: GlassParameters(
+            cornerRadius: 20, glow: glow(pulse: true), interior: interior(speed: 1)
+        ))
     }
 
     /// A small still source uploaded on `queue`.
@@ -192,6 +204,82 @@ struct PanelListSurfaceTests {
         try surface.setPanels(Self.panels(pulse: true))
         #expect(surface.isAnimating)
         surface.isHidden = true
+        #expect(!surface.isAnimating)
+    }
+
+    @Test func `An animated panel that cannot reach the drawable runs no clock`() async throws {
+        let surface = try makeSurface()
+        // The bounds are 190 × 100 points at scale 2. The panel's quad
+        // reaches 8 points (halo) and one pixel (half a point) beyond it.
+        let reach = 8.5
+        let outside: [CGRect] = [
+            CGRect(x: -40 - reach - 0.25, y: 20, width: 40, height: 60),    // left
+            CGRect(x: 190 + reach + 0.25, y: 20, width: 40, height: 60),    // right
+            CGRect(x: 72, y: -60 - reach - 0.25, width: 40, height: 60),    // above
+            CGRect(x: 72, y: 100 + reach + 0.25, width: 40, height: 60),    // below
+            CGRect(x: 72, y: 20, width: 0, height: 60),                     // no area
+        ]
+        for frame in outside {
+            try surface.setPanels([Self.animatedPanel(frame)])
+            #expect(surface.presentedPanels[0].parameters.glow.isAnimated)
+            #expect(!surface.isAnimating, "\(frame)")
+        }
+        // Ticks while it cannot reach the drawable submit nothing.
+        try await settle(surface)
+        let idle = surface.frameStatistics.submitted
+        for tick in 1...6 {
+            surface.effectTick(modelTime: 300 + Double(tick) / 60)
+        }
+        try await settle(surface)
+        #expect(surface.frameStatistics.submitted == idle)
+
+        // Its halo's outermost pixel touching the bounds is enough.
+        try surface.setPanels([Self.animatedPanel(CGRect(x: -40 - reach + 0.25, y: 20, width: 40, height: 60))])
+        #expect(surface.isAnimating)
+        // Back outside, then moved inside: the clock stops, then starts again,
+        // and each tick draws one frame.
+        try surface.setPanels([Self.animatedPanel(outside[0])])
+        #expect(!surface.isAnimating)
+        try surface.setPanels([Self.animatedPanel(CGRect(x: 72, y: 20, width: 40, height: 60))])
+        #expect(surface.isAnimating)
+        try await settle(surface)
+        let start = surface.frameStatistics.submitted
+        for tick in 1...4 {
+            surface.effectTick(modelTime: 400 + Double(tick) / 60)
+            try await settle(surface)
+        }
+        #expect(surface.frameStatistics.submitted == start + 4)
+
+        // A panel just outside the right edge starts the clock once the
+        // bounds grow to reach it, and stops it when they shrink again.
+        try surface.setPanels([Self.animatedPanel(outside[1])])
+        #expect(!surface.isAnimating)
+        surface.frame.size.width = 220
+        surface.layoutIfNeeded()
+        #expect(surface.isAnimating)
+        surface.frame.size.width = 190
+        surface.layoutIfNeeded()
+        #expect(!surface.isAnimating)
+
+        // Of two animated panels, one inside is enough.
+        try surface.setPanels([Self.animatedPanel(outside[2]), Self.animatedPanel(CGRect(x: 72, y: 20, width: 40, height: 60))])
+        #expect(surface.isAnimating)
+    }
+
+    @Test func `Without a source or a producer no clock runs`() throws {
+        let surface = try makeSurface(withSource: false)
+        let inside = Self.animatedPanel(CGRect(x: 72, y: 20, width: 40, height: 60))
+        try surface.setPanels([inside])
+        #expect(!surface.isAnimating, "Nothing can be drawn without a source")
+        try surface.setSource(makeLease())
+        #expect(surface.isAnimating)
+        surface.clearSource()
+        #expect(!surface.isAnimating)
+
+        // A producer can make the source at the next draw.
+        surface.setFrameProducer { _, _ in nil }
+        #expect(surface.isAnimating)
+        surface.setFrameProducer(nil)
         #expect(!surface.isAnimating)
     }
 }
