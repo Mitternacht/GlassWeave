@@ -607,7 +607,7 @@ sit above it and carry every interaction and every accessibility element.
 | Demo | Glass | Native control |
 | --- | --- | --- |
 | Light/dark switch | A round knob (`GalleryStyle.knob`): a warm rim light on its top edge (light angle 0°, directionality 0.92), a 22-point halo, a faint inner glow, and a whiter body by day, softer and moonlit at night. The capsule track is part of the background: a recessed day sky or a starry night, which the knob refracts. | `ThemeToggle`, a `UIControl`: one element, "Dark appearance", traits button and toggle button (which UIKit documents VoiceOver describes as a switch button; no live VoiceOver pass was possible), value "1" or "0", activated directly by `accessibilityActivate()`. It sets the gallery's `overrideUserInterfaceStyle`. |
-| Element capsules: Ember, Corona, Eddy | Dark glass capsules (`GalleryStyle.capsule`) with two-stop edge colors (orange to red, gold to amber, green to blue), interpolated by a selection level: calm is a thin rim, a faint inner glow, a 10-point halo, and a clear, dark, see-through middle; selected is a stronger rim, a 24-point inner glow, a 0.16 two-color fill, a 24-point halo, and the element's interior (embers, rays, or energy, center fade 0.6). Over a dark stage with a faint floor reflection of each capsule's lower outline in the background. | `ElementCard`, a `UIButton` per capsule, labeled with the element's name (shown beneath it), whose selected state is the selection; selecting the selected one deselects it. |
+| Element capsules: Ember, Corona, Eddy | Dark glass capsules (`GalleryStyle.capsule`) with two-stop edge colors (orange to red, gold to amber, green to blue), interpolated by a selection level: calm is a thin rim, a faint inner glow, a 10-point halo, and a clear, dark, see-through middle; selected is a stronger rim, a 24-point inner glow, a 0.16 two-color fill, a 24-point halo, and the element's interior (embers, rays, or energy, center fade 0.6). Over a dark stage with a faint floor reflection of each capsule's lower outline in the background. | `ElementCard`, a `UIButton` per capsule, labeled with the element's name (shown beneath it), whose selected state is the selection; selecting the selected one deselects it. The selected card also shows a check (`checkmark.circle.fill`, scaled with the headline text style) under its name in its lighter edge color, at least 8:1 against the stage, so selection does not depend on the glow: Reduce Transparency takes away the brightening, fill, halo, and interior. |
 | Energy orb | A circle on a dark bar (`GalleryStyle.orb`): at rest a steady cyan-to-violet rim, a 14-point halo, and the energy interior's still frame; charged, it surges for five seconds (a brighter rim, a 22-point halo, a 1.4 s pulse of depth 0.5, moving filaments) and settles. | `UIButton` "Charge the orb", value "Resting" or "Surging". |
 | Native glass | Genuine `UIGlassEffect` glass in an `EnhancedNativeGlassView` with a GW-14 rim and 18-point halo in the selected element's colors. | `UIButton` "Native glass". |
 
@@ -657,7 +657,7 @@ gallery draws more often only while something moves, within the same bound.
 | --- | --- |
 | VoiceOver | The surface is hidden from assistive technologies; every control is one labeled native element: Close, the switch (value 1/0), the three capsules (selected trait), the orb (value), and the native button, in reading order. A live VoiceOver pass needs a device. |
 | Reduce Motion | The policy stills interiors and steadies pulses, so no clock runs; the gallery also skips the knob's slide and the selection ramps, and keeps only the 0.35 s cross-dissolve of the theme. |
-| Reduce Transparency | Opaque bodies with a thin rim, no halos or interiors (the policy); the background drops the floor reflections. |
+| Reduce Transparency | Opaque bodies with a thin rim, no halos or interiors (the policy); the background drops the floor reflections. Every capsule then has the same thin rim (the selected one about 10 % brighter), so the selected card's check under its name carries the selection; VoiceOver reports the selected trait. |
 | Increase Contrast | Rims evenly lit, no inner glow, fill, or interior (the policy); halos and the orb's pulse are kept. The laboratory's `-lab.increaseContrast YES` sets the trait on the gallery for tests. |
 | Dynamic Type | Text styles throughout; at accessibility sizes the rows stack, names sit beside their capsules, and every target stays at least 44 points. |
 
@@ -677,9 +677,12 @@ gallery draws more often only while something moves, within the same bound.
   switch's value and the page's luminance in both appearances; selection and
   the selected trait for each capsule; the orb's surge and settling; frame
   counts at rest, while moving, in the background, and under Reduce Motion;
-  Reduce Transparency and Increase Contrast; element labels, targets, and
-  order; the accessibility audit in light and dark; the largest text size in
-  portrait and landscape; quads apart throughout.
+  Reduce Transparency and Increase Contrast; the selected card's check under
+  Reduce Transparency, read from screenshots (the selected card's bottom
+  20 points hold its check's bright edge-color pixels, the others none);
+  element labels, targets, and order; the accessibility audit in light and
+  dark; the largest text size in portrait and landscape; quads apart
+  throughout.
 
 ## Enhanced-native glow (GW-14, implemented)
 

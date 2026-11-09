@@ -340,6 +340,65 @@ final class GlowGalleryUITests: XCTestCase {
         app.terminate()
     }
 
+    /// Under Reduce Transparency the glow no longer marks the selected
+    /// capsule (no fill, halo, or interior, and every rim the same thin
+    /// line), so the card shows a check in its edge color under its name;
+    /// the other cards show none. Read from screenshots, dark and light.
+    @MainActor
+    func testTheSelectedElementShowsItsCheckUnderReduceTransparency() throws {
+        var lines: [String] = []
+        for appearance in ["dark", "light"] {
+            let (app, diagnostics) = launch(["-lab.reduceTransparency", "YES", "-lab.gallerySelect", "ember"], appearance: appearance)
+            XCTAssertTrue(wait(for: diagnostics, toContain: "Reduce Transparency on"), diagnostics.label)
+            XCTAssertTrue(wait(for: diagnostics, toContain: "selected ember"), diagnostics.label)
+            XCTAssertTrue(wait(for: diagnostics, toContain: "0 halos · 0 interiors · 0 moving"), diagnostics.label)
+            // The check fades in over 0.2 s.
+            Thread.sleep(forTimeInterval: 0.6)
+            var counts = try selectionCheckPixels(app)
+            lines.append("\(appearance), ember selected: \(counts)")
+            XCTAssertGreaterThanOrEqual(counts["ember"] ?? 0, 40, lines.last!)
+            XCTAssertEqual(counts["corona"], 0, lines.last!)
+            XCTAssertEqual(counts["eddy"], 0, lines.last!)
+
+            card(app, "corona").tap()
+            XCTAssertTrue(wait(for: diagnostics, toContain: "selected corona"), diagnostics.label)
+            Thread.sleep(forTimeInterval: 0.6)
+            counts = try selectionCheckPixels(app)
+            lines.append("\(appearance), corona selected: \(counts)")
+            XCTAssertEqual(counts["ember"], 0, lines.last!)
+            XCTAssertGreaterThanOrEqual(counts["corona"] ?? 0, 40, lines.last!)
+            XCTAssertEqual(counts["eddy"], 0, lines.last!)
+            XCTAssertTrue(card(app, "corona").isSelected)
+            XCTAssertFalse(card(app, "ember").isSelected)
+            app.terminate()
+        }
+        report(lines, name: "selection-check-pixels.txt")
+    }
+
+    /// Bright, saturated pixels (the largest channel above 160 and at least
+    /// 90 above the smallest, which the white caption, the dark stage, and
+    /// its dots never reach) in the bottom 20 points of each card, where the
+    /// selection check sits below the name.
+    @MainActor
+    private func selectionCheckPixels(_ app: XCUIApplication) throws -> [String: Int] {
+        let pixels = try SRGBPixels(app.screenshot().image)
+        let scale = Double(pixels.width) / Double(app.windows.firstMatch.frame.width)
+        var counts: [String: Int] = [:]
+        for name in Self.elements {
+            let frame = card(app, name).frame
+            var count = 0
+            for y in Int((Double(frame.maxY) - 20) * scale)..<Int(Double(frame.maxY) * scale) {
+                for x in Int(Double(frame.minX) * scale)..<Int(Double(frame.maxX) * scale) {
+                    let (r, g, b) = pixels.color(x: x, y: y)
+                    let high = max(r, g, b), low = min(r, g, b)
+                    if high > 160, high - low >= 90 { count += 1 }
+                }
+            }
+            counts[name] = count
+        }
+        return counts
+    }
+
     @MainActor
     func testEveryControlIsOneLabeledElementInReadingOrder() throws {
         let (app, _) = launch()

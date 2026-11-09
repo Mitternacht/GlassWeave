@@ -113,12 +113,18 @@ final class ThemeToggle: UIControl {
 /// One element capsule: a native button whose glass capsule is drawn by the
 /// gallery's surface at ``capsule``'s frame, with its name beneath (or beside,
 /// at accessibility text sizes). Selection is the button's own selected
-/// state, which UIKit reports to assistive technologies.
+/// state, which UIKit reports to assistive technologies, and a check under
+/// the name in the capsule's edge color, which shows it without the glow:
+/// Reduce Transparency removes the glow's brightening, fill, halo, and
+/// interior, and leaves every rim the same thin line.
 final class ElementCard: UIButton {
     let element: GalleryElement
     /// Where the glass capsule is drawn; it takes no touches.
     let capsule = UIView()
     private let caption = UILabel()
+    /// The selection check. It keeps its place in the layout when the card
+    /// is not selected (it is only transparent), so selecting moves nothing.
+    private let selectionMark = UIImageView()
     private let stack = UIStackView()
     private var capsuleWidth: NSLayoutConstraint!
     private var capsuleHeight: NSLayoutConstraint!
@@ -137,8 +143,19 @@ final class ElementCard: UIButton {
         caption.textAlignment = .center
         caption.numberOfLines = 0
         caption.isAccessibilityElement = false
+        let symbol = UIImage.SymbolConfiguration(textStyle: .headline)
+        selectionMark.image = UIImage(systemName: "checkmark.circle.fill", withConfiguration: symbol)
+        selectionMark.preferredSymbolConfiguration = symbol
+        selectionMark.adjustsImageSizeForAccessibilityContentSizeCategory = true
+        // The lighter (top) edge color: at least 8:1 against the dark stage.
+        let light = element.stops[0]
+        selectionMark.tintColor = UIColor(red: light.red, green: light.green, blue: light.blue, alpha: 1)
+        selectionMark.contentMode = .center
+        selectionMark.isAccessibilityElement = false
+        selectionMark.alpha = 0
         stack.addArrangedSubview(capsule)
         stack.addArrangedSubview(caption)
+        stack.addArrangedSubview(selectionMark)
         stack.alignment = .center
         stack.isUserInteractionEnabled = false
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -170,10 +187,21 @@ final class ElementCard: UIButton {
     func setCompact(_ beside: Bool) {
         stack.axis = beside ? .horizontal : .vertical
         stack.spacing = beside ? 20 : 42
+        stack.setCustomSpacing(beside ? 10 : 6, after: caption)
         caption.textAlignment = beside ? .natural : .center
     }
 
     override var isHighlighted: Bool {
         didSet { caption.alpha = isHighlighted ? 0.6 : 1 }
+    }
+
+    override var isSelected: Bool {
+        didSet {
+            guard isSelected != oldValue else { return }
+            // A short fade, which Reduce Motion keeps (it moves nothing).
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState]) {
+                self.selectionMark.alpha = self.isSelected ? 1 : 0
+            }
+        }
     }
 }
