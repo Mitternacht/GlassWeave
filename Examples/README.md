@@ -4,8 +4,9 @@ Open `GlassWeave.xcworkspace`. It contains the package and the UIKit
 laboratory, `GlassWeaveLab`, which consumes the package through a local
 package reference.
 
-The laboratory has one screen: a stage with the rendered background, and the
-comparison controls below it (portrait) or beside it (landscape).
+The laboratory has one main screen: a stage with the rendered background,
+and the comparison controls below it (portrait) or beside it (landscape).
+The glow gallery (below) is a second, full-screen one.
 
 - **Background.** By default the stage shows an app-owned moving source
   (`ProceduralBackground.swift`, `ProceduralBackground.metal`): a GPU-rendered
@@ -52,6 +53,26 @@ clock; Reduce Transparency makes the panel opaque. For UI tests and
 comparison runs, launch arguments fix the settings: `-lab.reduceMotion YES`,
 `-lab.reduceTransparency YES`, and `-lab.appearance dark` or `light` (the
 window's `overrideUserInterfaceStyle`).
+
+Glow (experimental, GW-17 to GW-19, GW-14): `-lab.glow amber|aurora|ember|energy`
+gives the custom panel a colored glow (with a Pulse switch for `energy`),
+`-lab.nativeGlow <preset>` draws the same rim and halo around the native
+reference, and `-lab.interior energy|rays|embers` adds an animated interior
+(with an Interior motion switch).
+
+Glow gallery (GW-20): the Glow gallery button (or `-lab.gallery YES`)
+opens a full-screen gallery of original demos drawn by one glass surface in
+one pass (`GlowGalleryViewController.swift`, `GalleryStyle.swift`,
+`GalleryControls.swift`, `GalleryBackground.swift` and `.metal`): a
+light/dark switch with a glass knob, three element capsules (Ember, Corona,
+Eddy) whose selected one brightens and runs its interior, an energy orb that
+surges when charged, and native glass with a colored rim for comparison.
+Every control is native. At rest it submits no frames; its diagnostics
+report what the surface presents, whether any two panels' quads overlap,
+and the frame counts. `-lab.gallerySelect ember|corona|eddy` and
+`-lab.galleryCharge YES` set its state at launch, and
+`-lab.increaseContrast YES` sets Increase Contrast on it, for tests and
+captures.
 
 Benchmark (GW-09): launch with `-lab.benchmark baseline`, `native`, `custom`,
 `idle`, or `lifecycle` to run one mode of the fixed workload in

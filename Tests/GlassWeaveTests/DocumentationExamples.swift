@@ -85,3 +85,28 @@ func energyOrb(frame: CGRect) -> GlassPanel {
         )
     ))
 }
+
+import CoreGraphics
+import GlassWeave
+
+/// Glowing capsules in a row for one `setPanels(_:)` call, one per color,
+/// spaced so that no two quads (capsule, halo, and one pixel on every side)
+/// overlap.
+func capsuleRow(origin: CGPoint, capsuleSize: CGSize, colors: [GlassGlow.ColorStop]) -> [GlassPanel] {
+    let halo = 16.0
+    let gap = 2 * halo + 4
+    return colors.enumerated().map { index, color in
+        let x = origin.x + Double(index) * (capsuleSize.width + gap)
+        return GlassPanel(
+            frame: CGRect(origin: CGPoint(x: x, y: origin.y), size: capsuleSize),
+            parameters: GlassParameters(
+                cornerRadius: min(capsuleSize.width, capsuleSize.height) / 2,
+                glow: GlassGlow(
+                    colors: [color],
+                    innerGlowRadius: 10, innerGlowIntensity: 0.6,
+                    haloRadius: halo, haloIntensity: 0.8
+                )
+            )
+        )
+    }
+}

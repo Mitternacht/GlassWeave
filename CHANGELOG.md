@@ -46,6 +46,23 @@ evidence only.
   `GlassInterior.Color(_:traits:)` reads a `UIColor` (GW-19).
 - The laboratory's `-lab.interior energy|rays|embers` with an Interior
   motion switch, and interior modes in the Mac characterization (GW-19).
+- `EnhancedNativeGlassView` (GW-14, pulled forward with the glow work): a
+  `GlassGlow`'s rim and halo, and its pulse, drawn with Core Animation around
+  a genuine `NativeGlassView`, whose material stays Apple's; the laboratory's
+  `-lab.nativeGlow <preset>` with a Native glow switch. (Added to this list
+  with GW-20; it was missing.)
+- Several panels in one pass (GW-20): `GlassRenderer.setPanels(_:)`,
+  `panels`, and `maximumPanelCount` (8) draw an ordered list of panels over
+  one frame, each as its own quad (where quads overlap, the later panel
+  wins); `setPanel(_:)` is the one-panel case and renders the same bytes.
+  `GlassSurfaceView.setPanels(_:)`, `panels`, and `presentedPanels` apply the
+  accessibility policy to each panel and run the effect clock while any
+  presented panel animates.
+- The laboratory's glow gallery (GW-20), from its Glow gallery button or
+  `-lab.gallery YES`: a light/dark switch with a glass knob, three element
+  capsules with their own edge colors and interiors, an energy orb, and
+  native glass with a colored rim, drawn by one surface in one pass under
+  native controls, submitting no frames at rest.
 
 ## Unreleased: v0.1 pre-alpha candidate
 

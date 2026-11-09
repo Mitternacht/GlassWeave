@@ -207,6 +207,16 @@ draw and uploaded. Without an interior the output is byte-identical to the
 GW-18 shader (a third frozen copy), and the effect clock also runs while a
 visible interior moves.
 
+GW-20 lets one pass draw several panels: `GlassRenderer.setPanels(_:)`
+(at most `maximumPanelCount`, 8) draws each panel as its own quad after the
+background, sampling the same frame, with the shader unchanged; one panel set
+as a list renders the same bytes as `setPanel(_:)`. Each quad is computed
+from the background sample, so where quads overlap the later panel wins;
+callers keep quads apart. `GlassSurfaceView.setPanels(_:)` applies the
+accessibility policy to each panel and runs the effect clock while any of
+them animates. The laboratory's glow gallery draws its five shapes this way;
+see [the glow design](glow.md#gw-20-several-shapes-in-one-pass-and-the-gallery-implemented).
+
 ## Scheduling and resources
 
 - Render static surfaces on demand; use continuous drawing only while a source or effect is changing.

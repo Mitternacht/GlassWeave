@@ -74,6 +74,48 @@ struct DocumentationExampleTests {
         #expect(worst <= 1)
     }
 
+    @Test func `The capsule row draws each capsule's color in one pass, with quads apart and clear middles`() async throws {
+        let gpu = try GPUContext()
+        let colors: [GlassGlow.ColorStop] = [
+            .init(red: 1, green: 0.4, blue: 0.1), .init(red: 1, green: 0.85, blue: 0.2), .init(red: 0.2, green: 0.9, blue: 0.8),
+        ]
+        // Odd widths put each capsule's center on a pixel center.
+        let panels = capsuleRow(origin: CGPoint(x: 20, y: 20), capsuleSize: CGSize(width: 41, height: 81), colors: colors)
+        #expect(panels.count == 3)
+        // The documented spacing keeps every quad apart.
+        let quads = panels.map { $0.frame.insetBy(dx: -($0.parameters.glow.haloRadius + 1), dy: -($0.parameters.glow.haloRadius + 1)) }
+        #expect(!quads[0].intersects(quads[1]) && !quads[1].intersects(quads[2]))
+
+        let source = Fixture.uniform(width: 240, height: 120, (30, 32, 40))
+        func render(_ panels: [GlassPanel]) async throws -> RenderedImage {
+            let renderer = try GlassRenderer(commandQueue: gpu.queue)
+            try renderer.setSource(gpu.makeLease(bgra: source.bgra, width: source.width, height: source.height))
+            try renderer.setPanels(panels)
+            #expect(renderer.panels.count == panels.count)
+            let target = try gpu.makeTarget(width: source.width, height: source.height)
+            #expect(renderer.draw(targetPixelSize: (source.width, source.height), displayScale: 1) { target } == .submitted(frameID: 1))
+            return try await gpu.readBack(try #require(target.renderPassDescriptor.colorAttachments[0].texture))
+        }
+        let image = try await render(panels)
+        let background = try await render([])
+        let withoutGlow = try await render(panels.map { panel in
+            var plain = panel
+            plain.parameters.glow = .none
+            return plain
+        })
+        for (panel, color) in zip(panels, colors) {
+            let midX = Int(panel.frame.midX)
+            // The top of each rim is its own color.
+            let expected = SIMD3(color.blue, color.green, color.red) * 255
+            #expect(image.channels(x: midX, y: Int(panel.frame.minY) + 1).largestDifference(from: expected) <= 1, "\(color)")
+            // The middle is see-through: exactly the glass without a glow.
+            #expect(image.channels(x: midX, y: Int(panel.frame.midY)) == withoutGlow.channels(x: midX, y: Int(panel.frame.midY)))
+            // The halo lightens the background beside it.
+            let beside = image.channels(x: Int(panel.frame.maxX) + 3, y: Int(panel.frame.midY))
+            #expect(beside.max() > background.channels(x: Int(panel.frame.maxX) + 3, y: Int(panel.frame.midY)).max() + 10)
+        }
+    }
+
     @Test func `The orb example spills a halo outside its circle and pulses`() async throws {
         let gpu = try GPUContext()
         // A 61-point circle with 30 points of surface around it.

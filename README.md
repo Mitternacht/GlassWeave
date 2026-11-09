@@ -56,12 +56,39 @@ performance budget is met or failed; see
 Physical-device qualification (GW-09), a Metal 4 backend experiment (GW-11),
 a touch-driven ripple (GW-12), merging of two custom surfaces (GW-13), a
 SwiftUI adapter (GW-15), and external texture interoperability (GW-16). None
-of these is part of v0.1. The glow work (experimental, after v0.1) has a
-colored rim, inner glow, halo, pulse, and animated interiors on the custom
-panel (GW-17 to GW-19) and a colored rim and halo around genuine native
-glass, `EnhancedNativeGlassView` (GW-14, pulled forward); simulator and Mac
-evidence only. It continues with a laboratory gallery (GW-20). See
-[the task list](tasks/todo.md).
+of these is part of v0.1. The glow work (experimental, after v0.1) is
+described below. See [the task list](tasks/todo.md).
+
+## Glow (experimental)
+
+Added after the v0.1 candidate at the user's request: glass whose edges take
+a tint and a glow in any color while the middle stays see-through or fades.
+Every API here is experimental, and nothing has been measured on a physical
+device.
+
+What works (simulator and Mac evidence):
+
+- **Custom panels** (`GlassGlow`, `GlassInterior` on `GlassParameters`): a
+  rim, an inner glow that fades toward an exactly see-through middle, an
+  optional center fill, a halo outside the shape, and a pulse, in one sRGB
+  color or an angular gradient of up to four, blended in linear light; and
+  animated energy, rays, or embers inside, fading toward the middle.
+- **Several shapes in one pass**: `GlassRenderer.setPanels(_:)` and
+  `GlassSurfaceView.setPanels(_:)` draw up to eight panels over one frame.
+- **Native glass** (`EnhancedNativeGlassView`): the same rim and halo around
+  genuine `UIGlassEffect` glass, whose material stays Apple's.
+- **On demand and accessible**: animation runs only while something moves
+  and the surface is visible; Reduce Motion, Reduce Transparency, and
+  Increase Contrast follow a documented mapping.
+- **The laboratory's glow gallery**: a light/dark switch with a glass knob,
+  three element capsules, an energy orb, and native glass for comparison,
+  all with native controls (`-lab.gallery YES`).
+
+Not measured: device GPU cost, display appearance, frame pacing, and energy
+on any iPhone or iPad; live VoiceOver; the cost of several panels in one
+pass. The clean-consumer check still pins the v0.1 candidate and covers no
+glow. See [the glow design](docs/glow.md) and the evidence in
+[the task list](tasks/todo.md#glow-effects-user-requested-2026-11-09).
 
 ## Modes
 

@@ -292,6 +292,49 @@ func energyOrb(frame: CGRect) -> GlassPanel {
 }
 ```
 
+### Several panels in one pass (experimental)
+
+> Note: Added after the v0.1 candidate at the user's request (GW-20).
+> Experimental and not part of the v0.1 scope.
+
+``GlassRenderer/setPanels(_:)`` draws an ordered list of up to
+``GlassRenderer/maximumPanelCount`` panels over one frame, each as its own
+quad after the background, in one render pass; `GlassSurfaceView.setPanels(_:)`
+does the same in a surface's points, applies the accessibility policy to
+each panel, and runs its effect clock while any of them animates. One panel
+set as a list renders exactly what ``GlassRenderer/setPanel(_:)`` renders.
+Each quad (the panel grown by its halo radius and one pixel) is computed from
+the background, not from what an earlier panel drew, so where two quads
+overlap the later panel wins: keep them apart. Every panel follows the
+``GlassParameters`` normalization rule; only the first eight are kept.
+
+```swift
+import CoreGraphics
+import GlassWeave
+
+/// Glowing capsules in a row for one `setPanels(_:)` call, one per color,
+/// spaced so that no two quads (capsule, halo, and one pixel on every side)
+/// overlap.
+func capsuleRow(origin: CGPoint, capsuleSize: CGSize, colors: [GlassGlow.ColorStop]) -> [GlassPanel] {
+    let halo = 16.0
+    let gap = 2 * halo + 4
+    return colors.enumerated().map { index, color in
+        let x = origin.x + Double(index) * (capsuleSize.width + gap)
+        return GlassPanel(
+            frame: CGRect(origin: CGPoint(x: x, y: origin.y), size: capsuleSize),
+            parameters: GlassParameters(
+                cornerRadius: min(capsuleSize.width, capsuleSize.height) / 2,
+                glow: GlassGlow(
+                    colors: [color],
+                    innerGlowRadius: 10, innerGlowIntensity: 0.6,
+                    haloRadius: halo, haloIntensity: 0.8
+                )
+            )
+        )
+    }
+}
+```
+
 ### Native glass with a glow (experimental)
 
 > Note: Added after the v0.1 candidate at the user's request (GW-14, pulled

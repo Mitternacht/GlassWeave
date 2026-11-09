@@ -185,8 +185,10 @@ rim and halo of `EnhancedNativeGlassView` (GW-14), which draws no interior:
 
 The legibility rule (`GlassTint.minimumStrength`) covers the interior when
 the center fill is 0, which Increase Contrast enforces. A center fill above 0
-mixes the glow colors into the interior; extending the rule to it is left to
-GW-20, where text first sits on a filled body.
+mixes the glow colors into the interior, and the rule does not cover that or
+an interior. The GW-20 gallery therefore places no text on a filled body or
+an interior (its text sits on opaque dark surfaces or the page); extending
+the rule to filled bodies remains open.
 
 ## GW-18: halo and pulse (implemented)
 
@@ -272,7 +274,7 @@ the distinctive-value GPU round trip cover the new fields.
 
 The surface owns its whole drawable, so a halo is cut off only where the
 surface ends, with a hard edge there. Give each shape at least its halo
-radius of surface on every side (the GW-20 gallery plans one full-screen
+radius of surface on every side (the GW-20 gallery uses one full-screen
 surface); a halo that reaches past the surface is simply not drawn beyond it
 (a readback test renders a panel 6 points from the target's edge with a
 40-point halo: the halo reaches the edge pixels, every pixel is written, and
@@ -550,12 +552,15 @@ not an iPhone or iPad.
   with the panel without one (the band around the panel and the middle
   unchanged).
 
-## GW-20 plan: several shapes in one pass
+## GW-20: several shapes in one pass and the gallery (implemented)
 
-The gallery draws **all its shapes in one `GlassSurfaceView` pass**:
-`GlassRenderer` will accept an ordered list of panels (a small fixed maximum)
-and draw each as one quad after the background, in the same render pass,
-sampling the same source frame. One surface per shape was rejected:
+### Several panels in one pass
+
+The gallery draws **all its shapes in one `GlassSurfaceView` pass**.
+`GlassRenderer.setPanels(_:)` takes an ordered list of panels and draws each
+as one quad after the background, in the same render pass, sampling the same
+source frame; `setPanel(_:)` is the one-panel case and renders exactly the
+same bytes. One surface per shape was rejected:
 
 - One produced frame then serves every shape, so the background, every
   refraction, and every halo always show the same frame (GW-06's guarantee),
@@ -565,12 +570,105 @@ sampling the same source frame. One surface per shape was rejected:
   their own command buffers, and extra margins for halos, multiplying memory
   and submissions for no visual gain.
 
-Each panel's fragment composites its body and halo over the background
-sample, so where two panels' quads overlap the later one wins. The gallery
-lays out its shapes so that quads (shape, halo, and one pixel) never
-overlap; merging shapes optically is GW-13's subject, not this one. The faint
-floor reflection under the element capsules is part of the laboratory's own
-background producer, which the app owns anyway.
+| API | Meaning |
+| --- | --- |
+| `GlassRenderer.maximumPanelCount` | 8. The most panels one draw renders; it bounds a draw's work (each panel is one quad whose fragments evaluate the glass, glow, and interior). |
+| `GlassRenderer.setPanels(_:)` | Sets the panels in drawing order. Every panel follows the `GlassParameters` rule: a non-finite value anywhere in the list, even past the maximum, throws `GlassParameterError.nonFinite(field)` and keeps the current panels; only the first eight are kept, as `GlassGlow` keeps its first four stops. |
+| `GlassRenderer.panels` | The panels as drawn (normalized). `panel` is the first, or `nil`. |
+| `GlassSurfaceView.setPanels(_:)`, `panels`, `presentedPanels` | The same in a surface's points. The accessibility policy applies to each panel; a change draws once; the effect clock runs while **any** presented panel animates. `panel`, `presentedPanel`, and `setPanel(_:)` keep their meaning for one panel. |
+
+Nothing in the shader changed: each draw uploads one panel's record. Each
+panel's fragment composites its body and halo over the background sample,
+not over what an earlier panel drew, so **where two quads overlap, the later
+panel wins** (a GPU test shows it). Lay shapes out so that their quads
+(shape, halo, and one pixel on every side) never overlap; merging shapes
+optically is GW-13's subject, not this one. The gallery computes its
+spacing from the halos and reports in its diagnostics whether any two
+presented quads overlap.
+
+### The gallery
+
+`Examples/GlassWeaveLab/GlassWeaveLab/GlowGalleryViewController.swift`,
+opened by the laboratory's Glow gallery button or `-lab.gallery YES`. The
+demos are original: no third-party artwork, icon, name, text, or layout is
+used. One full-screen `GlassSurfaceView` draws five panels; native controls
+sit above it and carry every interaction and every accessibility element.
+
+| Demo | Glass | Native control |
+| --- | --- | --- |
+| Light/dark switch | A round knob (`GalleryStyle.knob`): a warm rim light on its top edge (light angle 0°, directionality 0.92), a 22-point halo, a faint inner glow, and a whiter body by day, softer and moonlit at night. The capsule track is part of the background: a recessed day sky or a starry night, which the knob refracts. | `ThemeToggle`, a `UIControl`: one element, "Dark appearance", traits button and toggle button (which UIKit documents VoiceOver describes as a switch button; no live VoiceOver pass was possible), value "1" or "0", activated directly by `accessibilityActivate()`. It sets the gallery's `overrideUserInterfaceStyle`. |
+| Element capsules: Ember, Corona, Eddy | Dark glass capsules (`GalleryStyle.capsule`) with two-stop edge colors (orange to red, gold to amber, green to blue), interpolated by a selection level: calm is a thin rim, a faint inner glow, a 10-point halo, and a clear, dark, see-through middle; selected is a stronger rim, a 24-point inner glow, a 0.16 two-color fill, a 24-point halo, and the element's interior (embers, rays, or energy, center fade 0.6). Over a dark stage with a faint floor reflection of each capsule's lower outline in the background. | `ElementCard`, a `UIButton` per capsule, labeled with the element's name (shown beneath it), whose selected state is the selection; selecting the selected one deselects it. |
+| Energy orb | A circle on a dark bar (`GalleryStyle.orb`): at rest a steady cyan-to-violet rim, a 14-point halo, and the energy interior's still frame; charged, it surges for five seconds (a brighter rim, a 22-point halo, a 1.4 s pulse of depth 0.5, moving filaments) and settles. | `UIButton` "Charge the orb", value "Resting" or "Surging". |
+| Native glass | Genuine `UIGlassEffect` glass in an `EnhancedNativeGlassView` with a GW-14 rim and 18-point halo in the selected element's colors. | `UIButton` "Native glass". |
+
+No text sits on glass with a fill or an interior: names and titles sit on the
+dark stage, the dark bar, or the page, so the legibility rule for a tinted
+body is not stretched to a filled one; the accessibility audit checks the
+text's contrast in light and dark.
+
+**Background.** `GalleryBackground` (`.swift` and `.metal`) renders the page
+(a soft gradient with three wide color fields), the track, the stage, the
+reflections, and the bar from a `GalleryBackdrop` value derived from the
+layout, the theme level, and the selection levels. Its frame producer returns
+`nil`, so the surface redraws the frame it has, whenever the next backdrop
+equals the one on screen: an interior or pulse tick never re-renders the
+background. A 4 × 4 ordered dither keeps the soft gradients free of bands.
+
+**Layout.** The glass follows native placeholder views (the capsule inside
+each card, the orb inside its button, the knob inside the switch), converted
+into the surface's points after every layout pass and scroll. The capsules
+are spaced by the selected halo plus the calm halo plus two points, and the
+stage and the bar leave the widest halo inside them (light shows on their
+dark fill, not on the light page). At accessibility text sizes the rows
+stack and each capsule's name sits beside it; the content scrolls, and the
+glass scrolls with it.
+
+**Transitions.** The gallery animates levels (theme, knob position, each
+capsule's selection, the orb's energy) with its own `UIUpdateLink`, which
+exists only while a level moves (0.35 to 0.8 s), eased with smoothstep, and
+sets the panels and the backdrop on every step. Text and native content
+cross-dissolve to the new appearance over 0.35 s. An interior cannot change
+speed without its pattern jumping (phase = effect time × speed), so it fades
+in from intensity 0 when it starts moving, and the orb fades its still
+interior out before its moving one fades in.
+
+**On demand.** At rest nothing animates: no panel pulses or moves (the orb
+shows its still frame), the transition link does not exist, and the surface
+submits nothing. While a capsule is selected or the orb surges, the surface's
+own effect clock (GW-18) runs, through the GW-07 scheduler and its
+two-frame bound; it stops when the gallery is hidden, backgrounded, or
+covered. GW-04's open item (the main-thread drawable wait) is unchanged: the
+gallery draws more often only while something moves, within the same bound.
+
+### Accessibility in the gallery
+
+| Setting | Gallery |
+| --- | --- |
+| VoiceOver | The surface is hidden from assistive technologies; every control is one labeled native element: Close, the switch (value 1/0), the three capsules (selected trait), the orb (value), and the native button, in reading order. A live VoiceOver pass needs a device. |
+| Reduce Motion | The policy stills interiors and steadies pulses, so no clock runs; the gallery also skips the knob's slide and the selection ramps, and keeps only the 0.35 s cross-dissolve of the theme. |
+| Reduce Transparency | Opaque bodies with a thin rim, no halos or interiors (the policy); the background drops the floor reflections. |
+| Increase Contrast | Rims evenly lit, no inner glow, fill, or interior (the policy); halos and the orb's pulse are kept. The laboratory's `-lab.increaseContrast YES` sets the trait on the gallery for tests. |
+| Dynamic Type | Text styles throughout; at accessibility sizes the rows stack, names sit beside their capsules, and every target stays at least 44 points. |
+
+## Testing strategy (GW-20)
+
+- GPU readback on My Mac (`GlassPanelListTests`): one panel set as a list
+  equals `setPanel` byte for byte; three panels with halos, a pulse, and
+  interiors whose quads do not overlap equal each panel drawn alone inside
+  its quad and the background elsewhere, in either order; every panel draws
+  at the one effect time; where quads overlap, the later panel wins; the
+  normalization rule and the eight-panel maximum.
+- UIKit tests on the iPhone 18 Pro simulator (`PanelListSurfaceTests`): the
+  surface normalizes and presents each panel, draws once per change, applies
+  the policy to every panel, and runs its clock while any panel animates and
+  not when all have settled or the surface is hidden.
+- Laboratory UI tests (`GlowGalleryUITests`): opening and closing; the
+  switch's value and the page's luminance in both appearances; selection and
+  the selected trait for each capsule; the orb's surge and settling; frame
+  counts at rest, while moving, in the background, and under Reduce Motion;
+  Reduce Transparency and Increase Contrast; element labels, targets, and
+  order; the accessibility audit in light and dark; the largest text size in
+  portrait and landscape; quads apart throughout.
 
 ## Enhanced-native glow (GW-14, implemented)
 
