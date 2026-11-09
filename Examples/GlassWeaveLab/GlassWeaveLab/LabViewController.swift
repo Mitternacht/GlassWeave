@@ -17,7 +17,8 @@ import UIKit
 /// instead, for orientation checks. Launching with `-lab.benchmark <mode>`
 /// runs one mode of GW-09's fixed workload (``BenchmarkScenario``) with
 /// `RenderMetrics` recording. Launching with `-lab.glow <name>` gives the
-/// custom panel a colored glow (``LabGlow``, GW-17).
+/// custom panel a colored glow (``LabGlow``, GW-17), with a halo and a pulse
+/// for `ember` and `energy` (GW-18); a pulsing preset adds a Pulse switch.
 final class LabViewController: UIViewController {
     enum SourceMode {
         case moving
@@ -69,6 +70,8 @@ final class LabViewController: UIViewController {
     private let stageSwitch = UISwitch()
     private let newWindowButton = UIButton(configuration: .bordered())
     private let closeWindowButton = UIButton(configuration: .bordered())
+    /// Turns a pulsing glow preset's pulse on and off (GW-18).
+    private let pulseSwitch = UISwitch()
     private let diagnosticsLabel = UILabel()
     private let resetButton = UIButton(configuration: .bordered())
     /// Benchmark only: settles the stage and reports allocated bytes.
@@ -182,6 +185,11 @@ final class LabViewController: UIViewController {
             stage.surface.renderer.metrics?.reset()
         }
         stageSwitch.isOn = true
+        pulseSwitch.isOn = true
+        // Before the first layout the stage lays the panel out itself.
+        if stage.bounds.width > 0 {
+            updateCustomPanel()
+        }
         applyStageVisibility()
         applyMotionState()
         if mode == .pattern {
@@ -359,6 +367,14 @@ final class LabViewController: UIViewController {
         stageSwitch.accessibilityLabel = String(localized: "Show stage")
         stageSwitch.addAction(UIAction { [weak self] _ in self?.applyStageVisibility() }, for: .valueChanged)
 
+        pulseSwitch.accessibilityIdentifier = "lab.glowPulse"
+        pulseSwitch.accessibilityLabel = String(localized: "Glow pulse")
+        pulseSwitch.isOn = true
+        pulseSwitch.addAction(UIAction { [weak self] _ in
+            self?.updateCustomPanel()
+            self?.updateDiagnostics()
+        }, for: .valueChanged)
+
         newWindowButton.configuration?.title = String(localized: "New window")
         newWindowButton.accessibilityIdentifier = "lab.newWindow"
         newWindowButton.addAction(UIAction { [weak self] _ in self?.openNewWindow() }, for: .primaryActionTriggered)
@@ -394,10 +410,13 @@ final class LabViewController: UIViewController {
         // Lifecycle checks: hide the stage, or open a second window where
         // the system supports several (iPad).
         let lifecycleRow = Self.row([newWindowButton, closeWindowButton, UIView(), Self.caption(String(localized: "Stage")), stageSwitch])
-        controlRows = [tintRow, motionRow, lifecycleRow]
+        // A pulsing glow preset can be settled to compare frame counts.
+        let glowRow = Self.row([UIView(), Self.caption(String(localized: "Pulse")), pulseSwitch])
+        glowRow.isHidden = labGlow?.pulses != true
+        controlRows = [tintRow, motionRow, lifecycleRow, glowRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, diagnosticsLabel, resetButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, diagnosticsLabel, resetButton, measureButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -585,9 +604,13 @@ final class LabViewController: UIViewController {
         if let minimum = tint.minimumStrength(forContrast: panelContrastTarget, againstTextLuminance: panelTextLuminance) {
             tint.strength = max(tint.strength, (minimum * 100).rounded(.up) / 100)
         }
+        var glow = labGlow?.glow(for: traitCollection) ?? .none
+        if !pulseSwitch.isOn {
+            glow.pulseDepth = 0
+        }
         return GlassParameters(
             cornerRadius: 30, bezelWidth: 22, refraction: 0.85, edgeHighlight: 0.6, tint: tint,
-            glow: labGlow?.glow(for: traitCollection) ?? .none
+            glow: glow
         )
     }
 
@@ -777,7 +800,11 @@ final class LabViewController: UIViewController {
     private func renderDidFinish() {
         // A benchmark refreshes from its own timer, not from frames.
         guard benchmark == nil else { return }
-        if mode == .pattern || clock.ticks % 15 == 0 || updateLink?.isEnabled != true {
+        // While the glow pulses, frames come from the surface's effect clock;
+        // refresh about four times a second then too.
+        let pulsing: Bool = if case let .success(stage) = custom { stage.surface.isAnimating } else { false }
+        let pulseFrame: Bool = if case let .success(stage) = custom { stage.surface.frameStatistics.submitted % 15 == 0 } else { true }
+        if mode == .pattern ? (!pulsing || pulseFrame) : (clock.ticks % 15 == 0 || updateLink?.isEnabled != true) {
             updateDiagnostics()
         }
     }
@@ -1022,6 +1049,10 @@ final class LabViewController: UIViewController {
             }
             if let labGlow, let glow = surface.presentedPanel?.parameters.glow {
                 lines.append("Glow: \(labGlow.rawValue) · \(glow.colors.count) colors · rim \(String(format: "%.1f", glow.rimWidth)) pt · inner \(String(format: "%.2f", glow.innerGlowIntensity)) · center \(String(format: "%.2f", glow.centerOpacity))")
+                let pulse = glow.pulseDepth > 0
+                    ? "pulse \(String(format: "%.1f", glow.pulsePeriod)) s × \(String(format: "%.2f", glow.pulseDepth))"
+                    : "no pulse"
+                lines.append("Halo: \(String(format: "%.0f", glow.hasHalo ? glow.haloRadius : 0)) pt · \(String(format: "%.2f", glow.hasHalo ? glow.haloIntensity : 0)) · \(pulse) · effect clock \(surface.isAnimating ? "running" : "stopped") · t \(String(format: "%.2f", surface.renderer.effectTime)) s")
             }
             lines.append("Accessibility: Reduce Motion \(settings.reduceMotion ? "on" : "off") · Reduce Transparency \(settings.reduceTransparency ? "on" : "off") · contrast \(traitCollection.accessibilityContrast == .high ? "high" : "normal") · \(traitCollection.userInterfaceStyle == .dark ? "dark" : "light") · text \(traitCollection.preferredContentSizeCategory.rawValue.replacingOccurrences(of: "UICTContentSizeCategory", with: ""))")
             let statistics = surface.frameStatistics

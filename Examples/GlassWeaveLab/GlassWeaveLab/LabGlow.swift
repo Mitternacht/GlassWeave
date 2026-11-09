@@ -3,18 +3,24 @@ import GlassWeaveUIKit
 import UIKit
 
 /// A colored glow for the laboratory's custom panel, chosen at launch with
-/// `-lab.glow <name>` (GW-17). Without the argument the panel has no glow
-/// and renders exactly as before.
+/// `-lab.glow <name>` (GW-17, GW-18). Without the argument the panel has no
+/// glow and renders exactly as before.
 ///
 /// Every preset keeps the middle see-through (center opacity 0) and keeps
 /// its inner glow within the panel's 22-point rim, where the laboratory
 /// places no text, so the tint's legibility rule still describes the area
-/// the text sits on.
+/// the text sits on. A halo lies outside the panel, behind no text.
 enum LabGlow: String, CaseIterable {
     /// One warm color, lit from the top edge.
     case amber
     /// A four-stop angular gradient, lit evenly all around.
     case aurora
+    /// A warm light concentrated on the top edge, spilling outside the
+    /// panel as a halo (GW-18).
+    case ember
+    /// A cool two-color glow whose rim, inner glow, and halo pulse
+    /// (GW-18).
+    case energy
 
     /// From the `lab.glow` launch argument, or `nil` for no glow.
     static var fromLaunchArguments: LabGlow? {
@@ -43,6 +49,30 @@ enum LabGlow: String, CaseIterable {
                 innerGlowRadius: 22, innerGlowIntensity: 0.7,
                 centerOpacity: 0, lightAngle: 0, directionality: 0
             )
+        case .ember:
+            let warm = GlassGlow.ColorStop(.systemOrange, traits: traits) ?? .init(red: 1, green: 0.6, blue: 0.2)
+            return GlassGlow(
+                colors: [warm],
+                rimWidth: 2, rimSoftness: 2.5, rimIntensity: 1,
+                innerGlowRadius: 22, innerGlowIntensity: 0.8,
+                centerOpacity: 0, lightAngle: 0, directionality: 0.75,
+                haloRadius: 28, haloIntensity: 0.9
+            )
+        case .energy:
+            let stops: [(UIColor, Double)] = [(.systemCyan, 0), (.systemPurple, 180)]
+            return GlassGlow(
+                colors: stops.compactMap { GlassGlow.ColorStop($0.0, angle: $0.1, traits: traits) },
+                rimWidth: 2, rimSoftness: 2.5, rimIntensity: 1,
+                innerGlowRadius: 22, innerGlowIntensity: 0.75,
+                centerOpacity: 0, lightAngle: 0, directionality: 0.2,
+                haloRadius: 28, haloIntensity: 0.9,
+                pulsePeriod: 1.8, pulseDepth: 0.55
+            )
         }
+    }
+
+    /// Whether the preset pulses, so the laboratory offers its Pulse switch.
+    var pulses: Bool {
+        glow(for: UITraitCollection()).pulseDepth > 0
     }
 }
