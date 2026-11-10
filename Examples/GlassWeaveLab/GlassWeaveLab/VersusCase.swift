@@ -323,22 +323,16 @@ extension VersusCase {
             weaveCaption: "A calm gel lit from inside, with a thin bright edge and a few tiny bubbles, seen through the thick wall.",
             tint: UIColor(red: 1.0, green: 0.55, blue: 0.15, alpha: 0.45), height: 104
         ) { dark in
-            var parameters = RefinedLook.lens(corner: 38, bezel: 22, thickness: 20, dark: dark)
-            parameters.tint = GlassTint(red: 0.08, green: 0.07, blue: 0.07, strength: 0.34)
-            parameters.fill = GlassFill(
-                region: .gel(.blob(GlassBlob(
+            var parameters = VesselLook.shell(corner: 38, bezel: 22, thickness: 20, dark: dark)
+            parameters.fill = VesselLook.gel(
+                .blob(GlassBlob(
                     primitives: [
                         .capsule(from: CGPoint(x: -0.45, y: 0.08), to: CGPoint(x: 0.45, y: 0.08), radius: 0.50),
                         .circle(center: CGPoint(x: 0.30, y: -0.10), radius: 0.42),
                     ],
                     smoothness: 0.5, wobble: GlassBlob.Wobble(amplitude: 0.008, speed: 0.5)
-                ))),
-                wallThickness: 5,
-                colors: [fillColor(0.34, 0.06, 0.01), fillColor(1.0, 0.40, 0.05), fillColor(1.0, 0.70, 0.30)],
-                emission: 0.85, absorption: 0.7,
-                sheets: GlassFill.Sheets(count: 1, spacing: 14, edge: 0.3, wobble: 0.2),
-                wallLine: 0.4,
-                bubbles: GlassFill.Bubbles(count: 3, size: 1.8, speed: 0.6, seed: 5)
+                )),
+                wall: 5, folds: 0, bubbles: 2, seed: 5
             )
             return parameters
         },

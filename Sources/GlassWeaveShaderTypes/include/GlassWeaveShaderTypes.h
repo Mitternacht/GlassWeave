@@ -722,9 +722,10 @@ typedef enum GWFillFlag {
 ///   line strength 0...1 (`z`), and the number of ramp stops 1 to 3 (`w`).
 /// - `gelBounds`: gel mode: the gel's bounding box center (`xy`) and half size
 ///   (`zw`).
-/// - `flags`: `GWFillFlag` bits in bits 0...7 and the finish's richness
-///   (0...255, `GlassFill.richness` times 255) in bits 8...15; zero without
-///   it, so the layout is unchanged. `bubbleCount`: 0 to 16. `ior`: the liquid's
+/// - `flags`: `GWFillFlag` bits in bits 0...7, the finish's richness
+///   (0...255, `GlassFill.richness` times 255) in bits 8...15 and the calm
+///   body's pooling (0...255, `GlassFill.pooling` times 255) in bits 16...23;
+///   zero without them, so the layout is unchanged. `bubbleCount`: 0 to 16. `ior`: the liquid's
 ///   index of refraction. `padding0`: the liquid's gloss 0...1 (a slot that was
 ///   padding, so the layout is unchanged).
 /// - `gel`: the gel's own `GWShapeUniforms`, relative to `gelBounds.xy`.

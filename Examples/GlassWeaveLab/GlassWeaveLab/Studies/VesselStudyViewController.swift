@@ -169,13 +169,13 @@ final class VesselStudyViewController: StudyViewController {
         GlassFill.Color(red: red, green: green, blue: blue)
     }
 
-    /// Thick, smoky glass: the refined lens with a dark warm tint, so the body
-    /// is nearly clear and dark and the rim is the thin lit-side line.
+    /// Clear, thick glass: the refined lens with a whisper of warm smoke, so
+    /// the body is nearly clear and the rim is the thin lit-side line (see
+    /// `VesselLook`). No drop shadow: a shadow widens each panel's quad, and the
+    /// two vessels' quads must stay apart (the study's diagnostics line says so);
+    /// on the near-black stage the warm light on the table grounds them.
     private static func shell(corner: Double, bezel: Double, thickness: Double) -> GlassParameters {
-        var parameters = RefinedLook.lens(corner: corner, bezel: bezel, thickness: thickness, dark: true)
-        parameters.tint = GlassTint(red: 0.08, green: 0.07, blue: 0.07, strength: 0.34)
-        parameters.lens.dispersion = 0.10
-        return parameters
+        VesselLook.shell(corner: corner, bezel: bezel, thickness: thickness, shadow: false)
     }
 
     override func panels(at time: Double) -> [GlassPanel] {
@@ -194,42 +194,23 @@ final class VesselStudyViewController: StudyViewController {
             ],
             smoothness: 0.55
         ))
-        hero.fill = GlassFill(
-            region: .gel(.blob(GlassBlob(
+        hero.fill = VesselLook.gel(
+            .blob(GlassBlob(
                 primitives: [
                     .box(center: CGPoint(x: 0.12, y: 0.46), halfSize: CGSize(width: 0.92, height: 0.58), cornerRadius: 0.50, rotation: -4),
                     .circle(center: CGPoint(x: 0.34, y: 0.02), radius: 0.56),
                 ],
                 smoothness: 0.62, wobble: GlassBlob.Wobble(amplitude: 0.008, speed: 0.5)
-            ))),
-            wallThickness: 8,
-            colors: [Self.color(0.30, 0.05, 0.01), Self.color(1.00, 0.40, 0.05), Self.color(1.00, 0.72, 0.32)],
-            emission: 0.85, absorption: 0.7,
-            // PRESENCE: two soft sheets, far apart and bent by more noise, so
-            // they read as folds in one gel and not as contour lines.
-            sheets: GlassFill.Sheets(count: 2, spacing: 24, edge: 0.34, wobble: 0.85),
-            wallLine: 0.45,
-            bubbles: GlassFill.Bubbles(count: 6, size: 2.6, speed: 0.6, seed: 7),
-            gloss: 0.7,
-            richness: 1
+            )),
+            wall: 7, folds: 0, bubbles: 4, seed: 7
         )
 
         // The small vessel: a level liquid that the slider fills and Nudge
         // sloshes.
         var tube = Self.shell(corner: 36, bezel: 20, thickness: 20)
-        tube.fill = GlassFill(
-            region: .level(level: level, tilt: slosh.tilt),
-            wallThickness: 5,
-            colors: [Self.color(0.30, 0.04, 0.02), Self.color(0.95, 0.26, 0.05), Self.color(1.00, 0.58, 0.26)],
-            emission: 0.85, absorption: 0.7,
-            sheets: GlassFill.Sheets(count: 1, spacing: 14, edge: 0.3, wobble: 0.2),
-            wallLine: 0.4,
-            bubbles: GlassFill.Bubbles(count: 3, size: 1.8, speed: 0.6, seed: 21),
-            // A swinging surface ripples; a still one barely does.
-            surface: GlassFill.Surface(
-                waveAmplitude: 0.5 + 2.2 * slosh.agitation, wavelength: 60, waveSpeed: 0.8, meniscus: 3
-            ),
-            richness: 0.8
+        // A swinging surface ripples; a still one barely does.
+        tube.fill = VesselLook.level(
+            level, tilt: slosh.tilt, bubbles: 2, seed: 21, amplitude: 0.25 + 1.8 * slosh.agitation
         )
         return [
             GlassPanel(frame: frame(of: heroAnchor), parameters: hero),

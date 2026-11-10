@@ -55,6 +55,7 @@ import Foundation
 /// | ``wallLine`` | normalized | 0...1 | 0.5 | The thin line in the glass wall. |
 /// | ``gloss`` | normalized | 0...1 | 0.6 | How glossy the liquid's curved surface is: its soft specular streak, the bright thin edge and a level's meniscus line. 0 is matte. |
 /// | ``richness`` | normalized | 0...1 | 0 | Opt-in finish (experimental): a restrained specular highlight on the liquid's own curved surface, brighter warm sheet edges, fine internal structure in the body and a long soft reflection along the lit outer wall. 0 draws exactly what a fill drew before it existed. |
+/// | ``pooling`` | normalized | 0...1 | 0 | Opt-in calm body (experimental): the liquid's light pools along the glass wall and the bottom and falls off smoothly toward the surface, with no hot core and quieter internal masses. 0 draws exactly what a fill drew before it existed. |
 /// | ``bubbles`` | see ``Bubbles`` | see ``Bubbles`` | 5 | The tiny bubbles. |
 /// | ``surface`` | see ``Surface`` | see ``Surface`` | calm | The level surface's waves and meniscus (level mode only); its ``Surface/waveSpeed`` also sets how fast the body's slow flow moves. |
 /// | ``opaque`` | — | — | `false` | A single flat, opaque color: what Reduce Transparency presents. |
@@ -175,6 +176,8 @@ public struct GlassFill: Hashable, Sendable {
         case gloss
         /// The ``GlassFill/richness`` finish.
         case richness
+        /// The ``GlassFill/pooling`` calm body.
+        case pooling
         case bubbleSize, bubbleSpeed
         case waveAmplitude, wavelength, waveSpeed, meniscus
         /// The vessel tilt of a ``GlassFillSlosh``.
@@ -205,6 +208,17 @@ public struct GlassFill: Hashable, Sendable {
     /// a smooth gradient: no wedges, rings or hot spots. An ``opaque`` fill
     /// ignores it.
     public var richness: Double
+    /// The opt-in calm body, 0...1 (experimental; may change before a stable
+    /// release). 0, the default, draws the fill exactly as it was drawn before
+    /// this property existed. Above 0 the body's brightness no longer peaks in
+    /// its thick middle: the liquid's light pools along the glass wall and,
+    /// in a level, the bottom (brightest and most saturated there), and falls
+    /// off smoothly toward the surface and toward the middle, so the body is a
+    /// warm gradient with no hot core. The slow luminous masses fade to a faint
+    /// drift, and the lit side shades the body only a little. Contour sheets,
+    /// gloss, bubbles and the edge line keep their own controls. An ``opaque``
+    /// fill ignores it.
+    public var pooling: Double
     public var opaque: Bool
 
     /// The most colors the emissive ramp uses; further ones are dropped.
@@ -233,7 +247,8 @@ public struct GlassFill: Hashable, Sendable {
         surface: Surface = Surface(),
         gloss: Double = 0.6,
         opaque: Bool = false,
-        richness: Double = 0
+        richness: Double = 0,
+        pooling: Double = 0
     ) {
         self.region = region
         self.wallThickness = wallThickness
@@ -247,6 +262,7 @@ public struct GlassFill: Hashable, Sendable {
         self.gloss = gloss
         self.opaque = opaque
         self.richness = richness
+        self.pooling = pooling
     }
 
     /// Whether the fill draws anything: a gel, or a level above 0.
@@ -346,7 +362,8 @@ extension GlassFill {
             surface: surface,
             gloss: unit(try finite(gloss, .gloss)),
             opaque: opaque,
-            richness: unit(try finite(richness, .richness))
+            richness: unit(try finite(richness, .richness)),
+            pooling: unit(try finite(pooling, .pooling))
         )
     }
 }

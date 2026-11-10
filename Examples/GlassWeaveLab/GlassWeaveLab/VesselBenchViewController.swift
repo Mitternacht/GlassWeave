@@ -71,13 +71,10 @@ final class VesselBenchViewController: UIViewController {
         GlassFill.Color(red: red, green: green, blue: blue)
     }
 
-    /// Dark, thick, smoky glass with the refined thin rim light: a clean outline
-    /// and a mostly dark body, so the liquid is the only light.
+    /// Clear, thick glass with the refined thin rim light: a clean outline and
+    /// a nearly clear body, so the liquid is the only color (see `VesselLook`).
     private static func shell(bezel: Double, thickness: Double, corner: Double = 999) -> GlassParameters {
-        var parameters = RefinedLook.lens(corner: corner, bezel: bezel, thickness: thickness, dark: true)
-        parameters.tint = GlassTint(red: 0.07, green: 0.06, blue: 0.065, strength: 0.50)
-        parameters.lens.dispersion = 0.12
-        return parameters
+        VesselLook.shell(corner: corner, bezel: bezel, thickness: thickness)
     }
 
     private static func makeDemos() -> [Demo] {
@@ -92,21 +89,16 @@ final class VesselBenchViewController: UIViewController {
         )
         var ember = shell(bezel: 34, thickness: 30)
         ember.shape = .blob(pebble)
-        ember.fill = GlassFill(
-            region: .gel(.blob(GlassBlob(
+        ember.fill = VesselLook.gel(
+            .blob(GlassBlob(
                 primitives: [
                     .circle(center: CGPoint(x: -0.34, y: 0.04), radius: 0.60),
                     .circle(center: CGPoint(x: 0.36, y: -0.06), radius: 0.52),
                     .capsule(from: CGPoint(x: -0.50, y: 0.40), to: CGPoint(x: 0.50, y: 0.34), radius: 0.32),
                 ],
                 smoothness: 0.6, wobble: GlassBlob.Wobble(amplitude: 0.010, speed: 0.5)
-            ))),
-            wallThickness: 6,
-            colors: [color(0.42, 0.07, 0.01), color(1.00, 0.38, 0.04), color(1.00, 0.68, 0.28)],
-            emission: 0.9, absorption: 0.7,
-            sheets: GlassFill.Sheets(count: 3, spacing: 15, edge: 0.8, wobble: 0.3),
-            wallLine: 0.5,
-            bubbles: GlassFill.Bubbles(count: 6, size: 4.0, speed: 1, seed: 7)
+            )),
+            wall: 6, folds: 0, bubbles: 4, seed: 7
         )
 
         let drop = GlassBlob(
@@ -118,35 +110,25 @@ final class VesselBenchViewController: UIViewController {
         )
         var teal = shell(bezel: 24, thickness: 24)
         teal.shape = .blob(drop)
-        teal.fill = GlassFill(
-            region: .gel(.blob(GlassBlob(
+        teal.fill = VesselLook.gel(
+            .blob(GlassBlob(
                 primitives: [
                     .circle(center: CGPoint(x: 0, y: 0.16), radius: 0.56),
                     .circle(center: CGPoint(x: 0.1, y: -0.24), radius: 0.36),
                 ],
                 smoothness: 0.5, wobble: GlassBlob.Wobble(amplitude: 0.010, speed: 0.5)
-            ))),
-            wallThickness: 5,
-            colors: [color(0.01, 0.22, 0.24), color(0.06, 0.58, 0.54), color(0.40, 0.90, 0.80)],
-            emission: 0.85, absorption: 0.7,
-            sheets: GlassFill.Sheets(count: 3, spacing: 10, edge: 0.7, wobble: 0.3),
-            wallLine: 0.5,
-            bubbles: GlassFill.Bubbles(count: 4, size: 2.6, speed: 1, seed: 21)
+            )),
+            colors: [color(0.01, 0.20, 0.22), color(0.05, 0.52, 0.50), color(0.22, 0.74, 0.66)],
+            wall: 5, folds: 0, bubbles: 3, seed: 21
         )
 
         var level = shell(bezel: 22, thickness: 22, corner: 38)
-        level.fill = GlassFill(
-            region: .level(level: 0.55, tilt: 0),
-            wallThickness: 5,
-            colors: [color(0.30, 0.03, 0.13), color(0.72, 0.13, 0.32), color(0.96, 0.46, 0.56)],
-            emission: 0.78, absorption: 0.65,
-            sheets: GlassFill.Sheets(count: 2, spacing: 14, edge: 0.7, wobble: 0.3),
-            wallLine: 0.5,
-            bubbles: GlassFill.Bubbles(count: 4, size: 2.6, speed: 1, seed: 33),
-            surface: GlassFill.Surface(waveAmplitude: 1.0, wavelength: 56, waveSpeed: 1, meniscus: 3)
+        level.fill = VesselLook.level(
+            0.55, colors: [color(0.30, 0.03, 0.13), color(0.78, 0.13, 0.32), color(0.96, 0.40, 0.50)],
+            bubbles: 3, seed: 33, amplitude: 0.3
         )
         return [
-            Demo(vessel: .ember, caption: String(localized: "Ember vessel: smoky glass, a luminous gel with layered sheets, a wall line and a few bubbles"), parameters: ember),
+            Demo(vessel: .ember, caption: String(localized: "Ember vessel: clear glass, a calm luminous gel pooled along the wall and a few tiny bubbles"), parameters: ember),
             Demo(vessel: .teal, caption: String(localized: "A second hue, cool blue-green"), parameters: teal),
             Demo(vessel: .level, caption: String(localized: "Level fill: nudge it and the surface sloshes, then settles"), parameters: level),
         ]
@@ -344,7 +326,7 @@ final class VesselBenchViewController: UIViewController {
             if demo.vessel == .level {
                 parameters.fill.region = .level(level: 0.55, tilt: slosh.tilt)
                 // A swinging surface ripples; a still one does not.
-                parameters.fill.surface.waveAmplitude = 0.8 + 2.4 * slosh.agitation
+                parameters.fill.surface.waveAmplitude = 0.3 + 2.0 * slosh.agitation
             }
             return GlassPanel(frame: demo.frame, parameters: parameters)
         }

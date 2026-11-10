@@ -2533,6 +2533,10 @@ static float3 gw_fill_apply(
     // The opt-in finish (`GlassFill.richness`): bits 8...15 of the flags. Zero
     // takes none of the terms below, and the fill is drawn as it was without it.
     const float richness = float((fill.flags >> 8u) & 255u) * (1.0 / 255.0);
+    // The opt-in calm body (`GlassFill.pooling`): bits 16...23 of the flags.
+    // Zero takes none of the terms below, and the body is drawn as it was
+    // without it.
+    const float pooling = float((fill.flags >> 16u) & 255u) * (1.0 / 255.0);
     // CLEAN: the panel's refined look's clean level calms the fine structure
     // (the grain, the veins and the sheet edges become softer and fainter).
     const float cleanFill = (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone) ? gw_clean_level(uniforms.lighting) : 0.0;
@@ -2679,6 +2683,36 @@ static float3 gw_fill_apply(
             liquid = glass * transmittance;
             const float3 emitted = gw_fill_ramp(t, fill) * (lum * fill.absorption.w);
             liquid = liquid + (1.0 - liquid) * saturate(emitted);
+            if (pooling > 0.0) {
+                // The calm body: the liquid's light pools along the glass wall
+                // (and, in a level, the bottom) and falls off smoothly toward
+                // the surface and the middle, so it is brightest and most
+                // saturated at the wall and never forms a hot core. The slow
+                // masses are a faint drift, the lit side shades it a little, and
+                // the color ramp stops short of its palest end.
+                const float wallIn = gel ? bodyDepth : max(-insetD, 0.0);
+                const float surfaceIn = gel ? 1.0e4 : max(-boundaryD, 0.0);
+                // The depth saturates smoothly (no ridge where the distance to
+                // the wall peaks), so the middle is a calm plateau.
+                const float plateau = max(1.3 * domeRadius, 4.0);
+                const float poolWall = exp(-plateau * (1.0 - exp(-wallIn / plateau)) / max(0.9 * domeRadius, 4.0));
+                const float poolDepth = smoothstep(0.0, 1.1 * domeRadius + 4.0, surfaceIn);
+                const float pooled = poolWall * (0.40 + 0.60 * poolDepth);
+                const float calmDrift = 1.0 + 0.10 * lobeWeight * (lobe - 0.5);
+                const float calmShade = clamp(1.0 + 0.25 * facingLight, 0.88, 1.10);
+                const float calmLum = (0.38 + 0.62 * pooled) * calmDrift * calmShade * surfaceFade;
+                const float calmT = saturate(0.32 + 0.44 * pooled + 0.08 * facingLight);
+                // The body takes up what is behind it evenly and strongly (a
+                // dye): no channel absorbs less than 0.85 of the strongest, and
+                // all 2.4 times more, so a busy page does not show through the
+                // middle (about 0.6 % passes); at the thin edge it still does.
+                const float absorbMax = max(fill.absorption.x, max(fill.absorption.y, fill.absorption.z));
+                const float3 calmAbsorb = 2.4 * max(fill.absorption.xyz, float3(0.85 * absorbMax));
+                const float3 calmTransmittance = exp(-calmAbsorb * (h * domeRadius));
+                float3 calm = glass * calmTransmittance;
+                calm = calm + (1.0 - calm) * saturate(gw_fill_ramp(calmT, fill) * (calmLum * fill.absorption.w));
+                liquid = mix(liquid, calm, pooling);
+            }
 
             // Contour sheets: nested membranes, iso-offsets of the depth seen
             // through the surface, bent by noise. Each has a thin, sharp
@@ -3190,7 +3224,14 @@ fragment float4 gw_glass_fragment(
     // Presence (refined look): the body's backdrop pickup, the inner edge glow
     // and the inlays' shade, under the edge lights that follow.
     if (presenceLevel > 0.0) {
+        const float3 beforePresence = glass;
         glass = gw_presence_apply(glass, shown, pixel, q, depth, normal, presenceLevel, gw_frosted && frostPixel.weight > 0.0, uniforms, source);
+        if (gw_filled && ((fill.flags >> 16u) & 255u) != 0u) {
+            // A calm body (`GlassFill.pooling`) is the liquid's own light: the
+            // body's backdrop pickup stays on the empty glass and the wall, and
+            // does not show the page through the liquid.
+            glass = mix(glass, beforePresence, gw_fill_cover(q, normal, displacement, uniforms, fill));
+        }
     }
     // The edge light: the upper left, or the key light with the light model.
     const float2 edgeLight = (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone)
@@ -3265,6 +3306,7 @@ fragment float4 gw_glass_fragment(
     float touchAlpha = 0.0;
     if (gw_touched) {
         float finger = gw_touch_light(pixel, touch);
+        float liquidKeep = 1.0;
         if (gw_filled) {
             // GW-34: on a vessel the finger lifts the glass wall, not the
             // liquid's own light. Over the liquid only a sixth of it stays (a
@@ -3273,10 +3315,18 @@ fragment float4 gw_glass_fragment(
             // catches it, and a quarter of that in the flat middle, so the dark
             // glass is lit along its wall and not washed gray.
             const float wallBand = 1.0 - smoothstep(0.0, 0.5 * max(uniforms.bezelWidth, 1.0), depth);
-            finger *= (1.0 - 0.84 * gw_fill_cover(q, normal, displacement, uniforms, fill)) * (0.25 + 0.75 * wallBand);
+            // A calm body (`GlassFill.pooling`) keeps none of it, and none of the
+            // ring's catch light: the liquid is unchanged by a touch.
+            const bool calmBody = ((fill.flags >> 16u) & 255u) != 0u;
+            const float veil = calmBody ? 1.0 : 0.84;
+            const float liquidCover = gw_fill_cover(q, normal, displacement, uniforms, fill);
+            finger *= (1.0 - veil * liquidCover) * (0.25 + 0.75 * wallBand);
+            if (calmBody) {
+                liquidKeep = 1.0 - liquidCover;
+            }
         }
         const float gleam = gw_touch_gleam(pixel, depth, facing, touch);
-        const float shine = gw_touch_ring_light(pixel, edgeLight, touch);
+        const float shine = gw_touch_ring_light(pixel, edgeLight, touch) * liquidKeep;
         touchAlpha = 1.0 - (1.0 - finger) * (1.0 - gleam) * (1.0 - shine);
         if (touchAlpha > 0.0) {
             // The finger lifts the glass's own color toward white (a glass that

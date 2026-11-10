@@ -171,29 +171,13 @@ final class TouchBenchViewController: UIViewController {
                 parameters.frost = GlassFrost(profile: .clearRim, sigma: 7, transition: 24, grain: 0.3, saturation: 1.15, brightness: 1.03)
             }
         case .vessel:
-            // GW-34: dark, thick glass with the refined rim, holding a glowing
-            // ember liquid (a level in the pill, a gel in the round one), as on
-            // the vessels page.
-            parameters = RefinedLook.lens(corner: 999, bezel: bezel, thickness: thickness, dark: true)
-            parameters.tint = GlassTint(red: 0.07, green: 0.06, blue: 0.065, strength: 0.50)
-            parameters.lens.dispersion = 0.12
-            let ember = [
-                GlassFill.Color(red: 0.42, green: 0.07, blue: 0.01), GlassFill.Color(red: 1.00, green: 0.38, blue: 0.04),
-                GlassFill.Color(red: 1.00, green: 0.68, blue: 0.28),
-            ]
+            // VESSEL: clear glass with the refined thin rim, holding a calm
+            // luminous liquid (a level in both shapes: the pill and the round
+            // vessel), as on the vessels page. See `VesselLook`.
+            parameters = VesselLook.shell(bezel: bezel, thickness: thickness)
             parameters.fill = round
-                ? GlassFill(
-                    region: .gel(.blob(GlassBlob(primitives: [.circle(center: .zero, radius: 0.62)]))),
-                    wallThickness: 5, colors: ember, emission: 0.9, absorption: 0.7,
-                    sheets: GlassFill.Sheets(count: 2, spacing: 9, edge: 0.7, wobble: 0.3), wallLine: 0.5,
-                    bubbles: GlassFill.Bubbles(count: 3, size: 2.4, speed: 1, seed: 11)
-                )
-                : GlassFill(
-                    region: .level(level: 0.5, tilt: 0), wallThickness: 5, colors: ember, emission: 0.9, absorption: 0.7,
-                    sheets: GlassFill.Sheets(count: 2, spacing: 14, edge: 0.7, wobble: 0.3), wallLine: 0.5,
-                    bubbles: GlassFill.Bubbles(count: 5, size: 2.6, speed: 1, seed: 33),
-                    surface: GlassFill.Surface(waveAmplitude: 0.8, wavelength: 56, waveSpeed: 1, meniscus: 3)
-                )
+                ? VesselLook.level(0.58, bubbles: 2, seed: 11)
+                : VesselLook.level(0.5, bubbles: 3, seed: 33)
         }
         parameters.touch = .standard
         // `-lab.touch.boost <factor>` scales the three strengths, to inspect the
