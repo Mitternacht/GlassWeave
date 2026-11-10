@@ -3322,3 +3322,283 @@ fragment float4 gw_glass_fragment(
     }
     return float4(encoded, 1.0);
 }
+
+// MARK: Overlay mode (GW-30)
+//
+// A panel drawn for a TRANSPARENT surface: no background pass, no source
+// texture, the target cleared to transparent black, and every pixel written as
+// premultiplied alpha, `(color, alpha)`, so Core Animation composites the
+// surface over whatever UIKit draws behind it. These are separate functions
+// (`gw_overlay_fragment` and the two pre-pass fragments after it), selected as
+// pipeline variants like the effects above, so `gw_glass_fragment` is not touched and
+// the opaque surface renders what it always did, byte for byte (a frozen copy
+// in the tests proves it).
+//
+// What it draws is every term that is the panel's own light and material: the
+// tint, the rim light, the glow and its halo, the interior, the inner light, the
+// light model's rim and bloom, the inner shadow, the liquid or gel fill, and,
+// outside the outline, the drop and contact shadows and the caustic. What it
+// cannot draw is what needs the pixels behind the surface, which a layer cannot
+// read: the refraction and the lens's dispersion, the frost and its scrim, the
+// refined look's presence (the body's pickup of the backdrop) and the touch
+// response's bend. They are skipped, not approximated; the light model still
+// uses the lens's bevel as its surface normal.
+//
+// Every term is the same "over" of the opaque stack, kept as a layer: the
+// premultiplied (encoded) color the stack adds to the display and, per channel,
+// how much of what is behind it shows through (1 where the surface is clear).
+// A term that is affine in the glass color (the light model's and the fill's
+// steps) is evaluated over black and over white, which gives both exactly. The
+// resolve then needs ONE alpha, as Core Animation's premultiplied compositing,
+// `color + (1 - alpha) * behind`, has one: it is the mean of the channels'
+// opacity, and the colors are shifted so that the result is exact over a mid
+// gray (`gw_overlay_reference`) and, per channel, over black. A light stays
+// brighter than its alpha (the color exceeds the alpha, an additive glow) where
+// its channels differ, which is how a colored light adds to the page behind it
+// instead of covering it.
+
+/// The page the overlay's channel shift is exact over, in encoded units.
+constant float gw_overlay_reference = 0.5;
+
+struct GWOverlayStack {
+    /// The premultiplied, sRGB-encoded color the stack adds to the display.
+    float3 color;
+    /// Per channel, how much of what is behind the stack shows through.
+    float3 through;
+};
+
+static GWOverlayStack gw_overlay_clear() {
+    GWOverlayStack stack;
+    stack.color = float3(0.0);
+    stack.through = float3(1.0);
+    return stack;
+}
+
+/// Puts a layer, `color` premultiplied and `through` per channel, on top.
+static void gw_overlay_lay(thread GWOverlayStack &stack, float3 color, float3 through) {
+    stack.color = color + through * stack.color;
+    stack.through = stack.through * through;
+}
+
+/// `linearColor` laid over with an opacity per channel (the opaque stack's
+/// `mix(glass, color, alpha)`).
+static void gw_overlay_over(thread GWOverlayStack &stack, float3 linearColor, float3 alpha) {
+    const float3 a = saturate(alpha);
+    gw_overlay_lay(stack, gw_glass_encode_srgb(linearColor) * a, 1.0 - a);
+}
+
+/// White laid over with an opacity per channel: a light screened over the
+/// glass (`glass + (1 - glass) * alpha`), the rim light, the interior, the
+/// inner light and the halo.
+static void gw_overlay_light(thread GWOverlayStack &stack, float3 alpha) {
+    const float3 a = saturate(alpha);
+    gw_overlay_lay(stack, a, 1.0 - a);
+}
+
+/// A step that is affine in the glass color, given its results over black and
+/// over white: a layer whose opacity is what it takes from the white and whose
+/// color is what it adds to the black.
+static void gw_overlay_affine(thread GWOverlayStack &stack, float3 overBlack, float3 overWhite) {
+    const float3 alpha = saturate(1.0 - (overWhite - overBlack));
+    const float3 straight = max(overBlack, 0.0) / max(alpha, 1e-4);
+    gw_overlay_lay(stack, gw_glass_encode_srgb(straight) * alpha, 1.0 - alpha);
+}
+
+/// The premultiplied output for a stack: one alpha (the channels' mean
+/// opacity), the colors shifted to keep the result right over a mid gray, and
+/// the triangular dither (`need` 0...1) on color and alpha, so a soft gradient
+/// has no steps in either.
+static float4 gw_overlay_resolve(GWOverlayStack stack, uint2 cell, float need) {
+    const float3 through = saturate(stack.through);
+    const float mean = (through.x + through.y + through.z) * (1.0 / 3.0);
+    float3 color = max(stack.color + (through - mean) * gw_overlay_reference, 0.0);
+    float alpha = 1.0 - mean;
+    if (need > 0.0) {
+        const float3 noise = gw_dither_triangular(cell) * need;
+        color += noise;
+        alpha += noise.y;
+    }
+    return float4(saturate(color), saturate(alpha));
+}
+
+/// How much of the dither a pixel needs: where the shader makes a gradient.
+static float gw_overlay_need(float synthetic) {
+    return smoothstep(0.0, 0.03, synthetic);
+}
+
+/// The overlay panel: the glass terms that need no backdrop, as premultiplied
+/// alpha. The same stack order as `gw_glass_fragment`.
+fragment float4 gw_overlay_fragment(
+    GWGlassVertexOut in [[stage_in]],
+    constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]],
+    constant GWFillUniforms &fill [[buffer(GWGlassBindingIndexFill), function_constant(gw_filled)]])
+{
+    const float2 pixel = in.position.xy;
+    const float2 q = pixel - uniforms.panelCenter;
+    const float distance = gw_panel_distance(q, uniforms);
+    const float coverage = saturate(0.5 - distance);
+    const bool lit = uniforms.lighting.finish != GWLightingFinishNone;
+
+    // Outside the outline: the halo and the embers' sparks, light over nothing.
+    GWOverlayStack outside = gw_overlay_clear();
+    float haloAlpha = 0.0;
+    float sparkAlpha = 0.0;
+    if (uniforms.glowHaloRadius > 0.0 && coverage < 1.0 && distance < uniforms.glowHaloRadius) {
+        const float4 shade = gw_glow_shade(q, uniforms);
+        const float t = saturate(max(distance, 0.0) / uniforms.glowHaloRadius);
+        haloAlpha = uniforms.glowHaloIntensity * (1.0 - t) * (1.0 - t) * shade.w;
+        gw_overlay_light(outside, shade.xyz * haloAlpha);
+    }
+    if (uniforms.interiorEffect == GWInteriorEffectEmbers && uniforms.glowHaloRadius > 0.0
+        && coverage < 1.0 && q.y < 0.0 && distance < uniforms.glowHaloRadius) {
+        const float e = gw_interior_sparks(q / uniforms.interiorPixelsPerPoint, uniforms);
+        const float t = saturate(max(distance, 0.0) / uniforms.glowHaloRadius);
+        sparkAlpha = e * uniforms.interiorIntensity * (1.0 - t) * (1.0 - t);
+        if (sparkAlpha > 0.0) {
+            gw_overlay_light(outside, gw_interior_ramp(e, uniforms) * sparkAlpha);
+        }
+    }
+    if (coverage <= 0.0) {
+        if (haloAlpha <= 0.0 && sparkAlpha <= 0.0) {
+            return float4(0.0);
+        }
+        return gw_overlay_resolve(outside, uint2(pixel), gw_overlay_need(max(haloAlpha, sparkAlpha)));
+    }
+
+    const float depth = max(-distance, 0.0);
+    const float rim = uniforms.bezelWidth > 0.0 ? saturate(1.0 - depth / uniforms.bezelWidth) : 0.0;
+    const float2 normal = gw_panel_normal(q, uniforms.normalRadius, uniforms);
+    const bool grounded = (uniforms.grounding.flags & GWGroundingFlagActive) != 0u;
+    float synthetic = 0.0;
+
+    GWOverlayStack body = gw_overlay_clear();
+    // The tint: a veil of the panel's color (an opaque body under Reduce
+    // Transparency, whose policy makes it full strength).
+    gw_overlay_over(body, uniforms.tint.xyz, float3(uniforms.tint.w));
+    if (grounded && (uniforms.grounding.flags & GWGroundingFlagInner) != 0u) {
+        // The inner shadow: a shade just inside the rim nearest the light.
+        constant GWGroundingUniforms &g = uniforms.grounding;
+        const float d = gw_panel_distance(q - g.shadowDirection * g.innerOffset, uniforms);
+        const float s = g.innerColor.w * gw_blur_edge(d, g.innerSigma);
+        gw_overlay_lay(body, float3(0.0), 1.0 - s * (1.0 - g.innerColor.xyz));
+        synthetic = max(synthetic, s);
+    }
+    // The liquid or gel fill, over black and over white.
+    if (gw_filled) {
+        const float displacement = uniforms.maxDisplacement * rim * rim;
+        float touchedBlack = 0.0;
+        float touchedWhite = 0.0;
+        const float3 overBlack = gw_fill_apply(float3(0.0), pixel, q, normal, displacement, depth, uniforms, fill, touchedBlack);
+        const float3 overWhite = gw_fill_apply(float3(1.0), pixel, q, normal, displacement, depth, uniforms, fill, touchedWhite);
+        gw_overlay_affine(body, overBlack, overWhite);
+        synthetic = max(synthetic, max(touchedBlack, touchedWhite));
+    }
+    // The edge light: the upper left, or the key light with the light model.
+    const float2 edgeLight = lit ? uniforms.lighting.edgeDirection : gw_light_direction;
+    const float facing = saturate(dot(normal, edgeLight));
+    gw_overlay_light(body, float3(uniforms.edgeHighlight * rim * rim * rim * (0.4 + 0.6 * facing)));
+
+    // The glow.
+    const float rimReach = uniforms.glowRimIntensity > 0.0 ? uniforms.glowRimWidth + uniforms.glowRimFeather : 0.0;
+    const float glowReach = max(rimReach, uniforms.glowInnerRadius) + 0.01;
+    if (uniforms.glowStopCount > 0u && (uniforms.glowCenterOpacity > 0.0 || depth < glowReach)) {
+        const float4 glow = gw_glow(q, depth, uniforms);
+        gw_overlay_over(body, glow.xyz, float3(glow.w));
+        synthetic = max(synthetic, glow.w);
+    }
+    // The interior, light screened over the glow.
+    if (uniforms.interiorEffect != GWInteriorEffectNone) {
+        const float w = saturate(depth / gw_panel_inscribed(uniforms));
+        const float fade = 1.0 - uniforms.interiorCenterFade * smoothstep(0.3, 0.85, w);
+        if (fade > 0.0) {
+            const float e = gw_interior_value(q, w, uniforms);
+            const float alpha = e * uniforms.interiorIntensity * fade;
+            if (alpha > 0.0) {
+                gw_overlay_light(body, gw_interior_ramp(e, uniforms) * alpha);
+                synthetic = max(synthetic, alpha);
+            }
+        }
+    }
+    // The inner light.
+    if (uniforms.lightEmitterCount > 0u) {
+        const float minHalf = max(gw_panel_inscribed(uniforms), 1e-3);
+        const float w = gw_light_smooth_w(q, minHalf, uniforms);
+        const float fade = (1.0 - uniforms.lightCenterFade * smoothstep(0.3, 0.85, w)) * uniforms.lightBodyScale;
+        const float pipeBand = uniforms.lightPipingWidth > 0.0 ? gw_light_falloff(depth / uniforms.lightPipingWidth) : 0.0;
+        const float pipeScale = pipeBand * uniforms.lightPiping;
+        if (fade > 0.0 || pipeScale > 0.0) {
+            for (uint i = 0u; i < min(uniforms.lightEmitterCount, 4u); ++i) {
+                constant GWLightEmitter &emitter = uniforms.lightEmitters[i];
+                float pipe = 0.0;
+                const float4 emitted = gw_light_emitter(q, depth, w, emitter, uniforms, pipe);
+                const float bodyLight = emitted.w * emitter.intensity * fade;
+                const float piping = pipe * pipeScale * emitter.intensity;
+                const float alpha = 1.0 - (1.0 - bodyLight) * (1.0 - piping);
+                if (alpha > 0.0) {
+                    if (uniforms.lightComposite == GWLightCompositePaint) {
+                        gw_overlay_over(body, emitted.xyz, float3(min(alpha, gw_light_paint_cap)));
+                    } else {
+                        gw_overlay_light(body, emitted.xyz * alpha);
+                    }
+                    synthetic = max(synthetic, alpha);
+                }
+            }
+        }
+    }
+    // The light model's rim, reflections and bloom, over black and over white.
+    if (lit) {
+        // The contrasting hairline's polarity cannot follow a backdrop it
+        // cannot read: it follows the panel's own tint (light on a dark panel,
+        // dark on a light one), one way for both evaluations.
+        const float localLuma = dot(uniforms.tint.xyz, gw_presence_luma) > 0.2 ? 1.0 : 0.0;
+        float touchedBlack = 0.0;
+        float touchedWhite = 0.0;
+        const float3 overBlack = gw_light_model(float3(0.0), q, depth, uniforms, localLuma, touchedBlack);
+        const float3 overWhite = gw_light_model(float3(1.0), q, depth, uniforms, localLuma, touchedWhite);
+        gw_overlay_affine(body, overBlack, overWhite);
+        const float thinRim = gw_thin_rim(uniforms.lighting);
+        synthetic = max(synthetic, max(touchedBlack, touchedWhite) * (1.0 - thinRim));
+    }
+    // The caustic, light added over the surface, encoded.
+    if (grounded && (uniforms.grounding.flags & GWGroundingFlagCaustic) != 0u) {
+        const float3 caustic = gw_grounding_caustic(pixel, uniforms);
+        body.color += caustic;
+        synthetic = max(synthetic, max(caustic.x, max(caustic.y, caustic.z)) * 8.0);
+    }
+
+    // The body at its coverage, over the outside (the halo and the sparks).
+    GWOverlayStack result = outside;
+    gw_overlay_lay(result, body.color * coverage, 1.0 - coverage * (1.0 - body.through));
+    const float need = max(gw_overlay_need(synthetic) * coverage, gw_overlay_need(max(haloAlpha, sparkAlpha)) * (1.0 - coverage));
+    return gw_overlay_resolve(result, uint2(pixel), need);
+}
+
+/// The shadows' pre-pass fragment for an overlay: the drop and contact shadows
+/// as premultiplied black, outside the outline only, so the translucent glass
+/// is not darkened by a shadow it does not cast on itself.
+fragment float4 gw_overlay_shadow_fragment(
+    GWGlassVertexOut in [[stage_in]],
+    constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]])
+{
+    const float2 pixel = in.position.xy;
+    const float outsideOnly = 1.0 - saturate(0.5 - gw_panel_distance(pixel - uniforms.panelCenter, uniforms));
+    const float3 multiplier = gw_grounding_multiplier(pixel, uniforms);
+    GWOverlayStack stack = gw_overlay_clear();
+    gw_overlay_lay(stack, float3(0.0), 1.0 - (1.0 - multiplier) * outsideOnly);
+    const float3 shade = 1.0 - stack.through;
+    return gw_overlay_resolve(stack, uint2(pixel), smoothstep(0.0, 3.0 / 255.0, max(shade.x, max(shade.y, shade.z))));
+}
+
+/// The caustic's pre-pass fragment for an overlay: its light as premultiplied
+/// color with no alpha (added to what is behind), outside the outline only.
+fragment float4 gw_overlay_caustic_fragment(
+    GWGlassVertexOut in [[stage_in]],
+    constant GWGlassUniforms &uniforms [[buffer(GWGlassBindingIndexUniforms)]])
+{
+    const float2 pixel = in.position.xy;
+    const float outsideOnly = 1.0 - saturate(0.5 - gw_panel_distance(pixel - uniforms.panelCenter, uniforms));
+    float3 light = gw_grounding_caustic(pixel, uniforms) * outsideOnly;
+    const float3 amount = smoothstep(float3(0.0), float3(3.0 / 255.0), light);
+    light = max(light + gw_dither_triangular(uint2(pixel)) * amount, 0.0);
+    return float4(saturate(light), 0.0);
+}

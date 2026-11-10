@@ -100,9 +100,30 @@ import UIKit
 /// Motion a pulsing glow is drawn steady at its mean level and an interior
 /// as its still frame, so the effect clock stops. By default the view follows the system settings and their
 /// change notifications.
+///
+/// Overlay mode (GW-30, experimental): a surface made with a renderer created
+/// in ``GlassRenderer/Mode/overlay`` is transparent (`isOpaque` is `false`,
+/// the layer is cleared to transparent black and holds premultiplied alpha)
+/// and has no background pass and no source, so it composites over whatever
+/// UIKit draws behind it. Each panel contributes only the terms that need no
+/// backdrop (see ``GlassRenderer/Mode/overlay``); the view cannot bend or
+/// frost what is behind it, and a panel's frost and touch response are
+/// presented as none (``presentedPanel``). It draws as soon as it has a panel,
+/// a size and a window (no ``setSource(_:)`` is needed, which, like
+/// ``setFrameProducer(_:)``, does nothing on an overlay). Reduce Transparency
+/// presents the opaque policy body: a tint at full strength, so alpha 1 over the
+/// panel and the content behind it is hidden. Hit testing passes through (the
+/// view takes no touches) and it stays decorative to VoiceOver, as always.
 @MainActor
 public final class GlassSurfaceView: UIView {
     public let renderer: GlassRenderer
+
+    /// What the surface draws: the renderer's mode (GW-30). ``GlassRenderer/Mode/opaque``
+    /// by default; ``GlassRenderer/Mode/overlay`` for a transparent surface
+    /// over live content.
+    public var mode: GlassRenderer.Mode { renderer.mode }
+
+    private var isOverlay: Bool { renderer.mode == .overlay }
 
     /// The result of the most recent draw request, for diagnostics.
     public private(set) var lastRenderOutcome: BackgroundRenderOutcome?
@@ -264,6 +285,7 @@ public final class GlassSurfaceView: UIView {
         self.acquirer = DrawableAcquirer(layer: metalLayer)
         super.init(frame: .zero)
 
+        let overlay = renderer.mode == .overlay
         metalView.colorPixelFormat = GlassRenderer.outputPixelFormat
         metalView.framebufferOnly = true
         // Event-driven drawing: no display loop runs while nothing changes.
@@ -271,19 +293,22 @@ public final class GlassSurfaceView: UIView {
         metalView.enableSetNeedsDisplay = true
         // The drawable size comes from local bounds and display scale.
         metalView.autoResizeDrawable = false
-        metalView.isOpaque = true
+        // An overlay is transparent, and visible from the start: it needs no
+        // source to show its panels.
+        metalView.isOpaque = !overlay
+        metalView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         metalView.isUserInteractionEnabled = false
         metalView.isAccessibilityElement = false
-        metalView.isHidden = true
+        metalView.isHidden = !overlay
         drawDelegate.surface = self
         metalView.delegate = drawDelegate
         addSubview(metalView)
 
-        isOpaque = true
+        isOpaque = !overlay
         isUserInteractionEnabled = false
         isAccessibilityElement = false
         accessibilityElementsHidden = true
-        backgroundColor = .secondarySystemBackground
+        backgroundColor = overlay ? .clear : .secondarySystemBackground
 
         registerForTraitChanges([UITraitDisplayScale.self]) { (self: Self, _) in
             self.updatePixelSize()
@@ -348,7 +373,11 @@ public final class GlassSurfaceView: UIView {
     /// Validates and presents a new source frame.
     ///
     /// On error the previous source stays current.
+    ///
+    /// Does nothing on an overlay (``mode``): it has no background pass, so a
+    /// source is never drawn.
     public func setSource(_ lease: BackgroundFrameLease) throws(BackgroundSourceError) {
+        guard !isOverlay else { return }
         try renderer.setSource(lease)
         metalView.isHidden = false
         scheduleFrame()
@@ -410,8 +439,16 @@ public final class GlassSurfaceView: UIView {
         // Transparency and Increase Contrast draw their opaque body at every
         // tier, and Reduce Motion stills whatever the tier left moving.
         let tier = qualityResolution.quality
-        let presented = requestedPanels.map {
-            GlassAccessibilityPolicy.presentedPanel(for: tier.reduced($0), settings: accessibilitySettings, traits: traitCollection)
+        let presented = requestedPanels.map { panel in
+            var presented = GlassAccessibilityPolicy.presentedPanel(for: tier.reduced(panel), settings: accessibilitySettings, traits: traitCollection)
+            if isOverlay {
+                // An overlay cannot read what is behind it: the frost and the
+                // touch response (which bends it) are not drawn, so they are
+                // not presented, and no touch is tracked or clock run for them.
+                presented.parameters.frost = .none
+                presented.parameters.touch = .none
+            }
+            return presented
         }
         // Reduce Transparency presents any frost as none (the policy row also
         // clears each panel's own frost): its body is opaque, so no pyramid is
@@ -731,7 +768,7 @@ public final class GlassSurfaceView: UIView {
     /// Motion stills every one of them). A tick for a panel that cannot would
     /// only present the same pixels again.
     private var wantsEffectClock: Bool {
-        guard !isEffectClockPaused, isVisible, renderer.currentFrame != nil || frameProducer != nil else { return false }
+        guard !isEffectClockPaused, isVisible, isOverlay || renderer.currentFrame != nil || frameProducer != nil else { return false }
         let scale = Double(traitCollection.displayScale)
         // A touch whose ring or fade is still moving also runs the clock (GW-12).
         if touchTracker.isAnimating(styles: presentedTouchStyles, time: effectClock.time) { return true }
@@ -846,7 +883,10 @@ public final class GlassSurfaceView: UIView {
     /// when to call ``requestFrame()``; the view runs no display loop.
     ///
     /// Pass `nil` to stop producing; the last frame stays the source.
+    ///
+    /// Does nothing on an overlay (``mode``): there is no source to produce.
     public func setFrameProducer(_ producer: FrameProducer?) {
+        guard !isOverlay else { return }
         frameProducer = producer
         if producer != nil {
             metalView.isHidden = false
@@ -868,6 +908,7 @@ public final class GlassSurfaceView: UIView {
     /// Removes the source and shows the opaque fallback. A frame producer,
     /// if set, keeps producing on the next draw.
     public func clearSource() {
+        guard !isOverlay else { return }
         renderer.clearSource()
         metalView.isHidden = frameProducer == nil
         if frameProducer != nil {
@@ -926,7 +967,7 @@ public final class GlassSurfaceView: UIView {
     /// Whether a draw now would take a drawable: it has a source or a
     /// producer, and a target with area.
     private var wantsDrawable: Bool {
-        (renderer.currentFrame != nil || frameProducer != nil) && pixelSize.width > 0 && pixelSize.height > 0
+        (isOverlay || renderer.currentFrame != nil || frameProducer != nil) && pixelSize.width > 0 && pixelSize.height > 0
     }
 
     /// The acquisition finished (`drawable` is `nil` when the layer timed

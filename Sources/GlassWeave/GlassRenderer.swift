@@ -41,6 +41,30 @@ public final class GlassRenderer {
     /// The queue for every submission; see ``BackgroundRenderer/commandQueue``.
     public let commandQueue: any MTLCommandQueue
 
+    /// What the renderer draws into its target (GW-30).
+    ///
+    /// Experimental.
+    public enum Mode: String, Hashable, Sendable {
+        /// The default: the background source, with the panels over it, into
+        /// an opaque target. Everything this type documents.
+        case opaque
+        /// Glass over live content behind the surface: no background pass and
+        /// no source, the target cleared to transparent black, and each panel
+        /// drawn as premultiplied alpha with only the terms that need no
+        /// backdrop (its tint, rim light, glow and halo, interior, inner light,
+        /// light model, inner shadow, fill and, outside the outline, its drop
+        /// and contact shadows and caustic). Refraction, dispersion, frost
+        /// and the touch response read the pixels behind the surface, which a
+        /// layer cannot, so they are skipped. See ``overlayDraw``'s variant
+        /// ``PipelineVariant/overlay`` and `docs/overlay.md`.
+        case overlay
+    }
+
+    /// The mode the renderer was created with. A renderer in ``Mode/overlay``
+    /// builds only the overlay pipelines (and the plain panel pipeline), at
+    /// initialization like every other, and never takes a source.
+    public let mode: Mode
+
     private let background: BackgroundRenderer
     private let panelPipeline: any MTLRenderPipelineState
     /// The panel pipeline with the thick-lens code (GW-22), or `nil` when the
@@ -89,6 +113,10 @@ public final class GlassRenderer {
     /// bound; the touch code is gated at run time by the record.
     private let touchedPipeline: (any MTLRenderPipelineState)?
     private let touchedShapedPipeline: (any MTLRenderPipelineState)?
+    /// The overlay pipelines (GW-30), built only in ``Mode/overlay``.
+    private let overlayPipelines: OverlayPipelines?
+    /// The count of overlay draws, which stands in for a source frame's ID.
+    private var overlayFrameCount: UInt64 = 0
 
     /// The panel pipeline variants (GW-22, GW-23, GW-25, GW-26, GW-24b, GW-28),
     /// all built at initialization.
@@ -135,6 +163,10 @@ public final class GlassRenderer {
         /// effects and any shape. A panel with frost or a fill draws no touch
         /// response.
         case touched
+        /// The overlay shader (GW-30), in a renderer created with
+        /// ``Mode/overlay``: premultiplied alpha with the terms that need no
+        /// backdrop. Draws every panel, whatever else it asks for.
+        case overlay
     }
 
     /// How many pre-pass quads (a shadow quad or a caustic quad each) the last
@@ -253,12 +285,16 @@ public final class GlassRenderer {
     }
 
     /// Creates a renderer that submits to `commandQueue` on its device.
-    /// Loads the package shader library and builds both pipelines now.
-    public convenience init(commandQueue: any MTLCommandQueue) throws {
+    /// Loads the package shader library and builds the pipelines now.
+    ///
+    /// - Parameter mode: ``Mode/opaque`` (the default) or, experimental,
+    ///   ``Mode/overlay`` for glass over live content (GW-30).
+    public convenience init(commandQueue: any MTLCommandQueue, mode: Mode = .opaque) throws {
         let library = try BackgroundRenderer.makeLibrary(device: commandQueue.device)
         try self.init(
             commandQueue: commandQueue, library: library,
-            panelLibrary: library, panelVertex: "gw_glass_vertex", panelFragment: "gw_glass_fragment"
+            panelLibrary: library, panelVertex: "gw_glass_vertex", panelFragment: "gw_glass_fragment",
+            mode: mode
         )
     }
 
@@ -282,15 +318,20 @@ public final class GlassRenderer {
         touchConstant: String = GlassRenderer.touchConstantName,
         groundingFunctions: (vertex: String, shadow: String, caustic: String) = (
             GlassRenderer.groundingVertexName, GlassRenderer.groundingShadowName, GlassRenderer.groundingCausticName
-        )
+        ),
+        mode: Mode = .opaque
     ) throws {
         let clock = ContinuousClock()
         let start = clock.now
+        self.mode = mode
         // A panel library with the function constant has two variants; a
-        // frozen earlier shader has one.
+        // frozen earlier shader has one. An overlay renderer draws none of
+        // them, so it builds none (only the plain panel pipeline below, which the
+        // stored property needs).
         let constants = panelLibrary.makeFunction(name: panelFragment)?.functionConstantsDictionary ?? [:]
         let hasOptics = constants[opticsConstant] != nil
-        let hasLighting = hasOptics && constants[lightingConstant] != nil
+        let buildsVariants = mode == .opaque
+        let hasLighting = buildsVariants && hasOptics && constants[lightingConstant] != nil
         let hasGrounding = hasLighting && constants[groundingConstant] != nil
             && panelLibrary.makeFunction(name: groundingFunctions.vertex) != nil
         let hasShape = hasGrounding && constants[shapeConstant] != nil
@@ -302,7 +343,7 @@ public final class GlassRenderer {
             vertex: panelVertex, fragment: panelFragment, optics: hasOptics ? false : nil, lighting: hasLighting ? false : nil,
             shape: hasShape ? false : nil
         )
-        opticsPipeline = hasOptics ? try Self.makePanelPipeline(
+        opticsPipeline = buildsVariants && hasOptics ? try Self.makePanelPipeline(
             device: commandQueue.device, library: panelLibrary, label: "GlassWeave glass panel (optics)",
             vertex: panelVertex, fragment: panelFragment, optics: true, lighting: hasLighting ? false : nil,
             shape: hasShape ? false : nil
@@ -367,6 +408,9 @@ public final class GlassRenderer {
         placeholder.usage = .shaderRead
         placeholder.storageMode = .private
         frostPlaceholder = hasFrost ? commandQueue.device.makeTexture(descriptor: placeholder) : nil
+        overlayPipelines = mode == .overlay ? try OverlayPipelines(
+            device: commandQueue.device, library: panelLibrary, vertex: panelVertex, groundingVertex: groundingFunctions.vertex
+        ) : nil
         let elapsed = clock.now - start
         pipelineCreationSeconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
         background = try BackgroundRenderer(commandQueue: commandQueue, library: library)
@@ -701,6 +745,8 @@ public final class GlassRenderer {
         acquireTarget: () -> BackgroundDrawTarget?,
         onCommit: (_ commandBuffer: any MTLCommandBuffer, _ frameID: UInt64, _ drewFrame: Bool) -> Void
     ) throws(BackgroundSourceError) -> BackgroundRenderOutcome {
+        // An overlay has no source, so there is nothing to produce for it.
+        guard mode == .opaque else { return .skipped(.missingSource) }
         guard targetPixelSize.width > 0, targetPixelSize.height > 0 else {
             return .skipped(.zeroSizeTarget)
         }
@@ -731,6 +777,11 @@ public final class GlassRenderer {
         acquireTarget: () -> BackgroundDrawTarget?,
         onCommit: (_ commandBuffer: any MTLCommandBuffer, _ frameID: UInt64, _ drewFrame: Bool) -> Void
     ) -> BackgroundRenderOutcome {
+        if mode == .overlay {
+            return drawOverlay(
+                targetPixelSize: targetPixelSize, displayScale: displayScale, acquireTarget: acquireTarget, onCommit: onCommit
+            )
+        }
         let panels = panels
         let effectTime = effectTime
         let lightOffset = offsetOfLight
@@ -813,7 +864,7 @@ public final class GlassRenderer {
                     case .lighting: encoder.setRenderPipelineState(lightingPipeline ?? panelPipeline)
                     case .grounded: encoder.setRenderPipelineState(groundedPipeline ?? panelPipeline)
                     case .shaped: encoder.setRenderPipelineState(shapedPipeline ?? panelPipeline)
-                    case .frosted, .filled, .touched: break
+                    case .frosted, .filled, .touched, .overlay: break
                     }
                     current = variant
                 }
@@ -863,6 +914,189 @@ public final class GlassRenderer {
     }
 }
 
+// MARK: Overlay mode (GW-30, experimental)
+
+extension GlassRenderer {
+    /// The overlay pipelines: the panel body, and the shadow and caustic
+    /// pre-pass, each for a rounded rectangle and for a freeform shape, and
+    /// the body also with the fill record. All blend by premultiplied alpha,
+    /// `source + destination * (1 - source.a)`, over a target cleared to
+    /// transparent black.
+    fileprivate struct OverlayPipelines {
+        let body: any MTLRenderPipelineState
+        let bodyShaped: any MTLRenderPipelineState
+        let bodyFilled: any MTLRenderPipelineState
+        let bodyFilledShaped: any MTLRenderPipelineState
+        let shadow: any MTLRenderPipelineState
+        let shadowShaped: any MTLRenderPipelineState
+        let caustic: any MTLRenderPipelineState
+        let causticShaped: any MTLRenderPipelineState
+
+        init(device: any MTLDevice, library: any MTLLibrary, vertex: String, groundingVertex: String) throws {
+            func make(_ label: String, vertex: String, fragment: String, shape: Bool, fill: Bool = false) throws -> any MTLRenderPipelineState {
+                try GlassRenderer.makeOverlayPipeline(
+                    device: device, library: library, label: label, vertex: vertex, fragment: fragment, shape: shape, fill: fill
+                )
+            }
+            body = try make("GlassWeave overlay panel", vertex: vertex, fragment: GlassRenderer.overlayFragmentName, shape: false)
+            bodyShaped = try make("GlassWeave overlay panel (shaped)", vertex: vertex, fragment: GlassRenderer.overlayFragmentName, shape: true)
+            bodyFilled = try make("GlassWeave overlay panel (filled)", vertex: vertex, fragment: GlassRenderer.overlayFragmentName, shape: false, fill: true)
+            bodyFilledShaped = try make(
+                "GlassWeave overlay panel (filled, shaped)", vertex: vertex, fragment: GlassRenderer.overlayFragmentName, shape: true, fill: true
+            )
+            shadow = try make("GlassWeave overlay shadow", vertex: groundingVertex, fragment: GlassRenderer.overlayShadowName, shape: false)
+            shadowShaped = try make("GlassWeave overlay shadow (shaped)", vertex: groundingVertex, fragment: GlassRenderer.overlayShadowName, shape: true)
+            caustic = try make("GlassWeave overlay caustic", vertex: groundingVertex, fragment: GlassRenderer.overlayCausticName, shape: false)
+            causticShaped = try make("GlassWeave overlay caustic (shaped)", vertex: groundingVertex, fragment: GlassRenderer.overlayCausticName, shape: true)
+        }
+    }
+
+    static let overlayFragmentName = "gw_overlay_fragment"
+    static let overlayShadowName = "gw_overlay_shadow_fragment"
+    static let overlayCausticName = "gw_overlay_caustic_fragment"
+
+    /// Builds one overlay pipeline. The shader's function constants are set
+    /// where the function declares them: the thick-lens and light-model code
+    /// are on (the light model uses the lens's bevel as its surface normal), the
+    /// shape and fill constants select the variant.
+    fileprivate static func makeOverlayPipeline(
+        device: any MTLDevice, library: any MTLLibrary, label: String,
+        vertex: String, fragment: String, shape: Bool, fill: Bool
+    ) throws -> any MTLRenderPipelineState {
+        guard let vertexFunction = library.makeFunction(name: vertex) else {
+            throw BackgroundRendererError.missingShaderFunction(vertex)
+        }
+        guard let plain = library.makeFunction(name: fragment) else {
+            throw BackgroundRendererError.missingShaderFunction(fragment)
+        }
+        let declared = plain.functionConstantsDictionary
+        let constants = MTLFunctionConstantValues()
+        for (index, value) in [(0, true), (1, true), (2, true), (3, shape), (5, fill)] {
+            guard declared.values.contains(where: { $0.index == index }) else { continue }
+            var flag = value
+            constants.setConstantValue(&flag, type: .bool, index: index)
+        }
+        let fragmentFunction: any MTLFunction
+        do {
+            fragmentFunction = try library.makeFunction(name: fragment, constantValues: constants)
+        } catch {
+            throw BackgroundRendererError.pipelineCreationFailed("\(label): \(error)")
+        }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.label = label
+        descriptor.vertexFunction = vertexFunction
+        descriptor.fragmentFunction = fragmentFunction
+        let attachment = descriptor.colorAttachments[0]!
+        attachment.pixelFormat = BackgroundRenderer.outputPixelFormat
+        attachment.isBlendingEnabled = true
+        attachment.rgbBlendOperation = .add
+        attachment.alphaBlendOperation = .add
+        attachment.sourceRGBBlendFactor = .one
+        attachment.sourceAlphaBlendFactor = .one
+        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        do {
+            return try device.makeRenderPipelineState(descriptor: descriptor)
+        } catch {
+            throw BackgroundRendererError.pipelineCreationFailed("\(label): \(error)")
+        }
+    }
+
+    /// The overlay draw: the target cleared to transparent black, then every
+    /// panel's shadow and caustic (outside its outline), then its body, all as
+    /// premultiplied alpha. No source is read, so nothing can skip for a
+    /// missing or released one.
+    fileprivate func drawOverlay(
+        targetPixelSize: (width: Int, height: Int),
+        displayScale: Double,
+        acquireTarget: () -> BackgroundDrawTarget?,
+        onCommit: (_ commandBuffer: any MTLCommandBuffer, _ frameID: UInt64, _ drewFrame: Bool) -> Void
+    ) -> BackgroundRenderOutcome {
+        guard targetPixelSize.width > 0, targetPixelSize.height > 0 else { return .skipped(.zeroSizeTarget) }
+        guard let pipelines = overlayPipelines else { return .skipped(.encoderUnavailable) }
+        guard let target = acquireTarget(), let colorTexture = target.renderPassDescriptor.colorAttachments[0].texture else {
+            return .skipped(.drawableUnavailable)
+        }
+        precondition(
+            colorTexture.pixelFormat == BackgroundRenderer.outputPixelFormat,
+            "GlassWeave renders into \(BackgroundSourceError.name(of: BackgroundRenderer.outputPixelFormat)) targets; configure the host view's color format accordingly"
+        )
+        // The target is cleared to transparent black whatever the host asked
+        // for: the overlay's alpha is 0 outside every panel.
+        guard let descriptor = target.renderPassDescriptor.copy() as? MTLRenderPassDescriptor else { return .skipped(.encoderUnavailable) }
+        descriptor.colorAttachments[0].loadAction = .clear
+        descriptor.colorAttachments[0].storeAction = .store
+        descriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        guard let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
+        else { return .skipped(.encoderUnavailable) }
+        overlayFrameCount += 1
+        let frameID = overlayFrameCount
+        commandBuffer.label = "GlassWeave overlay frame \(frameID)"
+        encoder.label = "GlassWeave overlay"
+
+        let length = MemoryLayout<GWGlassUniforms>.stride
+        let uniformsIndex = Int(GWGlassBindingIndexUniforms.rawValue)
+        let background = GWBackgroundUniforms()
+        // The refraction, the frost and the touch response need the backdrop (or
+        // a pass that reads it): none is drawn.
+        let geometries = panels
+            .map { panel -> GlassPanelGeometry in
+                var geometry = GlassPanelGeometry(panel: panel, displayScale: displayScale, effectTime: effectTime, lightOffset: offsetOfLight)
+                geometry.frost = nil
+                geometry.touch = nil
+                return geometry
+            }
+            .filter { !$0.isEmpty }
+        var groundingDraws = 0
+        for geometry in geometries {
+            guard let grounding = geometry.grounding else { continue }
+            var uniforms = geometry.uniforms(background: background, targetWidth: colorTexture.width, targetHeight: colorTexture.height)
+            let shaped = geometry.shape != nil
+            encoder.pushDebugGroup("GlassWeave overlay grounding")
+            encoder.setVertexBytes(&uniforms, length: length, index: uniformsIndex)
+            encoder.setFragmentBytes(&uniforms, length: length, index: uniformsIndex)
+            if grounding.drawsShadow {
+                encoder.setRenderPipelineState(shaped ? pipelines.shadowShaped : pipelines.shadow)
+                encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                groundingDraws += 1
+            }
+            if grounding.drawsCaustic {
+                encoder.setRenderPipelineState(shaped ? pipelines.causticShaped : pipelines.caustic)
+                encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                groundingDraws += 1
+            }
+            encoder.popDebugGroup()
+        }
+        var variants: [PipelineVariant] = []
+        for geometry in geometries {
+            var uniforms = geometry.uniforms(background: background, targetWidth: colorTexture.width, targetHeight: colorTexture.height)
+            let shaped = geometry.shape != nil
+            encoder.pushDebugGroup("GlassWeave overlay panel")
+            if var record = geometry.fillRecord {
+                encoder.setRenderPipelineState(shaped ? pipelines.bodyFilledShaped : pipelines.bodyFilled)
+                encoder.setFragmentBytes(&record, length: MemoryLayout<GWFillUniforms>.stride, index: Int(GWGlassBindingIndexFill.rawValue))
+            } else {
+                encoder.setRenderPipelineState(shaped ? pipelines.bodyShaped : pipelines.body)
+            }
+            encoder.setVertexBytes(&uniforms, length: length, index: uniformsIndex)
+            encoder.setFragmentBytes(&uniforms, length: length, index: uniformsIndex)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            encoder.popDebugGroup()
+            variants.append(.overlay)
+        }
+        encoder.endEncoding()
+        if let drawable = target.drawable {
+            commandBuffer.present(drawable)
+        }
+        onCommit(commandBuffer, frameID, true)
+        commandBuffer.commit()
+        drawnVariants = variants
+        groundingDrawCount = groundingDraws
+        return .submitted(frameID: frameID)
+    }
+}
+
 // MARK: Metal 4 plan (GW-11, experimental)
 
 #if !targetEnvironment(simulator)
@@ -900,7 +1134,7 @@ extension GlassRenderer {
         backgroundUniforms: GWBackgroundUniforms,
         targetWidth: Int, targetHeight: Int, displayScale: Double
     ) -> Metal4Plan? {
-        if frostRequest != nil || panelFrostRequest() != nil { return nil }
+        if mode == .overlay || frostRequest != nil || panelFrostRequest() != nil { return nil }
         var draws: [Metal4PanelDraw] = []
         for panel in panels {
             var geometry = GlassPanelGeometry(

@@ -225,6 +225,9 @@ final class LabViewController: UIViewController {
             } else if defaults.bool(forKey: "lab.merge") {
                 openedBenchAtLaunch = true
                 openMerge(animated: false)
+            } else if OverlayLabViewController.launchRequested {
+                openedBenchAtLaunch = true
+                OverlayLabViewController.present(from: self, animated: false)
             } else if defaults.bool(forKey: "lab.paper") {
                 openedBenchAtLaunch = true
                 openBench(.paper, page: .paperDesk, animated: false)
@@ -665,7 +668,7 @@ final class LabViewController: UIViewController {
         controlRows = [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow]
         newWindowButton.isHidden = !UIApplication.shared.supportsMultipleScenes
         closeWindowButton.isHidden = newWindowButton.isHidden
-        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), StudyViewController.menuButton(presentedBy: self, hidden: benchmark != nil), SwiftUIExample.menuButton(presentedBy: self, hidden: benchmark != nil), lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, vesselButton, touchButton, mergeButton, compareButton, presentationButton, frostButton, frostGlassButton, benchButton, measureButton])
+        let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), OverlayLabViewController.menuButton(presentedBy: self, hidden: benchmark != nil), StudyViewController.menuButton(presentedBy: self, hidden: benchmark != nil), SwiftUIExample.menuButton(presentedBy: self, hidden: benchmark != nil), lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, vesselButton, touchButton, mergeButton, compareButton, presentationButton, frostButton, frostGlassButton, benchButton, measureButton])
        stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
