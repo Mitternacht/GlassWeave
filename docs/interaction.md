@@ -444,3 +444,135 @@ gap 40, interior 72), and the page opens on the stage, where the clear glass rea
   velocity trace (fast pass: not tested).
 - Apple's twin is dragged with a UIKit spring animation (`usingSpringWithDamping`),
   not the system's own follow; its container merge is whatever the system does.
+
+## Tilt-driven light (GW-33)
+
+> Experimental. `GlassMotionSource`, `GlassMotionSample`, `GlassInjectedMotionSource`,
+> `GlassCoreMotionSource` and `GlassTiltLight` (all `GlassWeaveUIKit`) may change
+> before a stable release.
+
+The light of GlassWeave glass can follow the tilt of the device: the highlights on
+the rim slide a few degrees the way a lamp's reflection does on a real piece of
+glass in the hand. Only the light moves. No panel, bend or shape changes and nothing
+is rebuilt: the helper makes one call, `GlassRenderer.setLightOffset(azimuth:elevation:)`
+(GW-23), on the surface's existing renderer and asks for one frame. Apple's glass has
+no such control; its light is the system's own.
+
+### Parts
+
+| Type | What it is |
+|---|---|
+| `GlassMotionSample` | One reading of gravity in the device frame (Core Motion's: x right, y up the screen, z out of it; units of g) with a timestamp. `init(rollDegrees:leanDegrees:timestamp:)` builds one from angles; `rollDegrees` and `leanDegrees` read them back. |
+| `GlassMotionSource` | The protocol: `isAvailable`, `isRunning`, `sampleHandler`, `start()`, `stop()`. It delivers samples on the main thread, only while running. |
+| `GlassCoreMotionSource` | The real one: `CMMotionManager` device motion, gravity only, 30 Hz by default (`updateInterval` clamped to 1/60...1/10 s), delivered on the main queue, between `start()` and `stop()`. iOS only (`#if canImport(CoreMotion) && os(iOS)`). Device motion needs no permission. |
+| `GlassInjectedMotionSource` | The injectable one, for tests and the simulator: `send(_:)` hands a sample to the handler, only while running, and says whether it did; it counts starts, stops and deliveries. |
+| `GlassTiltLight` | The helper that maps the samples to the light, filters them, applies them, and starts and stops the source. |
+
+### The mapping
+
+A fixed lamp in the room lights a screen from a direction that changes when the
+screen turns. Gravity alone gives two angles: **roll** (how far the right edge is down,
+`asin(gx)`) and **lean** (how far the screen is leaned back from upright, `atan2(-gz, -gy)`:
+0 upright, 90 flat and face up).
+
+- Azimuth offset `= -clamp(roll / fullTilt, -1, 1) * maximumAzimuth`. Right edge down
+  swings the lamp toward the left of the screen (counter-clockwise; azimuth 0 is the top,
+  as in the light model).
+- Elevation offset `= clamp((lean - neutralLean) / fullTilt, -1, 1) * maximumElevation`. A
+  flatter screen raises the lamp over it. A normal grip (lean 40) leaves the authored light.
+
+`GlassTiltLight.Configuration` and its bounds (every field is normalized: a NaN or
+infinite value throws `GlassTiltLightError.nonFiniteConfiguration(_:)` naming the field,
+a finite one is clamped):
+
+| Field | Default | Range |
+|---|---|---|
+| `maximumAzimuth` | 30 degrees (the tilt itself at full tilt) | 0...60 (`azimuthLimit`) |
+| `maximumElevation` | 12 degrees | 0...30 (`elevationLimit`) |
+| `fullTilt` | 30 degrees | 5...90 |
+| `neutralLean` | 40 degrees | 0...90 |
+| `timeConstant` | 0.25 s | 0.02...2 |
+
+**Documented bounds.** Whatever the device does (and whatever nonsense a sample holds), the
+azimuth offset stays within `maximumAzimuth` (never above 60) and the elevation offset within
+`maximumElevation` (never above 30). The mapping is clamped, and the filter is a convex
+combination of clamped values, so it cannot leave the range either. A NaN or infinite sample
+component throws `GlassTiltLightError.nonFiniteSample(_:)` from `ingest(_:)` (a source's own
+non-finite sample is ignored).
+
+### Smoothing and frequency
+
+The offsets go through an exponential low-pass filter with the configured time constant
+(`blend = 1 - exp(-dt / timeConstant)` per sample, `dt` the step between timestamps, never more
+than 0.25 s, 1/30 s for the first sample after a start): 95 percent of a new target in about 0.75
+s by default. The filter starts from the authored light (0, 0), so the light glides in
+instead of jumping to the first reading. The renderer is given the new offset only when it has
+moved by `applyThreshold` (0.02 degrees) since the last time, so a device lying still applies
+nothing and requests no frames: the light adds no clock and no steady draw, and a settled light
+leaves the surface on demand.
+
+### Lifetime and accessibility
+
+The light starts the source only while it is needed: the surface is visible
+(`GlassSurfaceView.isVisible`: in a window, not hidden, scene in the foreground) and no setting
+pins the light. It stops it when the surface hides. It does this by wrapping the surface's
+`visibilityHandler` and `accessibilitySettingsHandler` (the handlers that were there are still
+called) and by registering for the Increase Contrast trait; an app that replaces a handler
+afterwards calls `refresh()` from its own. `invalidate()` stops the source and gives the light
+back; a deinitialized light stops its source too.
+
+| Setting | Behavior |
+|---|---|
+| Reduce Motion | The light is **pinned** at the authored direction: the source stops, the offset returns to (0, 0) at once (no glide), and samples are ignored. A surface that starts under Reduce Motion never starts the source. |
+| Reduce Transparency, Increase Contrast | The policy already removes the light terms the tilt moves (or draws them as an even hairline), so nothing visible would change: the same pin applies and the sensor does not run. |
+| Quality tiers | Not affected: one frame per change, none at rest. |
+
+### Laboratory
+
+`-lab.tilt YES` (or the "Tilt" menu button) opens the page: a pill, a round button and the chrome
+ring (`RefinedLook.chromeRing`) on one surface, and the same three shapes in `UIGlassEffect`
+below, so the two can be compared on the same backdrop. The simulator has no motion hardware, so
+**Roll** and **Lean** sliders play the device: a 30 Hz timer hands the light a sample built from
+them through a `GlassInjectedMotionSource`, as the sensor would. The Core Motion segment is enabled
+only where the hardware is (it reads "n/a" on the simulator). `-lab.tilt.roll <deg>` and
+`-lab.tilt.lean <deg>` set the start (`m30` means -30: a launch argument cannot start with a minus
+sign), `-lab.tiltBackdrop orbs|stage|paper` the backdrop, `-lab.reduceMotion YES` and
+`-lab.increaseContrast YES` the pins. The status line shows the light offset, how many times it
+was applied, free or pinned, whether the sensor runs, the clock, the frames submitted and how long
+ago the last one was.
+
+Captures (`docs/evidence/captures/gw-33-tilt-*`, iPhone 18 Pro simulator): roll -30, 0 and +30 on
+the orbs, the stage and the paper desk; lean 10, 40 and 70; the page beside the `UIGlassEffect`
+twin; Reduce Motion (a roll of -30 requested, light pinned at 0.0 and 0.0, `applied 0`, sensor off)
+and Increase Contrast. At roll +30 the status read `light az -30.0 el +0.0 | applied 45 | clock
+off`, and the last frame was 1.9 s old when the capture was taken: the light had settled and drew
+nothing more.
+
+### Tuning record
+
+By eye on the orbs, the stage and the paper desk, beside the system glass. The amplitude started at
+20 degrees of azimuth and was raised to 30 (the tilt itself at full tilt: the ring's highlights
+moved too little to read at 20). The ring, whose prismatic bands and glints turn with the key
+light, shows the movement clearly. The pill and the round button carry the shared refined look,
+whose rim is a thin hairline that is a little brighter on the lit side; it shifts only slightly.
+Three attempts to make them show it more: a stronger Fresnel and specular, and a lower, tighter
+key, each changed nothing visible; a faint prismatic film showed the movement but turned the pill
+into a soap-bubble ring, which the style direction rules out. All three were dropped: the pill and
+the round button stay the shared look.
+
+### Limits
+
+- **Device only, not verified:** `GlassCoreMotionSource` is wired (device motion, gravity,
+  30 Hz, main queue, started and stopped by visibility) but nothing ran it: the simulator has no
+  motion hardware. Feel and battery cost on a device are open.
+- Gravity alone cannot see a turn about the vertical axis of an upright phone, so the light does
+  not follow that gesture; it follows roll and lean.
+- The pill and the round button show only a faint shift of their rim; the chrome ring shows it
+  clearly (see the tuning record).
+- The renderer's light offset is one value per renderer, so every lit panel on a surface moves
+  together, and the light owns that offset while it is attached (a page that also drags the light
+  by hand would fight it).
+- The light installs itself on two single-closure handlers of the surface (chained, not
+  replaced), and an app that sets them again must call `refresh()`.
+- The simulator slider's timer is the lab's, not the library's; the library's only source is Core
+  Motion.

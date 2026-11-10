@@ -246,6 +246,8 @@ final class LabViewController: UIViewController {
         }
         // `-lab.drag YES` opens the drag page once (GW-32).
         DragBenchViewController.presentAtLaunch(from: self)
+        // `-lab.tilt YES` opens the tilt page once (GW-33).
+        TiltBenchViewController.presentAtLaunch(from: self)
     }
 
     /// Presents the material bench or the light-fields demo (GW-21) over the
@@ -671,6 +673,7 @@ final class LabViewController: UIViewController {
        stack.axis = .vertical
         stack.spacing = 12
         stack.addArrangedSubview(DragBenchViewController.menuButton(presentedBy: self, hidden: benchmark != nil))
+        stack.addArrangedSubview(TiltBenchViewController.menuButton(presentedBy: self, hidden: benchmark != nil))
         stack.translatesAutoresizingMaskIntoConstraints = false
         controls.addSubview(stack)
         controls.translatesAutoresizingMaskIntoConstraints = false
