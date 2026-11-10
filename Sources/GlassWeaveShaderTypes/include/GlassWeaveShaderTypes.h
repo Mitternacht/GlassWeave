@@ -238,7 +238,10 @@ typedef enum GWLightingEnvironment {
 ///   fields (0...255 for 0...1): edge depth in bits 0 to 7, polished banding in
 ///   8 to 15, glints in 16 to 23. Zero when none is on. The layout is unchanged.
 /// - `finish`: a `GWLightingFinish` value. `environment`: a
-///   `GWLightingEnvironment` value.
+///   `GWLightingEnvironment` value in bits 0 to 7; the refined look's ring polish
+///   (POLISH, an integer 0...255 for 0...1, 0 for none) in bits 8 to 15. The
+///   layout is unchanged: the field is 32 bits wide and the shader reads only
+///   its low byte as the environment.
 /// - `azimuth`: the key light's azimuth in radians (0 at the top, clockwise),
 ///   offset included; the studio rotates with it.
 /// - `f0`: reflectance at normal incidence, `((n - 1) / (n + 1))^2`.

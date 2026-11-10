@@ -1673,6 +1673,19 @@ static GWEnhance gw_enhance(constant GWLightingUniforms &lighting) {
     return e;
 }
 
+/// Whether the panel's studio is the dark room: the low byte of
+/// `lighting.environment` (the host packs the ring polish level above it).
+static bool gw_env_dark(constant GWLightingUniforms &lighting) {
+    return (lighting.environment & 255u) == GWLightingEnvironmentStudioDark;
+}
+
+/// The ring polish level (POLISH, `GlassLighting.polish`), 0...1: bits 8 to 15
+/// of `lighting.environment`; exactly 0 for every panel that does not ask for
+/// it, which then takes none of the polished-torus paths.
+static float gw_polish_level(constant GWLightingUniforms &lighting) {
+    return float((lighting.environment >> 8) & 255u) * (1.0 / 255.0);
+}
+
 /// The thick slab (`edgeDepth`): across the bevel the glass is deeper, a
 /// darker body, toward the side away from the light, and carries a faint inner
 /// light on the lit side, both in the tilt window between the flat top and the
@@ -1700,7 +1713,7 @@ static float3 gw_enhance_slab(
     const float away = 1.0 - lit;
     const float darkening = depth * 0.52 * wall * (0.16 + 0.84 * away) * bandMask;
     glass *= 1.0 - darkening;
-    const bool dark = lighting.environment == GWLightingEnvironmentStudioDark;
+    const bool dark = gw_env_dark(lighting);
     const float3 sky = dark ? float3(0.52, 0.55, 0.64) : float3(0.97, 0.975, 1.0);
     float inner = gw_refined_bump(tilt, 0.15, 0.15);
     if (clean > 0.0) {
@@ -1794,14 +1807,124 @@ static float3 gw_enhance_glints(float3 N, float glints, constant GWLightingUnifo
     return color * (glints * 3.4 * (g0 + g1 + g2 + g3 + g4) * window);
 }
 
+// MARK: Polished torus (POLISH)
+//
+// `GlassLighting.polish` (its level rides in bits 8 to 15 of
+// `lighting.environment`). The bands of `gw_enhance_bands` are even in the
+// surface angle, so on a ring, whose normal tilts outward on the outer slope
+// and inward on the inner slope, they come in mirrored pairs about the crest,
+// and the thin film then turns each band into a rainbow stripe: two or three
+// concentric pearly rings. Here the metal's brightness is a function of the
+// direction the surface reflects, as a real polished tube's is: the normal
+// tilted toward the light sees the soft box, the normal tilted away sees the
+// dark room, the crest sees the overhead sky. One light direction decides the
+// whole picture, the profile is continuous across the crest, and nothing is
+// periodic. The thin film is confined to the brightest reflection and to a few
+// small glints. Runs only where the level is above zero (the refined look with
+// a clean level and a polished finish).
+
+/// The brightness (a display value, 0...1) of the studio along the reflected
+/// direction `R` (unit, z toward the viewer): the floor below the horizon (the
+/// page, light), a wall around the horizon that is bright toward the key
+/// light and dark beyond the far side, a broad sky overhead, and a soft box
+/// high on the key light's side (`lobe`, 0...1, is how near the reflection is
+/// to its center). Every term is smooth in `R`, so the metal has no plateau
+/// and no stripe.
+static float gw_polish_studio(float3 R, float2 toward, bool dark, thread float &lobe) {
+    const float3 keyDirection = normalize(float3(toward * 0.62, 0.78));
+    const float mirror = 1.0 - saturate(dot(R, keyDirection));
+    lobe = exp(-4.5 * mirror);
+    // A tighter core inside the soft box's reflection, so its edge is a little
+    // crisper than a plain Gaussian's (a polished surface reflects a box with
+    // a defined, soft edge).
+    const float core = exp(-20.0 * mirror);
+    // The unnormalized horizontal part, so `facing` is continuous across the
+    // crest, where the normal's direction flips (a normalized direction there
+    // is a step).
+    const float side = dot(R.xy, toward);
+    const float facing = smoothstep(-0.95, 0.25, side);
+    const float wall = mix(dark ? 0.02 : 0.17, dark ? 0.20 : 0.56, facing);
+    const float floorLevel = dark ? 0.16 : 0.54;
+    const float skyLevel = (dark ? 0.22 : 0.66) * (0.84 + 0.2 * facing);
+    const float sky = smoothstep(0.15, 0.80, R.z);
+    const float below = smoothstep(-0.50, -0.90, R.z);
+    const float base = mix(mix(wall, skyLevel, sky), floorLevel, below);
+    return base + (dark ? 0.40 : 0.40) * lobe + 0.2 * core;
+}
+
+/// The polished torus's metal at the surface normal `N`: a color that
+/// replaces the glass (`metal`) and `film`, 0...1, how much of the thin film
+/// to multiply onto it (only where the soft box is mirrored).
+static float3 gw_polish_metal(
+    float3 N, float2 outward, float tilt, float lit, bool dark, constant GWLightingUniforms &lighting,
+    thread float &film)
+{
+    const float3 R = float3(2.0 * N.z * N.xy, 2.0 * N.z * N.z - 1.0);
+    float lobe;
+    const float studio = saturate(gw_polish_studio(R, lighting.edgeDirection, dark, lobe));
+    // The thin bright line where the surface turns edge-on, at both ends of
+    // the profile: the sky on the lit side, the dim room on the far side.
+    const float edge = pow(saturate(tilt), 6.0) * 0.5;
+    const float edgeLevel = mix(dark ? 0.35 : 0.62, 0.95, lit);
+    // The levels above are display values (what a viewer sees as gray); the
+    // composite works in linear light.
+    // The side of the ring toward the light is brighter as a whole and the
+    // far side darker (the soft box lights the metal on its side): a gentle
+    // gradient around the ring by the outline's own direction, which is
+    // continuous around the ring and across the crest.
+    const float position = dot(outward, lighting.edgeDirection);
+    const float shaded = saturate(mix(studio, edgeLevel, edge) * (1.0 + 0.11 * position) + 0.04 * position);
+    const float level = pow(shaded, 2.2);
+    film = smoothstep(0.72, 0.98, lobe) * (1.0 - edge);
+    return lighting.tint.xyz * level;
+}
+
+/// One small catch of light on the polished torus: a Gaussian window of the
+/// normal's azimuth `psi` (radians from the key light's direction) around
+/// `psi0` and of its tilt `theta` around `theta0`, so it is a short arc a few
+/// pixels thick and not a ring.
+static float gw_polish_spark(float psi, float theta, float psi0, float theta0, float sigmaPsi, float sigmaTheta) {
+    float dPsi = psi - psi0;
+    dPsi -= 2.0 * M_PI_F * round(dPsi / (2.0 * M_PI_F));
+    const float dTheta = theta - theta0;
+    return exp(-0.5 * (dPsi * dPsi / (sigmaPsi * sigmaPsi) + dTheta * dTheta / (sigmaTheta * sigmaTheta)));
+}
+
+/// The glints of the polished torus (`glints`), in linear light before the
+/// knee: four small catches of light, windows of the normal's azimuth from the
+/// key light and of its tilt. The main one sits on the outer slope toward the
+/// light (the mirror image of the key light's edge), a fainter echo on the
+/// outer slope away from it, and two small ones to either side; they move with
+/// the light. Each is white with a faint thin-film hue that turns across it,
+/// drawn only inside the window. `outward` is the outline's outward unit
+/// normal: the slope facing outward carries the strong catches.
+static float3 gw_polish_glints(float3 N, float2 outward, float glints, constant GWLightingUniforms &lighting) {
+    const float2 toward = lighting.edgeDirection;
+    const float2 across = float2(-toward.y, toward.x);
+    const float theta = acos(clamp(N.z, 0.0, 1.0));
+    const float psi = precise::atan2(dot(N.xy, across), dot(N.xy, toward));
+    const float outer = smoothstep(-0.04, 0.04, dot(N.xy, outward));
+    const float g0 = gw_polish_spark(psi, theta, 0.07, 0.40, 0.075, 0.085) * mix(0.3, 1.0, outer);
+    const float g1 = 0.5 * gw_polish_spark(psi, theta, 3.14159265 - 0.12, 0.44, 0.09, 0.085) * outer;
+    const float g2 = 0.32 * gw_polish_spark(psi, theta, 1.62, 0.42, 0.08, 0.085) * outer;
+    const float g3 = 0.22 * gw_polish_spark(psi, theta, -1.50, 0.42, 0.08, 0.085) * outer;
+    const float saturation = lighting.finish == GWLightingFinishPrismatic ? max(lighting.prism.y, 0.55) : 0.0;
+    // The hue turns a little across each catch (with the tilt) and differs a
+    // little between them.
+    const float hue = lighting.prism.z + 1.5 * (theta - 0.4);
+    const float3 toneA = mix(float3(1.0), gw_light_film(hue, saturation), 1.0);
+    const float3 toneB = mix(float3(1.0), gw_light_film(hue + 0.33, saturation), 1.0);
+    return glints * 2.2 * (toneA * (g0 + g2) + toneB * (g1 + g3));
+}
+
 /// The refined edge reflection: a smooth gradient, sky toward the light and
 /// floor away from it, mixed in by a soft Fresnel term, so the rim reads as
 /// the edge of a thick clear body. The chrome finishes add one soft reflective
 /// band across the bevel (the polished edge), partly clear, with the thin-film
 /// hue on the band and the rim line only. `touched` receives the mix.
 static float3 gw_refined_edge(
-    float3 glass, float3 N, float depth, float thinDepth, float bandMask, constant GWGlassUniforms &uniforms,
-    thread float &touched)
+    float3 glass, float3 N, float2 outward, float depth, float thinDepth, float bandMask,
+    constant GWGlassUniforms &uniforms, thread float &touched)
 {
     constant GWLightingUniforms &lighting = uniforms.lighting;
     if (lighting.reflection <= 0.0 || bandMask <= 0.0) {
@@ -1810,7 +1933,7 @@ static float3 gw_refined_edge(
     float lit, back;
     gw_refined_facing(N, lighting.edgeDirection, lit, back);
     const float tilt = 1.0 - N.z;
-    const bool dark = lighting.environment == GWLightingEnvironmentStudioDark;
+    const bool dark = gw_env_dark(lighting);
     const float3 sky = dark ? float3(0.30, 0.31, 0.35) : float3(0.97, 0.975, 1.0);
     const float3 floorColor = dark ? float3(0.07, 0.07, 0.08) : float3(0.40, 0.41, 0.46);
     const float toward = saturate(0.12 + 0.88 * lit + 0.25 * back);
@@ -1892,6 +2015,24 @@ static float3 gw_refined_edge(
         // Stripes need a more opaque band to read; the glass still shows through.
         alpha = min(alpha * (1.0 + 0.55 * enhance.banding), 0.9 * bandMask);
     }
+    const float polish = gw_polish_level(lighting);
+    if (polish > 0.0 && cleanEdge > 0.0) {
+        // POLISH: the polished torus replaces the stripes and the film. On a
+        // ring the opacity is the ring's own window (`bandMask` ends over four
+        // and a half pixels at either end, so no hole opens at the crest, where
+        // the surface is flat); on any other profile it rises with the tilt.
+        float filmWeight;
+        const float3 polished = gw_polish_metal(N, outward, tilt, lit, dark, lighting, filmWeight);
+        float3 tinted = polished;
+        if (lighting.finish == GWLightingFinishPrismatic) {
+            const float hue = lighting.prism.z + 2.0 * tilt;
+            tinted *= mix(float3(1.0), gw_light_film(hue, lighting.prism.y), filmWeight * 0.9);
+        }
+        const float window = uniforms.lensProfile == GWLensProfileRing ? 1.0 : smoothstep(0.01, 0.10, tilt);
+        const float polishedAlpha = lighting.reflection * 0.92 * window * bandMask;
+        metal = mix(metal, tinted, polish);
+        alpha = mix(alpha, polishedAlpha, polish);
+    }
     glass = mix(glass, metal, alpha);
     touched = max(touched, alpha);
     return glass;
@@ -1943,7 +2084,7 @@ static float3 gw_light_model(
         if (enhance.depth > 0.0 && bandMask > 0.0) {
             glass = gw_enhance_slab(glass, N, enhance.depth, thinDepth, bandMask, lighting, touched);
         }
-        glass = gw_refined_edge(glass, N, depth, thinDepth, bandMask, uniforms, touched);
+        glass = gw_refined_edge(glass, N, outward, depth, thinDepth, bandMask, uniforms, touched);
     } else if (lighting.reflection > 0.0 && bandMask > 0.0) {
         const float3 R = float3(2.0 * N.z * N.xy, 2.0 * N.z * N.z - 1.0);
         float3 base;
@@ -2008,7 +2149,13 @@ static float3 gw_light_model(
         energy = gw_refined_lines(N, depth, thinDepth, uniforms);
         const GWEnhance enhance = gw_enhance(lighting);
         if (enhance.glints > 0.0 && bandMask > 0.0 && (lighting.finish == GWLightingFinishChrome || lighting.finish == GWLightingFinishPrismatic)) {
-            energy += gw_enhance_glints(N, enhance.glints, lighting) * bandMask;
+            const float polish = gw_polish_level(lighting);
+            if (polish > 0.0 && gw_clean_level(lighting) > 0.0) {
+                // POLISH: the small confined glints, in place of the broad ones.
+                energy += mix(gw_enhance_glints(N, enhance.glints, lighting), gw_polish_glints(N, outward, enhance.glints, lighting), polish) * bandMask;
+            } else {
+                energy += gw_enhance_glints(N, enhance.glints, lighting) * bandMask;
+            }
         }
     } else {
         energy = gw_light_lines(N, depth, uniforms);
@@ -2159,7 +2306,7 @@ static float3 gw_presence_apply(
     bool frosted, constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
 {
     constant GWLightingUniforms &lighting = uniforms.lighting;
-    const bool dark = lighting.environment == GWLightingEnvironmentStudioDark;
+    const bool dark = gw_env_dark(lighting);
     const float bevel = max(lighting.bevel, 1.0);
     const float inscribed = max(gw_panel_inscribed(uniforms), 1.0);
     const float radius = clamp(0.7 * bevel, 8.0, max(0.5 * inscribed, 8.0));

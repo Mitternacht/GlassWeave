@@ -192,30 +192,37 @@ enum RefinedLook {
         return p
     }
 
-    /// A polished chrome ring button: a chunky ring of glass standing at the
-    /// edge (about a third of the radius), a clear middle, a bright studio
-    /// reflected in a band with real stripes (a deep dark stripe between
-    /// bright ones), a faint thin film, and several small prismatic glints that
-    /// turn with the key light.
+    /// A polished chrome ring button (POLISH): one chunky ring of polished
+    /// metal that stands at the edge (about a fifth of the diameter wide, from
+    /// the outline inward), with a clear glass disc in the middle. The metal is
+    /// drawn as a polished torus (`GlassLighting.polish`): bright where it
+    /// faces the key light, dark on the far side, one continuous profile with a
+    /// thin bright line at each end, and the thin-film hue only as a faint
+    /// accent on the brightest reflection and a few small glints that turn
+    /// with the light. The bend stays the quiet one of the earlier ring.
     static func chromeRing(diameter: Double, azimuth: Double = RefinedLook.azimuth) -> GlassParameters {
-        // The ring's proportions follow the diameter (POLISH: chunkier than the
-        // first pass, 0.17 of the diameter against 0.13).
-        let width = max(diameter * 0.17, 12)
+        // The ring's proportions follow the diameter: 0.19 of it wide (0.17
+        // before POLISH), starting at the outline, so there is one outer edge
+        // and not a second line a few pixels inside it.
+        let width = max(diameter * 0.19, 12)
         var ring = panel(corner: diameter / 2, bezel: width, dark: false)
         ring.tint = GlassTint(red: 1, green: 1, blue: 1, strength: 0.05)
         ring.lens = GlassLens(
-            profile: .ring(center: width * 0.5, width: width * 0.84), thickness: width * 1.08, indexOfRefraction: 1.42,
+            profile: .ring(center: width * 0.5, width: width), thickness: diameter * 0.18, indexOfRefraction: 1.42,
             maximumOffset: 9, allowsFold: false, dispersion: 0.12, dispersionTaps: .sixTap, softness: 1
         )
         ring.lighting = .enhanced(
-            azimuth: azimuth, environment: .studioLight, finish: .prismatic(spread: 1.4, saturation: 0.42, phase: 0.06)
+            azimuth: azimuth, environment: .studioLight, finish: .prismatic(spread: 0.5, saturation: 0.5, phase: 0.62)
         )
         ring.lighting.fresnel = 0.85
         ring.lighting.specular = 0.75
         ring.lighting.reflection = 1
         ring.lighting.banding = 1
         ring.lighting.glints = 1
-        ring.lighting.bandWidth = width
+        ring.lighting.polish = 1
+        // The ring's whole profile sits inside the band, so the metal is not
+        // faded toward its inner end.
+        ring.lighting.bandWidth = width * 1.4
         ring.lighting.clean = clean
         ring.lighting.softRim = softRim
         return ring

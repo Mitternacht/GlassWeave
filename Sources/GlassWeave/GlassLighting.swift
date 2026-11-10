@@ -47,6 +47,7 @@ internal import GlassWeaveShaderTypes
 /// | ``presence`` | normalized | 0...1 | 0 | The refined look's liveliness without any extra bend: the body picks up the colors behind it softly (a few wide samples of the backdrop), lifts a little in luminance, and the inner edge carries a soft glow that follows the backdrop's color, brighter on the lit side, with a deeper far side. 0 draws none. Ignored by ``Look/classic``. Experimental. |
 /// | ``clean`` | normalized | 0...1 | 0 | The refined look's clean rim (CLEAN, experimental): every term that draws the rim and the edge (the hairline, the soft highlight, the inner glow and the thick-slab shade) falls off smoothly from the outline inward, in one gradient with no ring, crease or doubled line; the polished finishes' bands become wide and soft and the glints broader and calmer; the contrasting hairline changes polarity smoothly; the frost grain gives way to a static triangular dither of one 8-bit step. It adds no edge detail and raises no bend. 0 draws the look as before, byte for byte. Ignored by ``Look/classic``. |
 /// | ``softRim`` | normalized | 0...1 | 0 | With ``clean`` above 0 (CLEAN-2, experimental): how much of the wide, soft rim the clean look keeps. 0, the default, is a thin crisp hairline about 0.7 points wide, like the system glass's rim, with one gentle light and shade variation around the outline; 1 is the first clean pass's soft gradient of about ten points (the soft highlight, the Fresnel body, the inner glow and shade and the slab shade at their wide reach), kept as an explicit opt-in for the glow look; values between mix the two. Ignored when ``clean`` is 0 and by ``Look/classic``. |
+/// | ``polish`` | normalized | 0...1 | 0 | With the refined look, a ``clean`` level above 0 and a chrome or prismatic finish (POLISH, experimental): draws the polished edge as one smooth polished torus instead of stripes. The metal's brightness follows where each point of the surface would see the studio (a soft box high on the key light's side, a broad overhead sky, a dark room beyond the far side), so a ring is bright on its lit side and dark on its far side with one continuous profile, a thin bright line at each end, and no concentric pairs of bands; the thin-film hue (``Finish/prismatic(spread:saturation:phase:)``) is confined to the brightest reflection and a few small glints, and ``glints`` draws those instead of the broad ones. 0 draws the bands and glints as before, byte for byte. Reduce Transparency and Increase Contrast remove it with the finish. Ignored by ``Look/classic``. |
 ///
 /// **The model** (`docs/glass-optics.md`). With the viewer's direction
 /// `V = (0, 0, 1)` and the light's `L`, the reflected fraction is Schlick's
@@ -176,7 +177,7 @@ public struct GlassLighting: Hashable, Sendable {
         case indexOfRefraction, fresnel, specular, reflection, bloom, bloomWidth, bandWidth
         case chromeTintRed, chromeTintGreen, chromeTintBlue
         case prismaticSpread, prismaticSaturation, prismaticPhase
-        case edgeDepth, banding, glints, presence, clean, softRim
+        case edgeDepth, banding, glints, presence, clean, softRim, polish
         /// The azimuth passed to ``GlassRenderer/setLightOffset(azimuth:elevation:)``.
         case lightOffsetAzimuth
         /// The elevation passed to ``GlassRenderer/setLightOffset(azimuth:elevation:)``.
@@ -262,6 +263,16 @@ public struct GlassLighting: Hashable, Sendable {
     /// are separate and unchanged. 0 is the default. Ignored when ``clean`` is
     /// 0 and by ``Look/classic``.
     public var softRim: Double
+    /// The polished edge drawn as one smooth polished torus, 0...1 (POLISH,
+    /// experimental; the refined look with ``clean`` above 0 and a chrome or
+    /// prismatic finish): the metal's brightness follows the studio it would
+    /// reflect (bright on the lit side, dark on the far side, one continuous
+    /// profile with a bright line at each end), and the thin-film hue is
+    /// confined to the brightest reflection and a few small glints. 0, the
+    /// default, draws the bands as before, byte for byte. Reduce Transparency
+    /// and Increase Contrast remove it (they remove the finish). Experimental:
+    /// this API may change before a stable release.
+    public var polish: Double
 
     /// The longest the bloom can reach: 24 points.
     public static let maximumBloomWidth = 24.0
@@ -289,10 +300,12 @@ public struct GlassLighting: Hashable, Sendable {
         glints: Double = 0,
         presence: Double = 0,
         clean: Double = 0,
-        softRim: Double = 0
+        softRim: Double = 0,
+        polish: Double = 0
     ) {
         self.clean = clean
         self.softRim = softRim
+        self.polish = polish
         self.presence = presence
         self.edgeDepth = edgeDepth
         self.banding = banding
@@ -384,7 +397,7 @@ public struct GlassLighting: Hashable, Sendable {
             (.indexOfRefraction, indexOfRefraction), (.fresnel, fresnel), (.specular, specular),
             (.reflection, reflection), (.bloom, bloom), (.bloomWidth, bloomWidth),
             (.edgeDepth, edgeDepth), (.banding, banding), (.glints, glints), (.presence, presence), (.clean, clean),
-            (.softRim, softRim),
+            (.softRim, softRim), (.polish, polish),
         ]
         if let rim {
             checks += [
@@ -426,6 +439,7 @@ public struct GlassLighting: Hashable, Sendable {
         result.presence = unit(presence)
         result.clean = unit(clean)
         result.softRim = unit(softRim)
+        result.polish = unit(polish)
         result.bloomWidth = min(max(bloomWidth, 0), Self.maximumBloomWidth)
         result.bandWidth = bandWidth.map { min(max($0, 0), maximumLength) }
         switch finish {
@@ -542,8 +556,13 @@ extension GlassPanelGeometry {
             }
             record.prism = prism
             record.finish = finish
-            record.environment = lighting.environment == .studioDark
-                ? GWLightingEnvironmentStudioDark.rawValue : GWLightingEnvironmentStudioLight.rawValue
+            // POLISH: the polished torus level rides in bits 8 to 15 of
+            // `environment` (a 0 or 1 that no shader reads above its low byte),
+            // only for the refined look with a polished finish; zero otherwise.
+            let polishLevel: UInt32 = lighting.look == .refined && finish != GWLightingFinishDielectric.rawValue
+                ? UInt32((min(max(lighting.polish, 0), 1) * 255).rounded()) : 0
+            record.environment = (lighting.environment == .studioDark
+                ? GWLightingEnvironmentStudioDark.rawValue : GWLightingEnvironmentStudioLight.rawValue) | polishLevel << 8
             record.azimuth = Float(azimuthRadians)
             record.f0 = Float(f0)
             record.fresnel = Float(lighting.fresnel)
