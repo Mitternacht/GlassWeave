@@ -242,7 +242,16 @@ append-only with size asserts in C, MSL and Swift. The design notes:
 - [interaction.md](interaction.md): the touch response (`GlassTouch`, a finger
   light, one travelling ring, a rim gleam; `GlassTouchObserver`) and the merging
   of two custom surfaces (`GlassSurfaceMerge`, `SurfaceTransition`), with the
-  layout and hit-test policy for native content (GW-12, GW-13).
+  layout and hit-test policy for native content (GW-12, GW-13), the touch on
+  frosted and liquid panels (GW-34), the panel spring and merging by proximity
+  (`PanelSpring`, `GlassProximityMerge`, GW-32) and the tilt-driven light
+  (`GlassTiltLight`, GW-33).
+- [overlay.md](overlay.md): overlay mode (`GlassRenderer.Mode.overlay`), glass
+  composited over live UIKit content as premultiplied alpha, what it draws and
+  why it cannot bend or frost (GW-30).
+- [snapshot.md](snapshot.md): `UIKitSnapshotSource`, a pooled snapshot of a
+  UIKit region as a background frame so the custom glass can bend and frost
+  real, static UI; its contract, timing and limits (GW-31).
 - [swiftui.md](swiftui.md): the optional SwiftUI adapter `GlassWeaveSwiftUI`
   (`GlassSurface`), what runs where, its lifecycle and accessibility (GW-15).
 - [decisions/metal-backend.md](decisions/metal-backend.md): how the surface

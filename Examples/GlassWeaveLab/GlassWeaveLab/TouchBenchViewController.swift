@@ -276,7 +276,10 @@ final class TouchBenchViewController: UIViewController {
             surface.visibilityHandler = { [weak self] visible in
                 if !visible { self?.currentBackground?.trim() }
             }
-            surface.accessibilitySettingsHandler = { [weak self] _ in self?.scheduleStatus() }
+            surface.accessibilitySettingsHandler = { [weak self] _ in
+                self?.applyWeaveInk()
+                self?.scheduleStatus()
+            }
             surface.renderObserver = { [weak self] outcome in
                 guard let self else { return }
                 if case .submitted = outcome { self.submitted += 1 }
@@ -397,6 +400,16 @@ final class TouchBenchViewController: UIViewController {
         closeButton.overrideUserInterfaceStyle = .dark
         backdropControl.overrideUserInterfaceStyle = .dark
         kindControl.overrideUserInterfaceStyle = .dark
+        applyWeaveInk()
+    }
+
+    /// Under Reduce Transparency the surface is an opaque, system-colored
+    /// sheet, so GlassWeave's own buttons take the system label color instead
+    /// of white, which would be unreadable on it.
+    private func applyWeaveInk() {
+        let ink: UIColor = surface?.accessibilitySettings.reduceTransparency == true ? .label : .white
+        weavePillButton.configuration?.baseForegroundColor = ink
+        weaveRoundButton.configuration?.baseForegroundColor = ink
     }
 
     /// Places the glass in two groups: GlassWeave's pill and button, and Apple's.

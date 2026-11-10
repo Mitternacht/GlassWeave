@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH, PRESENCE, CLEAN, CLEAN-2)
+## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH, PRESENCE, CLEAN, CLEAN-2, GW-30 to GW-34)
 
 Requested by the user on 2026-11-09, on the branch `implement/glass-beyond`
 (nothing merged into `main`, nothing tagged). Every API is experimental, every
@@ -9,9 +9,41 @@ off (frozen-shader readback tests), and the evidence is simulator and Mac
 only. Design notes: [glass optics](docs/glass-optics.md),
 [frost](docs/frost.md), [presentation](docs/presentation.md),
 [studies](docs/studies.md), [interaction](docs/interaction.md),
+[overlay](docs/overlay.md), [snapshot](docs/snapshot.md),
 [the SwiftUI adapter](docs/swiftui.md).
 
 ### Added
+
+- Overlay mode (GW-30): `GlassRenderer(commandQueue:mode: .overlay)`
+  (`GlassRenderer.Mode`) draws each panel as premultiplied alpha with no
+  background pass and no source, from a separate overlay shader
+  (`gw_overlay_fragment`): tint, rim and edge light, glow, halo, interior,
+  inner light and shadow, and a drop shadow outside the outline. A
+  `GlassSurfaceView` made with it is transparent, needs no source and passes
+  touches through. It cannot bend or frost what is behind it. The default opaque
+  shader is untouched (frozen-shader readback test `GlassBaselineGW30Tests`).
+- Snapshot source (GW-31): `UIKitSnapshotSource` captures a region of a UIKit
+  view into a pooled `bgra8Unorm_srgb` frame (upright, opaque, on the renderer's
+  queue) and hands it to the surface through `setSource`, so the custom glass can
+  bend and frost real, static UI. Refreshed on demand, not live; every capture
+  reports its measured draw and upload time. A full-screen refresh took about 41 ms
+  on the simulator (the bound is 33 ms), a list-sized one 10 to 19 ms.
+- Panel spring and proximity merge (GW-32): `PanelSpring` moves a frame on the
+  effect clock and retargets in flight without touching the velocity;
+  `GlassProximityMerge` maps the gap between two outlines (circle, capsule,
+  rounded rectangle) to a 0...1 progress with hysteresis, tracks pairs and
+  groups connected panels, and builds the merged blob panel.
+- Tilt-driven light (GW-33): `GlassMotionSource` with `GlassCoreMotionSource`
+  (unverified without a device) and `GlassInjectedMotionSource`, and
+  `GlassTiltLight`, which maps gravity to a small azimuth and elevation offset
+  through a low-pass filter; Reduce Motion pins the light.
+- Touch on frost and fill (GW-34): a frosted panel and a filled vessel answer a
+  touch with the same finger light, ring and rim gleam as other panels, through
+  two new pipeline variants (`touchedFrosted`, `touchedFilled`, each for a
+  rounded rectangle and a freeform shape). Panels without a touch, or with only
+  one of frost, fill and touch, render the previous bytes (`GlassBaselineGW34Tests`).
+- Lab pages Overlay, Over real UI, Drag and Tilt, and a Clear / Frost / Vessel
+  control on the Touch page; launch arguments are in the README.
 
 - Touch response (GW-12): `GlassTouch` (`GlassParameters.touch`, default
   `.none`, `.standard`), `GlassTouchPoint`, `GlassTouchState` (a pure function of
@@ -129,6 +161,9 @@ only. Design notes: [glass optics](docs/glass-optics.md),
 
 ### Changed
 
+- The lab's Drag, Tilt and Touch pages draw GlassWeave's own button labels in the system label color
+  under Reduce Transparency (white on the opaque light sheet was unreadable; the Touch page had it
+  since GW-12). Nothing else on those pages changed (VERIFY-ROUND5).
 - `GlassSurfaceView` runs its effect clock while any presented panel is
   animated (`GlassParameters.isAnimated`: glow, interior, light, wobble,
   fill), and `isEffectClockPaused` holds it for pinned captures.
@@ -196,9 +231,16 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   the dome button's outline has a one-pixel staircase at 12x, and no test covers the new terms.
   `PresentationUITests.testHeldDrawablesNeverStallTheMainThreadAndTheRequestDrawsOnRelease`
   timed out once in a full run while another job used the Mac and passed 3 of 3 alone.
-- The touch response draws no ring on frost and fill panels (those pipeline
-  variants carry no touch code), and the observer was never driven by a real
+- The touch response now reaches frost and fill panels (GW-34); the ring is
+  invisible on frost by design, and the observer was never driven by a real
   finger. Merging was captured without frost, fill or touch on the merged panel.
+- GW-30 to GW-34 (verified in VERIFY-ROUND5, simulator and My Mac only): the
+  overlay cannot blur what it covers, so text under an overlay capsule stays
+  crisp (dimmed, not frosted); the snapshot is static and a full-screen refresh
+  exceeds its 33 ms bound on the simulator; the Core Motion source and every
+  feel and cost question need a device; `PanelSpring`'s velocity carry-over has
+  no trace test; a bright glyph under the rim of the snapshot capsule leaves a
+  pale smudge with a faint inner arc at 5x.
 - No physical device, no M5 cost run, no live VoiceOver pass; the acceptance
   items that need them or a test beyond the one safety test per task stay
   unchecked in `tasks/todo.md`.

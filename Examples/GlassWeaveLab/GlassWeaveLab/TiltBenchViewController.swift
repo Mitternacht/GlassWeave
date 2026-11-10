@@ -282,7 +282,10 @@ final class TiltBenchViewController: UIViewController {
             surface.visibilityHandler = { [weak self] visible in
                 if !visible { self?.currentBackground?.trim() }
             }
-            surface.accessibilitySettingsHandler = { [weak self] _ in self?.updateStatus() }
+            surface.accessibilitySettingsHandler = { [weak self] _ in
+                self?.applyColors()
+                self?.updateStatus()
+            }
             surface.renderObserver = { [weak self] outcome in
                 guard let self else { return }
                 if case .submitted = outcome {
@@ -457,7 +460,10 @@ final class TiltBenchViewController: UIViewController {
             label.layer.cornerRadius = 6
             label.layer.masksToBounds = true
         }
-        for button in buttons { button.configuration?.baseForegroundColor = ink }
+        // Under Reduce Transparency the surface is an opaque, system-colored
+        // sheet, so GlassWeave's own buttons take the system label color.
+        let buttonInk: UIColor = surface?.accessibilitySettings.reduceTransparency == true ? .label : ink
+        for button in buttons { button.configuration?.baseForegroundColor = buttonInk }
         for glass in nativeGlass {
             for case let button as UIButton in glass.contentView.subviews { button.configuration?.baseForegroundColor = ink }
         }

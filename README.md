@@ -46,6 +46,12 @@ performance budget is met or failed; see
   surfaces that merge into one pill under a spring, and an optional
   `GlassWeaveSwiftUI` product with a `GlassSurface` view; see
   [interaction](docs/interaction.md) and [the SwiftUI adapter](docs/swiftui.md).
+- **Experimental overlay, snapshot, springs and tilt** (GW-30 to GW-34): glass
+  over live UIKit content without bending it (overlay mode), glass that bends
+  and frosts a static snapshot of real UI, a panel spring and merging by
+  proximity, a tilt-driven light, and the touch response on frosted and liquid
+  panels; see [overlay](docs/overlay.md), [snapshot](docs/snapshot.md) and
+  [interaction](docs/interaction.md).
 - **The laboratory** (`Examples/GlassWeaveLab`): a UIKit app with the native
   reference beside the custom panel over a deterministic moving background,
   lifecycle and accessibility controls, and the GW-09 benchmark scenario
@@ -113,7 +119,7 @@ glow. See [the glow design](docs/glow.md) and the evidence in
 ## Glass beyond native (experimental, unreleased)
 
 Built after the glow work, on the branch `implement/glass-beyond` (GW-21 to
-GW-29, then GW-12, GW-13 and GW-15; nothing is merged into `main`, nothing is tagged or released). The aim:
+GW-29, then GW-12, GW-13, GW-15 and GW-30 to GW-34; nothing is merged into `main`, nothing is tagged or released). The aim:
 glass in the same family as Apple's Liquid Glass (a mostly clear body, one
 light, a thin rim, calm shadows), with things native glass cannot show.
 Every new parameter is off by default, and a panel that does not use one
@@ -136,6 +142,11 @@ no physical device, no M5 cost run, no live VoiceOver pass.
 | Two custom surfaces that merge into one pill and separate again, drawn as one panel so every effect follows the outline; an interruptible spring on the effect clock (GW-13) | `GlassSurfaceMerge`, `SurfaceTransition` | [interaction](docs/interaction.md#merging-two-surfaces-gw-13), [glass-optics](docs/glass-optics.md) |
 | Bends that blend: a smooth window and a soft ceiling on the lens offset, so refraction fades in from the rim with no start line, kink or smear; a calmer touch response; a restrained surface finish for the liquid (POLISH) | `GlassLens.softness`, `GlassFill.richness`, the touch defaults | [glass-optics](docs/glass-optics.md#polish-subtle-blended-bends-a-calm-touch-the-chrome-ring-and-the-liquid-finish-polish) |
 | A SwiftUI view over the UIKit host, in an optional product (GW-15) | `GlassSurface`, `GlassSurfaceConfiguration`, `GlassSurfaceContent` (product `GlassWeaveSwiftUI`) | [swiftui](docs/swiftui.md) |
+| Overlay mode: a transparent surface that tints, lights, glows and shades live UIKit content behind it as premultiplied alpha; it cannot bend or frost what it cannot read (GW-30) | `GlassRenderer.Mode.overlay` (`GlassRenderer(commandQueue:mode:)`) | [overlay](docs/overlay.md) |
+| A snapshot of a region of a UIKit view as a background frame, so the custom glass bends and frosts real, static UI; refreshed on demand, not live (GW-31) | `UIKitSnapshotSource` | [snapshot](docs/snapshot.md) |
+| An interruptible panel spring on the effect clock, and merging by proximity: a gap becomes a 0...1 progress with hysteresis, pairs and clusters (GW-32) | `PanelSpring`, `GlassProximityMerge` | [interaction](docs/interaction.md#glass-springs-and-proximity-merge-gw-32) |
+| A tilt-driven light: device gravity through a low-pass filter to a small light offset, with an injectable source for the simulator and tests (GW-33) | `GlassMotionSource`, `GlassInjectedMotionSource`, `GlassCoreMotionSource`, `GlassTiltLight` | [interaction](docs/interaction.md) |
+| The touch response on frosted panels and liquid vessels (GW-34) | the existing `GlassTouch`, no new type | [interaction](docs/interaction.md#touch-on-frost-and-liquid-panels-gw-34) |
 
 Reduce Transparency, Increase Contrast and Reduce Motion each have a
 documented row for every effect in `GlassAccessibilityPolicy`.
@@ -163,8 +174,12 @@ dev.glassweave.GlassWeaveLab <arguments>`):
 | Native vs refined glass | `-lab.compare YES` (`-lab.compareBackdrop <page>`) |
 | Presentation | `-lab.presentation YES` |
 | Glow gallery | `-lab.gallery YES` |
-| Touch (GW-12) | `-lab.touch YES` (`-lab.touchBackdrop orbs`, `stage` or `grid`; `-lab.touch.pin "pill:0.3:0.55:0.18;round:0.55:0.5:0.12"` freezes synthetic touches for a capture; `-lab.touch.boost <factor>`; `-lab.touch.auto YES` taps once through the surface API) |
+| Touch (GW-12, GW-34) | `-lab.touch YES` (`-lab.touch.kind clear`, `frost` or `vessel`; `-lab.touchBackdrop orbs`, `stage` or `grid`; `-lab.touch.pin "pill:0.3:0.55:0.18;round:0.55:0.5:0.12"` freezes synthetic touches for a capture; `-lab.touch.boost <factor>`; `-lab.touch.auto YES` taps once through the surface API) |
 | Merge (GW-13) | `-lab.merge YES` (`-lab.mergeBackdrop stage` or `orbs`; `-lab.merge.progress <0...1>` pins the progress; `-lab.merge.auto YES` merges, reverses and settles) |
+| Overlay (GW-30) | `-lab.overlay YES` (`-lab.overlay.offset <points>` sets the list's scroll offset; `-lab.overlay.auto YES` scrolls it; `-lab.overlay.flow YES` lets the pooled light drift; `-lab.overlay.probe YES` is the Core Animation probe) |
+| Over real UI (GW-31) | `-lab.snapshot YES` (`-lab.snapshot.offset <points>`, `-lab.snapshot.scrollTo <points>`, `-lab.snapshot.hold <points>`, `-lab.snapshot.frost 0` or `1`, `-lab.snapshot.dark YES` or `NO`, `-lab.snapshot.sigma <points>`, `-lab.snapshot.measure <n>`) |
+| Drag, merging by proximity (GW-32) | `-lab.drag YES` (`-lab.dragBackdrop stage` or `orbs`; `-lab.drag.pin "pill:0.3:0.28;round:0.63:0.28;square:0.5:0.78"` pins centers; `-lab.drag.latched YES`; `-lab.drag.auto YES`) |
+| Tilt (GW-33) | `-lab.tilt YES` (`-lab.tilt.roll <deg>`, `-lab.tilt.lean <deg>`, with `m30` for -30; `-lab.tiltBackdrop orbs`, `stage` or `paper`) |
 | GlassSurface in SwiftUI (GW-15) | `-lab.swiftui YES` (`-lab.swiftui.strength <0...1>`, `-lab.swiftui.light NO`, `-lab.swiftui.quality balanced` or `minimal`) |
 
 `-lab.reduceMotion YES`, `-lab.reduceTransparency YES`, `-lab.increaseContrast
@@ -217,7 +232,8 @@ overview and the laboratory.
 - [Architecture](docs/architecture.md), with the design notes
   [glass optics](docs/glass-optics.md), [frost](docs/frost.md),
   [presentation](docs/presentation.md), [studies](docs/studies.md),
-  [interaction](docs/interaction.md) (touch response, merging) and
+  [interaction](docs/interaction.md) (touch response, merging, springs, tilt),
+  [overlay](docs/overlay.md), [snapshot](docs/snapshot.md) and
   [the SwiftUI adapter](docs/swiftui.md)
 - [Validation protocol](docs/validation.md) and
   [Milestone 1 report](docs/evidence/milestone-1.md)
