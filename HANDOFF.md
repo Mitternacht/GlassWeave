@@ -256,7 +256,7 @@ pass unmodified). Notes: [glass-optics](docs/glass-optics.md#presence-a-livelier
 | Package scheme, iPhone 18 Pro simulator | 292 passed, 0 failed, 2 skipped (the two Metal 4 tests) |
 | All lab UI tests, iPhone 18 Pro simulator | 50 results: 49 passed, 0 failed, 1 skipped (the iPad-only two-scene test); the known gallery dark audit passed this time, unexplained, nothing changed for it |
 | Studies and versus smoke, iPad Pro 13-inch (M5) simulator | 2 passed, 0 failed |
-| `scripts/consumer_check.sh` at the committed fix, My Mac | see the final report in the checklist Evidence |
+| `scripts/consumer_check.sh` at the committed fix `72d9e41`, My Mac | passed (one pin at that revision, the consumer test passed) |
 
 **How to build and run here.** The Xcode MCP bridge times out when it opens a workspace
 on this Mac (`XcodeOpenWorkspace` after 10 s, on every path), so the whole round used
