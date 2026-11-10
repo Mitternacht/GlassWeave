@@ -1,8 +1,9 @@
-# Interaction (GW-12, GW-13)
+# Interaction (GW-12, GW-13, GW-32)
 
 Experimental. Everything here is unreleased and can change. This note covers how
 GlassWeave's own glass answers a finger (GW-12) and how two of its surfaces merge
-and separate under a spring (GW-13, [below](#merging-two-surfaces-gw-13)).
+and separate under a spring (GW-13, [below](#merging-two-surfaces-gw-13)); GW-32 adds a panel spring and
+merging by proximity ([below](#glass-springs-and-proximity-merge-gw-32)).
 
 ## Touch response (GW-12)
 
@@ -288,3 +289,158 @@ and [beside the system's merge](evidence/captures/gw-13-merge-vs-native-containe
 - The touch response (GW-12) answers a merged panel like any shaped panel; it was
   not exercised during a transition.
 - No cost measurement; simulator only.
+
+## Glass springs and proximity merge (GW-32)
+
+Experimental. Two parts: a spring that moves a panel's frame, and a merge that
+follows the distance between panels. Both are meant for glass that a finger drags.
+
+### Panel spring (`PanelSpring`, GlassWeaveUIKit)
+
+```swift
+let spring = try PanelSpring(surface: surface, frame: pillFrame)   // .follow: 0.28 s, damping 0.86
+spring.frameHandler = { frame in /* build the panels from every spring's frame */ }
+try spring.setTarget(fingerFrame)   // retargets in flight: position AND velocity carry over
+try spring.jump(to: frame)          // place it now: no spring, no velocity
+```
+
+`setTarget` is what a pan gesture calls on every move: the glass follows on a
+spring and never snaps or stops when the finger changes course. The state is the
+frame as four numbers (x, y, width, height) and their rates, advanced by the
+surface's effect time (clock deltas clamped to 0.1 s, 1/240 s substeps, the same
+maths as `SurfaceTransition`). A `NaN` or infinite component throws
+`PanelSpringError.nonFiniteFrame(_:)` naming it; a finite value clamps (sizes at
+0, everything within 100 000 points).
+
+**Clock and pacing.** A moving spring is an effect-clock client, like the merge
+transition of GW-13: the surface runs its clock and asks the display for the
+interaction rates while any spring moves, and the tick that settles the last one
+is the final frame, after which the surface draws nothing (on demand again). Any
+number of springs on one surface share the one clock. A pan gesture opens
+`surface.beginInteraction()` for its length so the display keeps the high rate
+while the finger is held still.
+
+| | Behavior |
+|---|---|
+| Full and balanced tiers | The spring runs on the clock at the tier's rate. |
+| Minimal tier | A new target is reached at once: no clock, no velocity. |
+| Reduce Motion | The same jump; a setting that changes in flight jumps the spring to its target. |
+| Reduce Transparency, Increase Contrast | The material changes (the opaque body), the motion does not; the surface applies the policy to every panel. |
+
+### Proximity merge (`GlassProximityMerge`, GlassWeave)
+
+`GlassProximityMerge.progress(gap:isMerged:)` maps the gap between two panels'
+outlines (points; 0 when they touch, negative when they overlap) to a merge
+progress from 0 to 1. A pure function: the same inputs give the same value; for
+one state it never decreases as the gap closes; it is clamped to 0...1. The ramp
+is smooth (smoothstep) between `startGap` (default 40: progress 0 at and beyond)
+and `fullGap` (default 6: progress 1 at and inside).
+
+**Hysteresis.** A pair that has merged holds on: its ramp moves outward by
+`release` (default 14 points). The state flips to merged when the gap reaches
+`fullGap` and back to apart when it passes `startGap + release` (54), and the two
+curves agree at both flips, so progress is continuous there and a finger hovering
+on a threshold cannot flicker: it merges once and lets go once. Measured: the
+same 28-point gap is progress 0.29 for a pair that is approaching and 0.86 for a
+pair that was merged and pulled out (captures below).
+
+`GlassProximityMerge.Tracker` holds the merged state of every pair of a list of
+panels and returns the clusters (connected groups) for each update. A cluster is
+one `GlassBlob` (`blob(for:of:in:)`: up to six circles, capsules and rounded
+rectangles, blend distance `blend` x progress, 56 points at 1, interior blend 72)
+that the app puts in `GlassParameters.shape` of one panel, so a merged group has
+one lens, one rim and one shadow with no seam. Nothing in the shader, the
+renderer or the shape types changed. Two panels are connected only once the gap
+between them is under the blob's blend distance (the distance at which a smooth
+union starts to bend one shape toward the other), so a third panel that comes
+into range joins from nothing, with no pop.
+
+`Outline` is the shape vocabulary: `.circle`, `.capsule` and `.roundedRectangle`
+(axis aligned), or `Outline.panel(frame:cornerRadius:)` to pick the exact one for
+a frame. `gap(to:)` is exact for all of them (each is a convex core, a point, a
+segment or a rectangle, grown by its radius, so the gap is the distance between
+the cores less both radii). Rounded rectangles use the blob's existing
+rounded-box primitive (GW-26), so **no shape-field or shader change was needed**;
+`GlassSurfaceMerge` (GW-13's pose-to-pose merge of a stepper) still takes circles
+and capsules only. The progress also drives that transition: `SurfaceTransition.scrub(to:)`
+takes the same 0...1.
+
+**Normalization rule.** A `NaN` or infinite gap, coordinate or parameter throws
+`GlassProximityMergeError.nonFinite(_:)` naming the field (`gap`, `outline`,
+`startGap`, `fullGap`, `release`, `blend`, `interiorBlend`); finite parameters
+clamp (`startGap` 1...400, `fullGap` -100...`startGap` - 0.5, `release` 0...200,
+`blend` and `interiorBlend` 0...400).
+
+### Native content and hit testing
+
+The surface takes no touches; the glass is decorative. In the lab each panel
+carries a native `UIButton` at the panel's own spring frame (the app moves it from
+`frameHandler`, so its frame and accessibility frame are the glass's frame in
+every state), and a `UIPanGestureRecognizer` on the button carries the drag.
+Policy: a panel's hit area is its own frame, apart or merged; the neck between
+merged panels belongs to nobody (a tap there reaches whatever the app put
+behind); a tap on a button works at every progress. Checked on the simulator with
+real touches: a tap on the pill while it was merged with the round button counted
+(`taps 1`); a tap in the neck counted nothing.
+
+### Laboratory
+
+`-lab.drag YES` (or the "Drag" button on the main screen) opens the page. Top: a
+pill, a round button and a rounded square of GlassWeave's clean refined glass
+(`RefinedLook.enhancedLens`, `GlassLighting.clean`, triangular dither) on the stage
+(`-lab.dragBackdrop stage|orbs`), draggable with a finger, merging by proximity.
+Bottom: the same three shapes as `UIGlassEffect` views in a
+`UIGlassContainerEffect` (spacing 40), dragged the same way: **Apple's merge,
+which is Apple's glass with Apple's glass; ours merges GlassWeave glass with
+GlassWeave glass**, and the page says so. `-lab.drag.pin "pill:0.3:0.28;round:0.63:0.28;square:0.5:0.78"`
+pins centers (fractions of the area) with no spring and no clock;
+`-lab.drag.latched YES` shows a pinned frame as a pair that merged first would see
+it; `-lab.drag.auto YES` brings the round button to the pill and pulls it away,
+through the same code a finger uses. The status line shows each pair's gap,
+progress and state, the spring and clock state, and `after settle +N`.
+
+Captures (iPhone 18 Pro simulator):
+[apart](evidence/captures/gw-32-drag-stage-apart-iphone18pro-sim.png),
+[gap 16 beside Apple's container](evidence/captures/gw-32-drag-stage-merging-gap16-vs-native-iphone18pro-sim.png),
+[gap 28 approaching](evidence/captures/gw-32-drag-stage-gap28-approaching-strip-iphone18pro-sim.png) and
+[gap 28 after a merge (hysteresis)](evidence/captures/gw-32-drag-stage-gap28-latched-hysteresis-strip-iphone18pro-sim.png),
+[three panels as one shape](evidence/captures/gw-32-drag-stage-three-merged-strip-iphone18pro-sim.png),
+[orbs](evidence/captures/gw-32-drag-orbs-merging-gap16-strip-iphone18pro-sim.png),
+[a real finger drag and pull, settled](evidence/captures/gw-32-drag-finger-pulled-settled-iphone18pro-sim.png)
+(`spring idle | clock off | after settle +0`),
+[Reduce Motion jump](evidence/captures/gw-32-drag-reduce-motion-jump-iphone18pro-sim.png)
+(`spring idle | clock off`, 2 frames submitted) and
+[merge then separate, settled](evidence/captures/gw-32-drag-auto-apart-settled-iphone18pro-sim.png)
+(`panels 3`, 52 frames, `after settle +0`).
+
+### Tuning record
+
+Three rounds, by eye, against the system's container twin. Round 1: the neck
+formed too late (it showed at a 16-point gap, where Apple's is already a peanut),
+so the ramp widened (36/4/12 to 44/6/14) and the blend grew (44 to 68). Round 2: a
+third panel 40 points from a merged pair was pulled 2 points by the group's one
+blend distance, so a panel now joins a group only once it is closer than that
+distance. Round 3: the three-panel blob read lumpy at blend 68; it is 56 (start
+gap 40, interior 72), and the page opens on the stage, where the clear glass reads.
+
+### Limits
+
+- Apple's merge is the benchmark and its look is its own (a flat gray on the
+  stage, pearly on the orbs); ours is the clearer, calmer material of the other
+  pages. Same family by the neck shape and rim, not by the fill.
+- One blend distance serves a whole group, so in a group of three the weaker pair
+  shares the stronger pair's blend (a joined panel starts from nothing, but a
+  weakly coupled one is bent as if it were close).
+- Before the neck bridges, and after a pulled-out neck lets go, the two shapes
+  lean toward each other for a few points (the polynomial smooth union's bend,
+  about 25 to 45 points of gap for a merged pair). It is short, but at a still
+  frame it reads as a teardrop; the capture "gap 28 after a merge" shows it.
+- A round panel taller than the pill next to it (64 against 56 points) leaves a
+  gentle swell along the merged edge; equal heights would not.
+- Springs and merge were exercised on the iPhone 18 Pro simulator, by real touches
+  for a drag and a tap and by the lab's scripted run; no device, no cost
+  measurement. Retargeting without a jump rests on the spring's construction (one
+  state of position and velocity, only the target changes); no run logged a
+  velocity trace (fast pass: not tested).
+- Apple's twin is dragged with a UIKit spring animation (`usingSpringWithDamping`),
+  not the system's own follow; its container merge is whatever the system does.

@@ -1093,12 +1093,12 @@ The user asked on 2026-11-10 to build what is left. These five tasks close the b
 **Dependencies:** GW-13, GW-27. **Scope:** M.
 
 **Acceptance criteria:**
-- [ ] A spring helper moves a panel's frame interruptibly and keeps velocity when retargeted.
-- [ ] The merge progress is a deterministic, monotonic function of the distance with hysteresis (no flicker at the threshold).
-- [ ] Merging works for circles, capsules and rounded rectangles with no seam; native content follows the documented hit-test policy.
-- [ ] Reduce Motion jumps to the end state; the effect clock stops when everything settles.
+- [ ] A spring helper moves a panel's frame interruptibly and keeps velocity when retargeted. (`PanelSpring` moves the frame and a finger retargets it on every move in the lab; the velocity carry-over rests on the construction, one state that `setTarget` does not touch. Fast pass: not tested, no velocity trace was logged.)
+- [x] The merge progress is a deterministic, monotonic function of the distance with hysteresis (no flicker at the threshold). (`GlassProximityMergeTests`, the one safety test.)
+- [x] Merging works for circles, capsules and rounded rectangles with no seam; native content follows the documented hit-test policy. (Captures of a capsule with a circle, with a rounded square, and all three as one shape; real taps on the simulator: a tap on the merged pill counted, a tap in the neck did not. Not an automated test.)
+- [x] Reduce Motion jumps to the end state; the effect clock stops when everything settles. (Captures: Reduce Motion `spring idle | clock off`, 2 frames; a finger drag and a scripted merge-and-separate both end `clock off`, `after settle +0`. Not an automated test.)
 
-**Evidence:** not started.
+**Evidence:** `PanelSpring` (new, `Sources/GlassWeaveUIKit/PanelSpring.swift`) moves a frame as four numbers with their rates on the surface's effect clock (an effect-clock client like GW-13's transition), retargets without touching the velocity, jumps under Reduce Motion and the minimal tier, and stops the clock when it settles. `GlassProximityMerge` (new, `Sources/GlassWeave/GlassProximityMerge.swift`): `progress(gap:isMerged:)`, the latch, a `Tracker` that returns clusters, `Outline` (circle, capsule, rounded rectangle, with an exact gap) and `blob(for:of:in:)`; rounded rectangles use the existing blob box primitive, so no shape or shader change was needed. Lab page `Drag` (`-lab.drag YES`, `DragBenchViewController.swift`, one menu button) with a native `UIGlassContainerEffect` twin; pins, `-lab.drag.latched`, `-lab.drag.auto`. The one test, `GlassProximityMergeTests/proximityProgressIsDeterministicMonotonicClampedAndHasHysteresis`: package scheme on My Mac 212 passed, 0 failed (xcresulttool), on the iPhone 18 Pro simulator 293 passed, 0 failed, 2 skipped (the 2 skips are not this task's; no lab UI test was added or changed, none run). Captures inspected: `docs/evidence/captures/gw-32-drag-*` (apart, merging beside Apple's container, gap 28 approaching and after a merge, three panels, orbs, finger drag settled, Reduce Motion, scripted separate settled). Three tuning rounds, in `docs/interaction.md`. Built with `xcodebuild` (the Xcode MCP workspace open timed out, recorded before this task). Limits: the short lean before the neck bridges, one blend distance per group, no velocity trace, simulator only, Apple's twin is dragged with a UIKit spring animation.
 
 ## GW-33: Tilt-driven light
 
