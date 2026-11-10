@@ -1,9 +1,10 @@
-# Interaction (GW-12, GW-13, GW-34)
+# Interaction (GW-12, GW-13, GW-32, GW-34)
 
 Experimental. Everything here is unreleased and can change. This note covers how
 GlassWeave's own glass answers a finger (GW-12; frost and liquid panels too, GW-34,
 [below](#touch-on-frost-and-liquid-panels-gw-34)) and how two of its surfaces merge
-and separate under a spring (GW-13, [below](#merging-two-surfaces-gw-13)).
+and separate under a spring (GW-13, [below](#merging-two-surfaces-gw-13)); GW-32 adds a
+panel spring and merging by proximity ([below](#glass-springs-and-proximity-merge-gw-32)).
 
 ## Touch response (GW-12)
 
@@ -407,3 +408,290 @@ and [beside the system's merge](evidence/captures/gw-13-merge-vs-native-containe
 - The touch response (GW-12) answers a merged panel like any shaped panel; it was
   not exercised during a transition.
 - No cost measurement; simulator only.
+
+## Glass springs and proximity merge (GW-32)
+
+Experimental. Two parts: a spring that moves a panel's frame, and a merge that
+follows the distance between panels. Both are meant for glass that a finger drags.
+
+### Panel spring (`PanelSpring`, GlassWeaveUIKit)
+
+```swift
+let spring = try PanelSpring(surface: surface, frame: pillFrame)   // .follow: 0.28 s, damping 0.86
+spring.frameHandler = { frame in /* build the panels from every spring's frame */ }
+try spring.setTarget(fingerFrame)   // retargets in flight: position AND velocity carry over
+try spring.jump(to: frame)          // place it now: no spring, no velocity
+```
+
+`setTarget` is what a pan gesture calls on every move: the glass follows on a
+spring and never snaps or stops when the finger changes course. The state is the
+frame as four numbers (x, y, width, height) and their rates, advanced by the
+surface's effect time (clock deltas clamped to 0.1 s, 1/240 s substeps, the same
+maths as `SurfaceTransition`). A `NaN` or infinite component throws
+`PanelSpringError.nonFiniteFrame(_:)` naming it; a finite value clamps (sizes at
+0, everything within 100 000 points).
+
+**Clock and pacing.** A moving spring is an effect-clock client, like the merge
+transition of GW-13: the surface runs its clock and asks the display for the
+interaction rates while any spring moves, and the tick that settles the last one
+is the final frame, after which the surface draws nothing (on demand again). Any
+number of springs on one surface share the one clock. A pan gesture opens
+`surface.beginInteraction()` for its length so the display keeps the high rate
+while the finger is held still.
+
+| | Behavior |
+|---|---|
+| Full and balanced tiers | The spring runs on the clock at the tier's rate. |
+| Minimal tier | A new target is reached at once: no clock, no velocity. |
+| Reduce Motion | The same jump; a setting that changes in flight jumps the spring to its target. |
+| Reduce Transparency, Increase Contrast | The material changes (the opaque body), the motion does not; the surface applies the policy to every panel. |
+
+### Proximity merge (`GlassProximityMerge`, GlassWeave)
+
+`GlassProximityMerge.progress(gap:isMerged:)` maps the gap between two panels'
+outlines (points; 0 when they touch, negative when they overlap) to a merge
+progress from 0 to 1. A pure function: the same inputs give the same value; for
+one state it never decreases as the gap closes; it is clamped to 0...1. The ramp
+is smooth (smoothstep) between `startGap` (default 40: progress 0 at and beyond)
+and `fullGap` (default 6: progress 1 at and inside).
+
+**Hysteresis.** A pair that has merged holds on: its ramp moves outward by
+`release` (default 14 points). The state flips to merged when the gap reaches
+`fullGap` and back to apart when it passes `startGap + release` (54), and the two
+curves agree at both flips, so progress is continuous there and a finger hovering
+on a threshold cannot flicker: it merges once and lets go once. Measured: the
+same 28-point gap is progress 0.29 for a pair that is approaching and 0.86 for a
+pair that was merged and pulled out (captures below).
+
+`GlassProximityMerge.Tracker` holds the merged state of every pair of a list of
+panels and returns the clusters (connected groups) for each update. A cluster is
+one `GlassBlob` (`blob(for:of:in:)`: up to six circles, capsules and rounded
+rectangles, blend distance `blend` x progress, 56 points at 1, interior blend 72)
+that the app puts in `GlassParameters.shape` of one panel, so a merged group has
+one lens, one rim and one shadow with no seam. Nothing in the shader, the
+renderer or the shape types changed. Two panels are connected only once the gap
+between them is under the blob's blend distance (the distance at which a smooth
+union starts to bend one shape toward the other), so a third panel that comes
+into range joins from nothing, with no pop.
+
+`Outline` is the shape vocabulary: `.circle`, `.capsule` and `.roundedRectangle`
+(axis aligned), or `Outline.panel(frame:cornerRadius:)` to pick the exact one for
+a frame. `gap(to:)` is exact for all of them (each is a convex core, a point, a
+segment or a rectangle, grown by its radius, so the gap is the distance between
+the cores less both radii). Rounded rectangles use the blob's existing
+rounded-box primitive (GW-26), so **no shape-field or shader change was needed**;
+`GlassSurfaceMerge` (GW-13's pose-to-pose merge of a stepper) still takes circles
+and capsules only. The progress also drives that transition: `SurfaceTransition.scrub(to:)`
+takes the same 0...1.
+
+**Normalization rule.** A `NaN` or infinite gap, coordinate or parameter throws
+`GlassProximityMergeError.nonFinite(_:)` naming the field (`gap`, `outline`,
+`startGap`, `fullGap`, `release`, `blend`, `interiorBlend`); finite parameters
+clamp (`startGap` 1...400, `fullGap` -100...`startGap` - 0.5, `release` 0...200,
+`blend` and `interiorBlend` 0...400).
+
+### Native content and hit testing
+
+The surface takes no touches; the glass is decorative. In the lab each panel
+carries a native `UIButton` at the panel's own spring frame (the app moves it from
+`frameHandler`, so its frame and accessibility frame are the glass's frame in
+every state), and a `UIPanGestureRecognizer` on the button carries the drag.
+Policy: a panel's hit area is its own frame, apart or merged; the neck between
+merged panels belongs to nobody (a tap there reaches whatever the app put
+behind); a tap on a button works at every progress. Checked on the simulator with
+real touches: a tap on the pill while it was merged with the round button counted
+(`taps 1`); a tap in the neck counted nothing.
+
+### Laboratory
+
+`-lab.drag YES` (or the "Drag" button on the main screen) opens the page. Top: a
+pill, a round button and a rounded square of GlassWeave's clean refined glass
+(`RefinedLook.enhancedLens`, `GlassLighting.clean`, triangular dither) on the stage
+(`-lab.dragBackdrop stage|orbs`), draggable with a finger, merging by proximity.
+Bottom: the same three shapes as `UIGlassEffect` views in a
+`UIGlassContainerEffect` (spacing 40), dragged the same way: **Apple's merge,
+which is Apple's glass with Apple's glass; ours merges GlassWeave glass with
+GlassWeave glass**, and the page says so. `-lab.drag.pin "pill:0.3:0.28;round:0.63:0.28;square:0.5:0.78"`
+pins centers (fractions of the area) with no spring and no clock;
+`-lab.drag.latched YES` shows a pinned frame as a pair that merged first would see
+it; `-lab.drag.auto YES` brings the round button to the pill and pulls it away,
+through the same code a finger uses. The status line shows each pair's gap,
+progress and state, the spring and clock state, and `after settle +N`.
+
+Captures (iPhone 18 Pro simulator):
+[apart](evidence/captures/gw-32-drag-stage-apart-iphone18pro-sim.png),
+[gap 16 beside Apple's container](evidence/captures/gw-32-drag-stage-merging-gap16-vs-native-iphone18pro-sim.png),
+[gap 28 approaching](evidence/captures/gw-32-drag-stage-gap28-approaching-strip-iphone18pro-sim.png) and
+[gap 28 after a merge (hysteresis)](evidence/captures/gw-32-drag-stage-gap28-latched-hysteresis-strip-iphone18pro-sim.png),
+[three panels as one shape](evidence/captures/gw-32-drag-stage-three-merged-strip-iphone18pro-sim.png),
+[orbs](evidence/captures/gw-32-drag-orbs-merging-gap16-strip-iphone18pro-sim.png),
+[a real finger drag and pull, settled](evidence/captures/gw-32-drag-finger-pulled-settled-iphone18pro-sim.png)
+(`spring idle | clock off | after settle +0`),
+[Reduce Motion jump](evidence/captures/gw-32-drag-reduce-motion-jump-iphone18pro-sim.png)
+(`spring idle | clock off`, 2 frames submitted) and
+[merge then separate, settled](evidence/captures/gw-32-drag-auto-apart-settled-iphone18pro-sim.png)
+(`panels 3`, 52 frames, `after settle +0`).
+
+### Tuning record
+
+Three rounds, by eye, against the system's container twin. Round 1: the neck
+formed too late (it showed at a 16-point gap, where Apple's is already a peanut),
+so the ramp widened (36/4/12 to 44/6/14) and the blend grew (44 to 68). Round 2: a
+third panel 40 points from a merged pair was pulled 2 points by the group's one
+blend distance, so a panel now joins a group only once it is closer than that
+distance. Round 3: the three-panel blob read lumpy at blend 68; it is 56 (start
+gap 40, interior 72), and the page opens on the stage, where the clear glass reads.
+
+### Limits
+
+- Apple's merge is the benchmark and its look is its own (a flat gray on the
+  stage, pearly on the orbs); ours is the clearer, calmer material of the other
+  pages. Same family by the neck shape and rim, not by the fill.
+- One blend distance serves a whole group, so in a group of three the weaker pair
+  shares the stronger pair's blend (a joined panel starts from nothing, but a
+  weakly coupled one is bent as if it were close).
+- Before the neck bridges, and after a pulled-out neck lets go, the two shapes
+  lean toward each other for a few points (the polynomial smooth union's bend,
+  about 25 to 45 points of gap for a merged pair). It is short, but at a still
+  frame it reads as a teardrop; the capture "gap 28 after a merge" shows it.
+- A round panel taller than the pill next to it (64 against 56 points) leaves a
+  gentle swell along the merged edge; equal heights would not.
+- Springs and merge were exercised on the iPhone 18 Pro simulator, by real touches
+  for a drag and a tap and by the lab's scripted run; no device, no cost
+  measurement. Retargeting without a jump rests on the spring's construction (one
+  state of position and velocity, only the target changes); no run logged a
+  velocity trace (fast pass: not tested).
+- Apple's twin is dragged with a UIKit spring animation (`usingSpringWithDamping`),
+  not the system's own follow; its container merge is whatever the system does.
+
+## Tilt-driven light (GW-33)
+
+> Experimental. `GlassMotionSource`, `GlassMotionSample`, `GlassInjectedMotionSource`,
+> `GlassCoreMotionSource` and `GlassTiltLight` (all `GlassWeaveUIKit`) may change
+> before a stable release.
+
+The light of GlassWeave glass can follow the tilt of the device: the highlights on
+the rim slide a few degrees the way a lamp's reflection does on a real piece of
+glass in the hand. Only the light moves. No panel, bend or shape changes and nothing
+is rebuilt: the helper makes one call, `GlassRenderer.setLightOffset(azimuth:elevation:)`
+(GW-23), on the surface's existing renderer and asks for one frame. Apple's glass has
+no such control; its light is the system's own.
+
+### Parts
+
+| Type | What it is |
+|---|---|
+| `GlassMotionSample` | One reading of gravity in the device frame (Core Motion's: x right, y up the screen, z out of it; units of g) with a timestamp. `init(rollDegrees:leanDegrees:timestamp:)` builds one from angles; `rollDegrees` and `leanDegrees` read them back. |
+| `GlassMotionSource` | The protocol: `isAvailable`, `isRunning`, `sampleHandler`, `start()`, `stop()`. It delivers samples on the main thread, only while running. |
+| `GlassCoreMotionSource` | The real one: `CMMotionManager` device motion, gravity only, 30 Hz by default (`updateInterval` clamped to 1/60...1/10 s), delivered on the main queue, between `start()` and `stop()`. iOS only (`#if canImport(CoreMotion) && os(iOS)`). Device motion needs no permission. |
+| `GlassInjectedMotionSource` | The injectable one, for tests and the simulator: `send(_:)` hands a sample to the handler, only while running, and says whether it did; it counts starts, stops and deliveries. |
+| `GlassTiltLight` | The helper that maps the samples to the light, filters them, applies them, and starts and stops the source. |
+
+### The mapping
+
+A fixed lamp in the room lights a screen from a direction that changes when the
+screen turns. Gravity alone gives two angles: **roll** (how far the right edge is down,
+`asin(gx)`) and **lean** (how far the screen is leaned back from upright, `atan2(-gz, -gy)`:
+0 upright, 90 flat and face up).
+
+- Azimuth offset `= -clamp(roll / fullTilt, -1, 1) * maximumAzimuth`. Right edge down
+  swings the lamp toward the left of the screen (counter-clockwise; azimuth 0 is the top,
+  as in the light model).
+- Elevation offset `= clamp((lean - neutralLean) / fullTilt, -1, 1) * maximumElevation`. A
+  flatter screen raises the lamp over it. A normal grip (lean 40) leaves the authored light.
+
+`GlassTiltLight.Configuration` and its bounds (every field is normalized: a NaN or
+infinite value throws `GlassTiltLightError.nonFiniteConfiguration(_:)` naming the field,
+a finite one is clamped):
+
+| Field | Default | Range |
+|---|---|---|
+| `maximumAzimuth` | 30 degrees (the tilt itself at full tilt) | 0...60 (`azimuthLimit`) |
+| `maximumElevation` | 12 degrees | 0...30 (`elevationLimit`) |
+| `fullTilt` | 30 degrees | 5...90 |
+| `neutralLean` | 40 degrees | 0...90 |
+| `timeConstant` | 0.25 s | 0.02...2 |
+
+**Documented bounds.** Whatever the device does (and whatever nonsense a sample holds), the
+azimuth offset stays within `maximumAzimuth` (never above 60) and the elevation offset within
+`maximumElevation` (never above 30). The mapping is clamped, and the filter is a convex
+combination of clamped values, so it cannot leave the range either. A NaN or infinite sample
+component throws `GlassTiltLightError.nonFiniteSample(_:)` from `ingest(_:)` (a source's own
+non-finite sample is ignored).
+
+### Smoothing and frequency
+
+The offsets go through an exponential low-pass filter with the configured time constant
+(`blend = 1 - exp(-dt / timeConstant)` per sample, `dt` the step between timestamps, never more
+than 0.25 s, 1/30 s for the first sample after a start): 95 percent of a new target in about 0.75
+s by default. The filter starts from the authored light (0, 0), so the light glides in
+instead of jumping to the first reading. The renderer is given the new offset only when it has
+moved by `applyThreshold` (0.02 degrees) since the last time, so a device lying still applies
+nothing and requests no frames: the light adds no clock and no steady draw, and a settled light
+leaves the surface on demand.
+
+### Lifetime and accessibility
+
+The light starts the source only while it is needed: the surface is visible
+(`GlassSurfaceView.isVisible`: in a window, not hidden, scene in the foreground) and no setting
+pins the light. It stops it when the surface hides. It does this by wrapping the surface's
+`visibilityHandler` and `accessibilitySettingsHandler` (the handlers that were there are still
+called) and by registering for the Increase Contrast trait; an app that replaces a handler
+afterwards calls `refresh()` from its own. `invalidate()` stops the source and gives the light
+back; a deinitialized light stops its source too.
+
+| Setting | Behavior |
+|---|---|
+| Reduce Motion | The light is **pinned** at the authored direction: the source stops, the offset returns to (0, 0) at once (no glide), and samples are ignored. A surface that starts under Reduce Motion never starts the source. |
+| Reduce Transparency, Increase Contrast | The policy already removes the light terms the tilt moves (or draws them as an even hairline), so nothing visible would change: the same pin applies and the sensor does not run. |
+| Quality tiers | Not affected: one frame per change, none at rest. |
+
+### Laboratory
+
+`-lab.tilt YES` (or the "Tilt" menu button) opens the page: a pill, a round button and the chrome
+ring (`RefinedLook.chromeRing`) on one surface, and the same three shapes in `UIGlassEffect`
+below, so the two can be compared on the same backdrop. The simulator has no motion hardware, so
+**Roll** and **Lean** sliders play the device: a 30 Hz timer hands the light a sample built from
+them through a `GlassInjectedMotionSource`, as the sensor would. The Core Motion segment is enabled
+only where the hardware is (it reads "n/a" on the simulator). `-lab.tilt.roll <deg>` and
+`-lab.tilt.lean <deg>` set the start (`m30` means -30: a launch argument cannot start with a minus
+sign), `-lab.tiltBackdrop orbs|stage|paper` the backdrop, `-lab.reduceMotion YES` and
+`-lab.increaseContrast YES` the pins. The status line shows the light offset, how many times it
+was applied, free or pinned, whether the sensor runs, the clock, the frames submitted and how long
+ago the last one was.
+
+Captures (`docs/evidence/captures/gw-33-tilt-*`, iPhone 18 Pro simulator): roll -30, 0 and +30 on
+the orbs, the stage and the paper desk; lean 10, 40 and 70; the page beside the `UIGlassEffect`
+twin; Reduce Motion (a roll of -30 requested, light pinned at 0.0 and 0.0, `applied 0`, sensor off)
+and Increase Contrast. At roll +30 the status read `light az -30.0 el +0.0 | applied 45 | clock
+off`, and the last frame was 1.9 s old when the capture was taken: the light had settled and drew
+nothing more.
+
+### Tuning record
+
+By eye on the orbs, the stage and the paper desk, beside the system glass. The amplitude started at
+20 degrees of azimuth and was raised to 30 (the tilt itself at full tilt: the ring's highlights
+moved too little to read at 20). The ring, whose prismatic bands and glints turn with the key
+light, shows the movement clearly. The pill and the round button carry the shared refined look,
+whose rim is a thin hairline that is a little brighter on the lit side; it shifts only slightly.
+Three attempts to make them show it more: a stronger Fresnel and specular, and a lower, tighter
+key, each changed nothing visible; a faint prismatic film showed the movement but turned the pill
+into a soap-bubble ring, which the style direction rules out. All three were dropped: the pill and
+the round button stay the shared look.
+
+### Limits
+
+- **Device only, not verified:** `GlassCoreMotionSource` is wired (device motion, gravity,
+  30 Hz, main queue, started and stopped by visibility) but nothing ran it: the simulator has no
+  motion hardware. Feel and battery cost on a device are open.
+- Gravity alone cannot see a turn about the vertical axis of an upright phone, so the light does
+  not follow that gesture; it follows roll and lean.
+- The pill and the round button show only a faint shift of their rim; the chrome ring shows it
+  clearly (see the tuning record).
+- The renderer's light offset is one value per renderer, so every lit panel on a surface moves
+  together, and the light owns that offset while it is attached (a page that also drags the light
+  by hand would fight it).
+- The light installs itself on two single-closure handlers of the surface (chained, not
+  replaced), and an app that sets them again must call `refresh()`.
+- The simulator slider's timer is the lab's, not the library's; the library's only source is Core
+  Motion.

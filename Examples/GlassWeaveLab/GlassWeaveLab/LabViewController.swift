@@ -247,6 +247,12 @@ final class LabViewController: UIViewController {
             openedVersusAtLaunch = true
             VersusViewController.present(from: self, animated: false)
         }
+        // `-lab.drag YES` opens the drag page once (GW-32).
+        DragBenchViewController.presentAtLaunch(from: self)
+        // `-lab.tilt YES` opens the tilt page once (GW-33).
+        TiltBenchViewController.presentAtLaunch(from: self)
+        // `-lab.snapshot YES` opens the over-real-UI page once (GW-31).
+        SnapshotBenchViewController.presentAtLaunch(from: self)
     }
 
     /// Presents the material bench or the light-fields demo (GW-21) over the
@@ -671,6 +677,9 @@ final class LabViewController: UIViewController {
         let stack = UIStackView(arrangedSubviews: [tintRow, motionRow, lifecycleRow, glowRow, nativeGlowRow, interiorRow, diagnosticsLabel, resetButton, galleryButton, VersusViewController.menuButton(presentedBy: self, hidden: benchmark != nil), OverlayLabViewController.menuButton(presentedBy: self, hidden: benchmark != nil), StudyViewController.menuButton(presentedBy: self, hidden: benchmark != nil), SwiftUIExample.menuButton(presentedBy: self, hidden: benchmark != nil), lightFieldsButton, lensButton, chromeButton, paperButton, shapesButton, vesselButton, touchButton, mergeButton, compareButton, presentationButton, frostButton, frostGlassButton, benchButton, measureButton])
        stack.axis = .vertical
         stack.spacing = 12
+        stack.addArrangedSubview(DragBenchViewController.menuButton(presentedBy: self, hidden: benchmark != nil))
+        stack.addArrangedSubview(TiltBenchViewController.menuButton(presentedBy: self, hidden: benchmark != nil))
+        stack.addArrangedSubview(SnapshotBenchViewController.menuButton(presentedBy: self, hidden: benchmark != nil))
         stack.translatesAutoresizingMaskIntoConstraints = false
         controls.addSubview(stack)
         controls.translatesAutoresizingMaskIntoConstraints = false
