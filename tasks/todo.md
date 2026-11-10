@@ -1054,3 +1054,74 @@ Visual verdict, honest: see HANDOFF.md, "Visual verdict after POLISH". Limits: M
 - [ ] Tests for the new terms (the thin rim's profile, the smoothed distance, the ring ramp, the dither's amplitude), a CPU mirror, a byte-level `softRim` 1 check, device sign-off, the M5 cost of the extra distance evaluations. (not done: the task allowed no new tests; device only)
 
 **Evidence (2026-11-10, `xcodebuild`; the Xcode MCP bridge could not open a workspace on this Mac, so narrow commands with a private derived-data folder were used, DocumentationSearch was not needed; one batch of tests at the end).** The pass and its parent were built into separate derived-data folders (10 s each), installed one after the other on the iPhone 18 Pro simulator and captured by a script with the same arguments; crops, zooms (nearest neighbour), contrast stretches, luminance profiles, grain, edge positions and difference images came from a small Swift tool kept outside the repository. Eleven own-render crops are committed as `docs/evidence/captures/gw-verify-clean2-*`. Results: every page clean next to the native twin; the rim on charcoal as thin as the native one (half maximum 2.5 against 2.8 px, 10 percent at 4 px in both, 8 px before); the crease, the ring step and the opaque shade fixed; bends unchanged (0.0 to 0.5 px); glow pages smooth at 3x to 4x; the tests above. Limits: simulator only, by eye and by pixel measurement on 3x captures; the native twin is the only reference; the orbs backdrop differs under the two halves of a page, so the orbs numbers compare different spots; no device, no M5 run; no code was changed.
+
+## Next round 2: capability gaps (GW-30 to GW-34, approved 2026-11-10)
+
+The user asked on 2026-11-10 to build what is left. These five tasks close the biggest remaining gaps against native glass and add motion. They follow the same fast pass as GW-21 to GW-29: one safety test per task, one end-of-task test batch, and every criterion that needs a further test or a device stays unchecked with a written reason. Check an item only when its evidence exists.
+
+## GW-30: Overlay mode: glass over live UIKit content
+
+**Description:** A transparent glass surface that composites hues, glow, rim light, tint and shadow over whatever UIKit draws behind it, without bending it (the surface cannot read live pixels behind it). Native glass works over any live content; this closes that gap for everything except refraction.
+
+**Dependencies:** GW-21 to GW-28. **Scope:** M.
+
+**Acceptance criteria:**
+- [ ] A surface can be created in overlay mode (non-opaque layer, premultiplied output, no background pass); the default opaque surface renders byte-identical to before.
+- [ ] Outside every panel the overlay's alpha is 0; inside, tint, rim, glow, light and shadow composite correctly over live UIKit content in the lab (a scrolling list behind a glass bar).
+- [ ] Reduce Transparency, Increase Contrast and Reduce Motion follow the documented policy in overlay mode; the surface stays decorative to VoiceOver and hit testing passes through.
+- [ ] The lab page labels honestly what an overlay cannot do (no bending, no frost of live content).
+
+**Evidence:** not started.
+
+## GW-31: Snapshot source: bend and frost static real UI
+
+**Description:** An opt-in UIKit source that captures a view hierarchy region into a background frame, so the custom glass can refract and frost real, static UI. The snapshot is refreshed on demand, not every frame.
+
+**Dependencies:** GW-04, GW-24. **Scope:** M.
+
+**Acceptance criteria:**
+- [ ] A snapshot of a known pattern view matches the view's pixels within one 8-bit step in the correct orientation and scale, with the documented color, alpha and ownership contract.
+- [ ] A lab page shows native scrolling content behind custom glass that bends and frosts it, with an on-demand refresh, next to Apple's live glass, with honest labels (static versus live).
+- [ ] Refresh does not block the main thread beyond a documented bound and does not recreate the renderer.
+
+**Evidence:** not started.
+
+## GW-32: Glass springs and proximity merge
+
+**Description:** Interruptible spring motion for glass panels, and merging by proximity: two draggable glass panels merge as they approach and separate when pulled apart, for circles, capsules and rounded rectangles.
+
+**Dependencies:** GW-13, GW-27. **Scope:** M.
+
+**Acceptance criteria:**
+- [ ] A spring helper moves a panel's frame interruptibly and keeps velocity when retargeted.
+- [ ] The merge progress is a deterministic, monotonic function of the distance with hysteresis (no flicker at the threshold).
+- [ ] Merging works for circles, capsules and rounded rectangles with no seam; native content follows the documented hit-test policy.
+- [ ] Reduce Motion jumps to the end state; the effect clock stops when everything settles.
+
+**Evidence:** not started.
+
+## GW-33: Tilt-driven light
+
+**Description:** The light direction follows device tilt through an injectable motion source, low-pass filtered and small, off under Reduce Motion.
+
+**Dependencies:** GW-23. **Scope:** S.
+
+**Acceptance criteria:**
+- [ ] Injected motion samples move the light within documented bounds; Reduce Motion pins it.
+- [ ] The simulator lab drives it with a slider; the real Core Motion source is wired but unverified without a device.
+- [ ] **Device only:** feel and battery cost on hardware.
+
+**Evidence:** not started.
+
+## GW-34: Touch response on frost and liquid panels
+
+**Description:** The touch response (finger light, ring, gleam) also works on panels with frost or liquid fill, which GW-12 documented as a limit.
+
+**Dependencies:** GW-12, GW-24, GW-28. **Scope:** M.
+
+**Acceptance criteria:**
+- [ ] A frosted panel and a filled vessel respond to touch; panels without touch, frost or fill are byte-identical to before.
+- [ ] The lab shows both responding next to a native interactive twin.
+- [ ] Reduce Motion, Reduce Transparency and the quality tiers follow the GW-12 rows.
+
+**Evidence:** not started.
