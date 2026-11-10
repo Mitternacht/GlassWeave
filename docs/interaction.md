@@ -1,7 +1,8 @@
-# Interaction (GW-12, GW-13)
+# Interaction (GW-12, GW-13, GW-34)
 
 Experimental. Everything here is unreleased and can change. This note covers how
-GlassWeave's own glass answers a finger (GW-12) and how two of its surfaces merge
+GlassWeave's own glass answers a finger (GW-12; frost and liquid panels too, GW-34,
+[below](#touch-on-frost-and-liquid-panels-gw-34)) and how two of its surfaces merge
 and separate under a spring (GW-13, [below](#merging-two-surfaces-gw-13)).
 
 ## Touch response (GW-12)
@@ -95,7 +96,9 @@ other effect (`GlassQuality.reduced(_:)`, `GlassAccessibilityPolicy.presentedTou
 
 A function constant (index 6) and the `touched` pipeline variants (a rounded
 rectangle and a freeform shape), built at initialization with the optics,
-lighting, grounding and shape code and **without** the frost and fill code. A
+lighting, grounding and shape code and **without** the frost and fill code (GW-34
+adds the same constant to the frost and fill variants as their own pipelines,
+[below](#touch-on-frost-and-liquid-panels-gw-34)). A
 panel draws in them only while a touch that began inside its outline has
 something to show; otherwise it is drawn by the variant it would have used, with
 the same bytes as before (the safety test
@@ -143,9 +146,11 @@ crowd a little; on a soft backdrop the ring is not visible as a ring. See
 
 ### Limits and deviations
 
-- A panel with frost or a fill draws no touch response: the frost and fill
+- A panel with frost or a fill drew no touch response in GW-12: the frost and fill
   variants are frozen byte-for-byte by earlier safety tests and carry no touch
-  code. Adding it would need a second copy of each.
+  code. GW-34 lifted this limit without a second copy of either: the touch is a
+  function constant of its own, so it is combined with the frost constant and with
+  the fill constant in two more variants (see below).
 - The comparison with Apple's glass is at rest only: the captures show the
   `UIGlassEffect` twin idle. The pressed state of the twin was not captured (no
   touch injection into the simulator was available), so the match of the response
@@ -158,6 +163,120 @@ crowd a little; on a soft backdrop the ring is not visible as a ring. See
   test, and no cost measurement: fast pass, not tested.
 - The ring's catch light and the gleam are the least visible parts at the standard
   strength on a busy backdrop; they show on the dark stage and the grid.
+
+## Touch on frost and liquid panels (GW-34)
+
+Experimental. A frosted panel and a filled vessel answer a touch with the same
+restrained finger light, ring and rim gleam as any other panel, through the same
+`GlassTouch` style, observer and accessibility rows as GW-12. Everything else is
+unchanged: a panel with no touch, and a panel with only one of frost, fill and touch,
+draws the bytes it drew before (`GlassBaselineGW34Tests`, below).
+
+### What exists
+
+- Two pipeline variants, `GlassRenderer.PipelineVariant.touchedFrosted` and
+  `.touchedFilled`, each a rounded-rectangle pipeline and a freeform-shape pipeline
+  (four pipelines): the shader's own function constants (frost with touch, fill
+  with touch) set together at initialization, never per draw. No new record: the
+  touch record (`GWTouchUniforms`, 128 bytes, fragment buffer 3) is bound next to the
+  frost record and the pyramid, or next to the fill record, so no layout changed and
+  no new size assert was needed. A panel whose presented style shows nothing for a
+  touch that began inside it still draws in the variant it would have used.
+- `GlassPanelGeometry` resolves the touch for every panel now (it skipped frost and
+  fill panels in GW-12); `GlassRenderer` picks `touchedFilled` over `touchedFrosted`
+  over `touched`, in the order fill, frost, touch that it always used.
+
+### Frost
+
+The pyramid is read where the ring sends the pixel: the same displacement as the
+clear panel's, a few points at most (the standard ring moves the sample by about 2.6
+points), applied to the one position the frost reads. A blur hides a bend that
+small, so on frost the ring is a barely-there soft swell carried by its catch light
+and the finger's light, with no second sample, no smear and no ghost of the pyramid
+(zoomed capture on the dot grid, at twice the standard strength). The finger light,
+the gleam and the catch light are added after the frost grade and before the light
+model, as on other panels; the legibility scrim is the last stage and still wins over
+them, so a label's contrast holds while a finger is down. Reduce Transparency
+presents frost as none and the touch as off, so the panel draws in the plain
+opaque variant.
+
+### Vessel
+
+The finger lifts the glass wall, not the liquid. `gw_fill_cover` (the liquid's
+coverage with the same shell refraction, inset wall, gel outline and level surface
+as the fill, with 3-pixel soft edges) scales the finger's light by
+`1 - 0.84 cover`, so over the liquid a sixth of it stays, a faint veil of the glass
+in front of it and not the liquid's own light; on the empty glass it is weighted by
+the wall band (`0.25 + 0.75 x`, `x` falling from 1 at the outline to 0 half a bevel
+in), so the dark glass is lit along its wall and not washed gray. The gleam sits at
+the outline (the wall) already. The ring moves the glass behind the vessel as on a
+clear panel and does not move the liquid, which is read at the pixel itself.
+
+### Tiers and accessibility
+
+The rows of GW-12 apply unchanged, because the style is presented before the renderer
+sees it (balanced: finger light and gleam, no ring; minimal: off; Increase Contrast:
+no ring and no gleam; Reduce Motion: finger light and gleam while the finger is
+down, no ring, no fades; Reduce Transparency: off). Seen in the lab: Reduce
+Transparency with frost draws `grounded` (no frost, no touch); Reduce Motion with a
+vessel draws `touchedFilled` and the clock is off.
+
+### Laboratory
+
+`-lab.touch.kind clear|frost|vessel` (a "Clear / Frost / Vessel" control on the Touch
+page) makes the two GlassWeave panels clear glass (as before), frosted glass (a calm
+blur with a clear rim and a quiet cool tint) or vessels (dark glass holding an ember
+liquid, a level in the pill and a gel in the round button), above the interactive
+`UIGlassEffect` twin. The pins are the same
+(`-lab.touch.pin "pill:0.3:0.5:0.2;round:0.5:0.5:0.2"`). Captures (iPhone 18 Pro
+simulator unless named): [frost](evidence/captures/gw-34-touch-frost-orbs-iphone18pro-sim.png),
+[vessels](evidence/captures/gw-34-touch-vessel-orbs-iphone18pro-sim.png),
+[vessels touched at the wall, on the stage](evidence/captures/gw-34-touch-vessel-stage-wall-iphone18pro-sim.png),
+[vessels on the iPad](evidence/captures/gw-34-touch-vessel-orbs-ipadpro13m5-sim.png);
+zoomed pairs, touched and at rest:
+[vessel pill, touched](evidence/captures/gw-34-zoom-vessel-pill-touched-stage-iphone18pro-sim.png) and
+[at rest](evidence/captures/gw-34-zoom-vessel-pill-rest-stage-iphone18pro-sim.png),
+[vessel round, touched](evidence/captures/gw-34-zoom-vessel-round-touched-stage-iphone18pro-sim.png) and
+[at rest](evidence/captures/gw-34-zoom-vessel-round-rest-stage-iphone18pro-sim.png),
+[frost pill, touched](evidence/captures/gw-34-zoom-frost-pill-touched-orbs-iphone18pro-sim.png) and
+[at rest](evidence/captures/gw-34-zoom-frost-pill-rest-orbs-iphone18pro-sim.png),
+[frost pill with the ring at twice the strength, on the dot grid](evidence/captures/gw-34-zoom-frost-pill-ring-boost-grid-iphone18pro-sim.png).
+
+### Safety test
+
+`GlassBaselineGW34Tests` compares nine cases against a frozen copy of the shader
+before this change (`Tests/GlassWeaveTests/Shaders/GlassBaselineGW34.metal`), byte
+for byte, on two backdrops: the default panel, glow, halo, interior and light, a
+thick lens with six-tap dispersion and an inlay, the refined light model, a grounded
+panel, an ellipse, a frosted panel, a vessel and a touched panel (frost only, fill
+only, touch only). A frosted panel and a vessel with an active touch style and no
+touch to answer are the same bytes. Control: a touch that began inside the frosted
+panel draws in `touchedFrosted`, one inside the vessel in `touchedFilled`, and each
+picture differs from the untouched one. The GW-12 test's frosted branch was edited
+(it expected the `frosted` variant for a touched frosted panel; it now expects
+`touchedFrosted`): the only existing test that changed, because this task changes
+that behavior on purpose.
+
+### Tuning record
+
+Round 1: weighting the finger light by the liquid's coverage alone left the empty
+glass of a dark vessel washed in a gray pool (the lift of a pale light over near-black
+glass reads as fog after the encode); the wall band weight and a sixth of the light
+over the liquid keep it on the wall, and a vessel now reads quieter than the clear
+round at the same touch. Frost needed no tuning: the standard response is a soft pool
+that brightens the blurred body a little, and at twice the strength it is still a
+smooth gradient with no ring, no smear and no ghost of the dots.
+
+### Limits
+
+- The comparison with Apple's glass is at rest only, as in GW-12 (no touch injection
+  into the simulator): the twin stays idle in every capture.
+- On frost the ring is not visible as a ring, by design (a blur hides a bend of a few
+  points); the finger light and the catch light carry the response. On a vessel the
+  liquid does not respond: that is the point.
+- The Metal 4 experiment still declines a panel with a touch response (as before).
+- Four more pipelines are built at initialization; their cost was not measured (fast
+  pass: not tested). No per-tier or accessibility readback test, no cost measurement.
 
 ## Merging two surfaces (GW-13)
 

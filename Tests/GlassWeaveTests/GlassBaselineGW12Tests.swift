@@ -12,7 +12,7 @@ import GlassWeaveShaderTypes
 /// variants, both with the default `GlassTouch.none` and with an active touch
 /// style while no touch is given. Control: the same panel with an active style
 /// and a touch that began inside it draws in the `touched` variant and differs
-/// (a frosted panel draws no touch response, by design). Also pins the touch
+/// (a frosted panel draws in the `touchedFrosted` variant since GW-34). Also pins the touch
 /// record's size (128 bytes; the C and MSL asserts pin the offsets).
 @Suite(.timeLimit(.minutes(3)))
 struct GlassBaselineGW12Tests {
@@ -157,14 +157,15 @@ struct GlassBaselineGW12Tests {
             #expect(zip(styledImage.bgra, baseline.bgra).count { $0 != $1 } == 0)
 
             // Control: a touch that began inside the panel draws in the touched
-            // variant and the picture differs. A frosted panel carries no touch
-            // code and draws as before.
+            // variant and the picture differs. A frosted panel draws in the
+            // touched frosted variant (GW-34).
             let touchedRenderer = try GlassRenderer(commandQueue: gpu.queue)
             try touchedRenderer.setEffectTime(0.2)
             try touchedRenderer.setTouches([GlassTouchPoint(origin: CGPoint(x: frame.midX, y: frame.midY), beganAt: 0)])
             let touched = try await render(gpu, fixture, panel: GlassPanel(frame: frame, parameters: styled), renderer: touchedRenderer)
             if testCase.variant == .frosted {
-                #expect(touchedRenderer.drawnVariants == [.frosted])
+                // GW-34: a frosted panel now answers the touch, in its own variant.
+                #expect(touchedRenderer.drawnVariants == [.touchedFrosted])
             } else {
                 #expect(touchedRenderer.drawnVariants == [.touched])
                 #expect(touched.maximumDifference(from: baseline) > 4)

@@ -12,6 +12,12 @@ import UIKit
 ///   the finger (``GlassTouch/standard``). The native buttons keep their own
 ///   tap: the surface takes no touches, a ``GlassTouchObserver`` on the page
 ///   only watches them.
+/// - **Kind (GW-34).** The same two panels as clear glass, as frosted glass (a
+///   calm blur with a clear rim) and as vessels (dark glass holding a glowing
+///   liquid): all three answer a touch with the same restrained finger light,
+///   ring and rim gleam. On a vessel the finger's light lifts the glass wall and
+///   the empty glass, not the liquid's own light; on frost nothing smears or
+///   ghosts.
 /// - **Bottom group: `UIGlassEffect`, interactive.** The same two shapes in
 ///   Apple's glass with its own touch response, on the same backdrop, as the
 ///   benchmark for restraint.
@@ -21,6 +27,7 @@ import UIKit
 ///
 /// `-lab.touch YES` opens it; `-lab.touchBackdrop orbs|stage|grid` picks the backdrop
 /// (default orbs, a colorful dusk with soft spheres; stage is the dark page; grid is a dot lattice that shows the ring's bending).
+/// `-lab.touch.kind clear|frost|vessel` picks the kind of the GlassWeave panels (default clear).
 /// `-lab.touch.auto YES` taps the pill once through the surface's touch API.
 /// `-lab.touch.pin "pill:0.3:0.5:0.2;round:0.5:0.5:0.35:0.2"` pins synthetic
 /// touches for captures: panel (`pill` or `round`), the position as fractions of
@@ -54,6 +61,33 @@ final class TouchBenchViewController: UIViewController {
         }
     }
 
+    /// What the GlassWeave panels are made of (GW-34).
+    private enum Kind: Int, CaseIterable {
+        case clear, frost, vessel
+
+        var title: String {
+            switch self {
+            case .clear: String(localized: "Clear")
+            case .frost: String(localized: "Frost")
+            case .vessel: String(localized: "Vessel")
+            }
+        }
+        var identifier: String {
+            switch self {
+            case .clear: "clear"
+            case .frost: "frost"
+            case .vessel: "vessel"
+            }
+        }
+        var caption: String {
+            switch self {
+            case .clear: String(localized: "GlassWeave glass: touch the pill or the button")
+            case .frost: String(localized: "GlassWeave frosted glass: touch the pill or the button")
+            case .vessel: String(localized: "GlassWeave vessels: the finger lifts the glass, not the liquid")
+            }
+        }
+    }
+
     private struct Rendering {
         let surface: GlassSurfaceView
         let background: BenchBackground
@@ -70,6 +104,7 @@ final class TouchBenchViewController: UIViewController {
     private var rendering: Result<Rendering, any Error>?
     private var producedKey: String?
     private var backdrop: Backdrop
+    private var kind: Kind
     private let pins: [Pin]
     private var pinsApplied = false
 
@@ -77,6 +112,7 @@ final class TouchBenchViewController: UIViewController {
     private let closeButton = UIButton(configuration: .glass())
     private let statusLabel = UILabel()
     private let backdropControl = UISegmentedControl(items: Backdrop.allCases.map(\.title))
+    private let kindControl = UISegmentedControl(items: Kind.allCases.map(\.title))
     private let weaveCaption = UILabel()
     private let nativeCaption = UILabel()
     private var weavePill = CGRect.zero
@@ -96,6 +132,7 @@ final class TouchBenchViewController: UIViewController {
     init() {
         let defaults = UserDefaults.standard
         backdrop = Backdrop.allCases.first { $0.identifier == defaults.string(forKey: "lab.touchBackdrop") } ?? .orbs
+        kind = Kind.allCases.first { $0.identifier == defaults.string(forKey: "lab.touch.kind") } ?? .clear
         pins = Self.parsePins(defaults.string(forKey: "lab.touch.pin"))
         super.init(nibName: nil, bundle: nil)
     }
@@ -118,12 +155,46 @@ final class TouchBenchViewController: UIViewController {
     // MARK: Glass
 
     /// The page's glass: the same refined, enhanced thick lens as the other
-    /// pages, with the standard touch response.
-    private static func parameters(bezel: Double, thickness: Double) -> GlassParameters {
-        var parameters = RefinedLook.enhancedLens(corner: 999, bezel: bezel, thickness: thickness, dispersion: 0.4, dark: true)
-        // POLISH: the bend at the rim is a little quieter still here, so the
-        // touch response (a soft pool, a barely-there ring) is what changes.
-        parameters.lens.maximumOffset = 5.5
+    /// pages (clear, frosted, or a vessel holding a liquid), with the standard
+    /// touch response.
+    private static func parameters(kind: Kind, round: Bool, bezel: Double, thickness: Double) -> GlassParameters {
+        var parameters: GlassParameters
+        switch kind {
+        case .clear, .frost:
+            parameters = RefinedLook.enhancedLens(corner: 999, bezel: bezel, thickness: thickness, dispersion: 0.4, dark: true)
+            // POLISH: the bend at the rim is a little quieter still here, so the
+            // touch response (a soft pool, a barely-there ring) is what changes.
+            parameters.lens.maximumOffset = 5.5
+            if kind == .frost {
+                // GW-34: a calm blur in the body with a clear rim, a quiet cool tint.
+                parameters.tint = GlassTint(red: 0.85, green: 0.88, blue: 1, strength: 0.05)
+                parameters.frost = GlassFrost(profile: .clearRim, sigma: 7, transition: 24, grain: 0.3, saturation: 1.15, brightness: 1.03)
+            }
+        case .vessel:
+            // GW-34: dark, thick glass with the refined rim, holding a glowing
+            // ember liquid (a level in the pill, a gel in the round one), as on
+            // the vessels page.
+            parameters = RefinedLook.lens(corner: 999, bezel: bezel, thickness: thickness, dark: true)
+            parameters.tint = GlassTint(red: 0.07, green: 0.06, blue: 0.065, strength: 0.50)
+            parameters.lens.dispersion = 0.12
+            let ember = [
+                GlassFill.Color(red: 0.42, green: 0.07, blue: 0.01), GlassFill.Color(red: 1.00, green: 0.38, blue: 0.04),
+                GlassFill.Color(red: 1.00, green: 0.68, blue: 0.28),
+            ]
+            parameters.fill = round
+                ? GlassFill(
+                    region: .gel(.blob(GlassBlob(primitives: [.circle(center: .zero, radius: 0.62)]))),
+                    wallThickness: 5, colors: ember, emission: 0.9, absorption: 0.7,
+                    sheets: GlassFill.Sheets(count: 2, spacing: 9, edge: 0.7, wobble: 0.3), wallLine: 0.5,
+                    bubbles: GlassFill.Bubbles(count: 3, size: 2.4, speed: 1, seed: 11)
+                )
+                : GlassFill(
+                    region: .level(level: 0.5, tilt: 0), wallThickness: 5, colors: ember, emission: 0.9, absorption: 0.7,
+                    sheets: GlassFill.Sheets(count: 2, spacing: 14, edge: 0.7, wobble: 0.3), wallLine: 0.5,
+                    bubbles: GlassFill.Bubbles(count: 5, size: 2.6, speed: 1, seed: 33),
+                    surface: GlassFill.Surface(waveAmplitude: 0.8, wavelength: 56, waveSpeed: 1, meniscus: 3)
+                )
+        }
         parameters.touch = .standard
         // `-lab.touch.boost <factor>` scales the three strengths, to inspect the
         // response (never above 1 each).
@@ -262,7 +333,7 @@ final class TouchBenchViewController: UIViewController {
         statusLabel.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         statusLabel.numberOfLines = 0
         statusLabel.accessibilityIdentifier = "touch.status"
-        weaveCaption.text = String(localized: "GlassWeave glass: touch the pill or the button")
+        weaveCaption.text = kind.caption
         nativeCaption.text = String(localized: "UIGlassEffect, interactive: Apple's response")
         for label in [weaveCaption, nativeCaption] {
             label.font = .preferredFont(forTextStyle: .footnote)
@@ -278,6 +349,16 @@ final class TouchBenchViewController: UIViewController {
             applyColors()
         }, for: .valueChanged)
 
+        kindControl.selectedSegmentIndex = kind.rawValue
+        kindControl.accessibilityIdentifier = "touch.kind"
+        kindControl.addAction(UIAction { [weak self] _ in
+            guard let self, let chosen = Kind(rawValue: kindControl.selectedSegmentIndex) else { return }
+            kind = chosen
+            weaveCaption.text = chosen.caption
+            view.setNeedsLayout()
+            surface?.requestFrame()
+        }, for: .valueChanged)
+
         configureButton(weavePillButton, title: String(localized: "Tap"), symbol: nil, identifier: "touch.weave.pillButton")
         configureButton(weaveRoundButton, title: nil, symbol: "plus", identifier: "touch.weave.roundButton")
         configureButton(nativePillButton, title: String(localized: "Tap"), symbol: nil, identifier: "touch.native.pillButton")
@@ -286,7 +367,7 @@ final class TouchBenchViewController: UIViewController {
         nativeRound.cornerConfiguration = .capsule()
         nativePill.contentView.addSubview(nativePillButton)
         nativeRound.contentView.addSubview(nativeRoundButton)
-        for subview in [titleLabel, closeButton, weaveCaption, nativeCaption, nativePill, nativeRound, weavePillButton, weaveRoundButton, backdropControl, statusLabel] {
+        for subview in [titleLabel, closeButton, weaveCaption, nativeCaption, nativePill, nativeRound, weavePillButton, weaveRoundButton, backdropControl, kindControl, statusLabel] {
             view.addSubview(subview)
         }
         applyColors()
@@ -315,6 +396,7 @@ final class TouchBenchViewController: UIViewController {
         }
         closeButton.overrideUserInterfaceStyle = .dark
         backdropControl.overrideUserInterfaceStyle = .dark
+        kindControl.overrideUserInterfaceStyle = .dark
     }
 
     /// Places the glass in two groups: GlassWeave's pill and button, and Apple's.
@@ -341,7 +423,8 @@ final class TouchBenchViewController: UIViewController {
         nativeRound.frame = CGRect(x: left, y: y, width: roundDiameter, height: roundDiameter)
         y += roundDiameter + 20
         backdropControl.frame = CGRect(x: left, y: y, width: min(width, 300), height: 32)
-        statusLabel.frame = CGRect(x: left, y: y + 40, width: width, height: 56)
+        kindControl.frame = CGRect(x: left, y: y + 38, width: min(width, 300), height: 32)
+        statusLabel.frame = CGRect(x: left, y: y + 78, width: width, height: 56)
 
         let pillButtonSize = CGSize(width: 76, height: 48)
         weavePillButton.frame = CGRect(
@@ -365,8 +448,8 @@ final class TouchBenchViewController: UIViewController {
     private func applyPanels() {
         guard let surface else { return }
         let panels = [
-            GlassPanel(frame: weavePill, parameters: Self.parameters(bezel: 30, thickness: 30)),
-            GlassPanel(frame: weaveRound, parameters: Self.parameters(bezel: 26, thickness: 26)),
+            GlassPanel(frame: weavePill, parameters: Self.parameters(kind: kind, round: false, bezel: 30, thickness: 30)),
+            GlassPanel(frame: weaveRound, parameters: Self.parameters(kind: kind, round: true, bezel: 26, thickness: 26)),
         ]
         try? surface.setPanels(panels)
         if !pinsApplied, !pins.isEmpty {

@@ -2846,6 +2846,36 @@ static float3 gw_fill_apply(
     return result;
 }
 
+/// How much of the pixel the liquid or gel covers (GW-34): 0 in the glass wall
+/// and in the empty glass beside or above the liquid, 1 in the body, with the
+/// same regions as `gw_fill_apply` (the shell's refraction, the inset wall, the
+/// gel's outline or the level's surface) but edges softened over 3 pixels, so a
+/// light that follows it has no hard edge. The touch response uses it to keep the
+/// finger's light on the glass and off the liquid's own emission.
+static float gw_fill_cover(
+    float2 q, float2 rimNormal, float rimDisplacement,
+    constant GWGlassUniforms &uniforms, constant GWFillUniforms &fill)
+{
+    const float wall = fill.region.y;
+    const float2 qf = q + gw_fill_shell_offset(q, rimNormal, rimDisplacement, uniforms);
+    const float insetD = gw_panel_distance(qf, uniforms) + wall;
+    float boundaryD;
+    if (uint(fill.region.x + 0.5) == GWFillModeGel) {
+        boundaryD = gw_fill_gel(qf - fill.gelBounds.xy, fill.gel, fill.gelBounds.zw).x;
+    } else {
+        boundaryD = -1.0e4;
+        if ((fill.flags & GWFillFlagFull) == 0u) {
+            const float k = 6.2831853 / max(fill.waves.y, 1.0);
+            const float wave = fill.waves.x * (0.6 * sin(k * qf.x + fill.waves.z) + 0.4 * sin(k / 0.62 * qf.x + fill.waves.w));
+            const float climb = fill.surface.z * exp(-max(-insetD, 0.0) / max(fill.surface.w, 1.0));
+            const float surfaceY = fill.surface.x + fill.surface.y * qf.x + wave - climb;
+            boundaryD = (surfaceY - qf.y) * rsqrt(1.0 + fill.surface.y * fill.surface.y);
+        }
+    }
+    const float insetPixel = gw_panel_distance(q, uniforms) + wall;
+    return saturate(0.5 - insetPixel / 3.0) * saturate(0.5 - boundaryD / 3.0);
+}
+
 // MARK: Touch response (GW-12)
 //
 // A soft finger light that follows the touch, one ring that travels out from
@@ -2858,6 +2888,15 @@ static float3 gw_fill_apply(
 // copy in the tests proves it). A `GWTouchUniforms` record is bound only for
 // those variants. The time is resolved on the CPU (`GlassTouch.state`): the
 // record holds positions, radii and levels.
+//
+// GW-34: the touch constant is independent of the frost and fill constants, so a
+// frosted panel and a vessel answer a touch in the combinations (frost and touch,
+// fill and touch), built at initialization like every other variant. A frosted
+// panel reads the pyramid where the ring sends the pixel (one position, no second
+// copy of the blur); on a vessel the finger's light is weighted by `gw_fill_cover`
+// and the wall band, so it lifts the glass and not the liquid's own light. Every
+// variant without the touch constant is unchanged (a frozen copy in the tests
+// proves it).
 constant bool gw_touch_constant [[function_constant(6)]];
 constant bool gw_touched = is_function_constant_defined(gw_touch_constant) ? gw_touch_constant : false;
 
@@ -3111,10 +3150,14 @@ fragment float4 gw_glass_fragment(
         frostPixel = gw_frost_pixel(depth, q.y, heightFraction, frost);
     }
     if (gw_frosted && frostPixel.weight > 0.0) {
+        // GW-34: a touched frosted panel reads the pyramid where the ring sends
+        // the pixel (`samplePixel` is `pixel` bit for bit without a touch). The
+        // pyramid is one smooth field read at one position, so a bend of a few
+        // points moves it without a second copy of anything: no smear, no ghost.
         if (gw_optics && gw_lens_active(uniforms)) {
-            glass = gw_lens_glass_frosted(pixel, q, normal, displacement, frostPixel, uniforms, source, frost, pyramid);
+            glass = gw_lens_glass_frosted(samplePixel, q, normal, displacement, frostPixel, uniforms, source, frost, pyramid);
         } else {
-            glass = gw_frost_color(pixel - normal * displacement, frostPixel, uniforms, source, frost, pyramid);
+            glass = gw_frost_color(samplePixel - normal * displacement, frostPixel, uniforms, source, frost, pyramid);
         }
         glass = gw_frost_grade(glass, pixel, frostPixel, frost, cleanLevel);
     } else if (gw_optics && gw_lens_active(uniforms)) {
@@ -3221,7 +3264,17 @@ fragment float4 gw_glass_fragment(
     // the rim gleam, over everything below, under the light model.
     float touchAlpha = 0.0;
     if (gw_touched) {
-        const float finger = gw_touch_light(pixel, touch);
+        float finger = gw_touch_light(pixel, touch);
+        if (gw_filled) {
+            // GW-34: on a vessel the finger lifts the glass wall, not the
+            // liquid's own light. Over the liquid only a sixth of it stays (a
+            // faint veil of the glass in front of it); on the empty glass it is
+            // strongest in the outer half of the bevel, where the thick wall
+            // catches it, and a quarter of that in the flat middle, so the dark
+            // glass is lit along its wall and not washed gray.
+            const float wallBand = 1.0 - smoothstep(0.0, 0.5 * max(uniforms.bezelWidth, 1.0), depth);
+            finger *= (1.0 - 0.84 * gw_fill_cover(q, normal, displacement, uniforms, fill)) * (0.25 + 0.75 * wallBand);
+        }
         const float gleam = gw_touch_gleam(pixel, depth, facing, touch);
         const float shine = gw_touch_ring_light(pixel, edgeLight, touch);
         touchAlpha = 1.0 - (1.0 - finger) * (1.0 - gleam) * (1.0 - shine);
