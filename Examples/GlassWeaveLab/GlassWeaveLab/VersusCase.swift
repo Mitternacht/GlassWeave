@@ -320,7 +320,7 @@ extension VersusCase {
         refined(
             id: "liquid", title: "Liquid fill", symbol: "drop",
             nativeCaption: "Apple's glass has no inside. A tint is one color; anything in it is your own views on top.",
-            weaveCaption: "A calm gel lit from inside, with a thin bright edge and a few tiny bubbles, seen through the thick wall.",
+            weaveCaption: "A calm gel, brightest along the wall, with a thin bright edge and a few tiny bubbles, seen through the thick wall.",
             tint: UIColor(red: 1.0, green: 0.55, blue: 0.15, alpha: 0.45), height: 104
         ) { dark in
             var parameters = VesselLook.shell(corner: 38, bezel: 22, thickness: 20, dark: dark)

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH, PRESENCE, CLEAN, CLEAN-2, GW-30 to GW-34)
+## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH, PRESENCE, CLEAN, CLEAN-2, GW-30 to GW-34, VESSEL, RING)
 
 Requested by the user on 2026-11-09, on the branch `implement/glass-beyond`
 (nothing merged into `main`, nothing tagged). Every API is experimental, every
@@ -158,6 +158,22 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   light, paper desk, shapes, liquid vessels, frosted glass, frost pyramid,
   native vs refined glass, and presentation pages, each with a launch
   argument (see the README).
+- Look fixes (VESSEL, RING; found by the independent review of the capability
+  round, checked in VERIFY-ROUND6): `GlassLighting.polish` (0...1, default 0)
+  draws the refined look's chrome or prismatic edge as one polished torus (one
+  bright and one dark flank, a thin bright line at each end, hue only on the
+  brightest reflection and a few small glints) instead of mirrored pearly bands,
+  packed in bits 8 to 15 of `GWLightingUniforms.environment`; Reduce
+  Transparency and Increase Contrast remove it. `GlassFill.pooling` (0...1,
+  default 0) gives the liquid a calm body whose light pools along the wall and
+  the bottom with no hot core, packed in bits 16 to 23 of `GWFillUniforms.flags`.
+  No layout changed and 0 draws the previous bytes. The lab's chrome ring
+  (Pearl study, Chrome page, Tilt page) and its vessels (Touch page, Vessel
+  study, Vessel bench, the Apple vs GlassWeave liquid row) use them; the round
+  vessel on the Touch page is now a level fill that fills its circle. The
+  ring is a neutral opaque metal, heavier than the native glass beside it, and
+  the liquid is calm and flat, not luminous. Numbers and per-page verdicts:
+  [studies](docs/studies.md#look-fixes-independent-check-verify-round6-experimental-unreleased).
 
 ### Changed
 

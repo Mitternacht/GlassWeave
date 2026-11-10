@@ -11,6 +11,24 @@ implementation for Claude.
 
 ## Pick up here (2026-11-10, after the glass-beyond, interaction, polish, Metal 4, presence, two clean rounds and the capability round GW-30 to GW-34)
 
+**Look fixes (VERIFY-ROUND6, 2026-11-10): the round vessel and the chrome ring were redrawn, merged and checked. Read this first.**
+
+- *What changed.* Two opt-in fields, off by default (0 draws the previous bytes): `GlassFill.pooling` (a calm liquid body that pools
+  along the wall and the bottom, no hot core) and `GlassLighting.polish` (the chrome ring as one polished torus instead of mirrored
+  pearly bands). The lab's vessels (`VesselLook.swift`: Touch page, Vessel study, Vessel bench, the Apple vs GlassWeave liquid row)
+  and its chrome ring (`RefinedLook.chromeRing`: Pearl study, Chrome page, Tilt page) use them. Commits on `implement/glass-beyond`
+  after `a84088e`: `b01a4d6` VESSEL, `ac88c77` RING (built on `implement/glass-host`), `359b9e8` the real merge of `implement/glass-host`
+  (conflicts only in the appended sections of `docs/studies.md` and `tasks/todo.md`), then this check. Nothing was pushed in this round.
+- *Verdict.* Orange lamp in a gray ring: gone for the round vessel on the Touch page (red no longer clips, interior mean RGB
+  (234, 128, 43) to (196, 75, 15)); the gel vessels on the other pages are calmer but are still a flat blob inside a larger gray
+  glass, and the liquid now reads as matte paint, not as lit liquid. Soap-bubble double rings: gone on all ring pages (maxima per
+  radial profile 2.67 to 1.33, mean chroma 0.056 to 0.006), and the lit side now follows the tilt; the ring is a heavy opaque neutral metal
+  bezel, much heavier than the native pill beside it. Eighteen captures of unrelated pages are pixel-identical to a build of `a84088e`.
+  Details and numbers: [studies](docs/studies.md#look-fixes-independent-check-verify-round6-experimental-unreleased).
+- *Still open.* Everything device-only; the new fields have no normalization or readback tests of their own (fast pass; the frozen
+  baselines pass unmodified); a lighter, glassier ring and a luminous but calm liquid are the next look work; the Increase Contrast
+  ring still shows faint radial streaks of the backdrop's grain. The `GlassWeave-host` worktree folder still exists; remove it after review.
+
 **Capability round (VERIFY-ROUND5, 2026-11-10): GW-30 to GW-34 are built, merged and checked.** Read this block first;
 the older blocks below it still describe the earlier rounds.
 
@@ -54,9 +72,9 @@ the older blocks below it still describe the earlier rounds.
   bound. **Drag:** works; a smooth neck and no seam, close to Apple's container merge, clear with a thin rim where Apple's merged
   body is a flat gray plate on black. **Tilt:** works; the light moves the rim and the shadow (clock off once settled); the pill and
   the round button shift only faintly, and the chrome ring shows the light but its pearly double bands read as the soap-bubble ring the
-  user does not want (an opt-in look from before). **Touch on frost and fill:** works; a soft pool on the frost, a pale light on the
-  glass above the liquid (the liquid unchanged), no ring, smear or ghost; the round vessel (an earlier look) reads as an orange lamp in
-  a gray ring. No new bend is noticeable as a bend at normal size. Native's twin is idle in the simulator.
+  user does not want (an opt-in look from before; redrawn afterwards, see the look-fixes block above). **Touch on frost and fill:** works; a soft pool on the frost, a pale light on the
+  glass above the liquid (the liquid unchanged), no ring, smear or ghost; the round vessel (an earlier look) read as an orange lamp in
+  a gray ring (redrawn afterwards, see the look-fixes block above). No new bend is noticeable as a bend at normal size. Native's twin is idle in the simulator.
 - *Still open from this round.* A scrim or legibility control for text under an overlay panel; the snapshot capsule's smudge and
   arc; `PanelSpring`'s velocity carry-over has no trace test; the snapshot's full-screen refresh is over its bound; every device
   item (the Core Motion source, feel, battery, cost, a finger on frost and vessels, live VoiceOver); the skipped test groups; the one
