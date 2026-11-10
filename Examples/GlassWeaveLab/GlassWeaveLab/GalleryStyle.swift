@@ -117,7 +117,7 @@ enum GalleryStyle {
                 centerOpacity: 0, lightAngle: 0, directionality: 0.92,
                 haloRadius: knobHalo, haloIntensity: mix(0.8, 0.65, theme)
             )
-        )
+        ).cleaned()
     }
 
     // MARK: Element capsules
@@ -146,7 +146,7 @@ enum GalleryStyle {
                 haloRadius: mix(capsuleCalmHalo, capsuleSelectedHalo, s), haloIntensity: mix(0.35, 0.9, s)
             ),
             interior: interior
-        )
+        ).cleaned()
     }
 
     // MARK: Energy orb
@@ -185,7 +185,7 @@ enum GalleryStyle {
                 pulsePeriod: 1.4, pulseDepth: 0.5 * max(2 * s - 1, 0)
             ),
             interior: interior
-        )
+        ).cleaned()
     }
 
     static let orbInteriorColors: [GlassInterior.Color] = [

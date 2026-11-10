@@ -66,7 +66,7 @@ struct VersusCase: Identifiable {
                 parameters.fill.region = .gel(.blob(blob))
             }
         }
-        return parameters
+        return parameters.cleaned()
     }
 
     /// Whether this row's custom glass has something that moves.

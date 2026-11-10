@@ -38,6 +38,11 @@ enum BenchPage: Int, CaseIterable {
     /// enough that the liquid is the only light, with just enough structure
     /// for the shell's refraction to show.
     case stage
+    /// CLEAN: a page of real text, many short lines of dark type on warm
+    /// paper, drawn by the lab's own producer (CoreGraphics into a texture, as
+    /// an app would draw its own content). It is the page a ghost, a doubled
+    /// copy or a smear under a panel shows on, which smooth backdrops hide.
+    case text
 
     /// The name used on the command line and in accessibility identifiers.
     var identifier: String {
@@ -52,6 +57,7 @@ enum BenchPage: Int, CaseIterable {
         case .paperDesk: "paperdesk"
         case .prism: "prism"
         case .stage: "stage"
+        case .text: "text"
         }
     }
 
@@ -67,12 +73,13 @@ enum BenchPage: Int, CaseIterable {
         case .paperDesk: String(localized: "Paper desk")
         case .prism: String(localized: "Prism")
         case .stage: String(localized: "Stage")
+        case .text: String(localized: "Text")
         }
     }
 
     /// Whether white text reads on the page.
     var isDark: Bool {
-        self != .paper && self != .paperDesk
+        self != .paper && self != .paperDesk && self != .text
     }
 
     /// The page named by a launch argument value: an identifier or an index.
@@ -103,13 +110,25 @@ final class BenchBackground {
     /// The presented frame plus the surface's two frames in flight.
     static let textureLimit = 3
 
+    private let device: any MTLDevice
     private let pipeline: any MTLRenderPipelineState
     private let pool: FrameTexturePool
+    /// The text page's texture (CLEAN), kept for the size it was drawn at, and
+    /// a one-texel stand-in bound for every other page.
+    private var textTexture: (width: Int, height: Int, texture: any MTLTexture)?
+    private let placeholder: any MTLTexture
     private let clock = ContinuousClock()
     private let start: ContinuousClock.Instant
     private var nextFrameID: UInt64 = 1
 
     init(device: any MTLDevice) throws {
+        self.device = device
+        let stand = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 1, height: 1, mipmapped: false)
+        stand.usage = .shaderRead
+        guard let placeholder = device.makeTexture(descriptor: stand) else {
+            throw Failure.shaderUnavailable("no placeholder texture")
+        }
+        self.placeholder = placeholder
         guard let library = device.makeDefaultLibrary(),
               let vertex = library.makeFunction(name: "bench_background_vertex"),
               let fragment = library.makeFunction(name: "bench_background_fragment")
@@ -160,6 +179,7 @@ final class BenchBackground {
         encoder.label = "GlassWeaveLab bench background \(frameID)"
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentBytes(&parameters, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
+        encoder.setFragmentTexture(page == .text ? textPage(width: pixelSize.width, height: pixelSize.height, scale: scale) : placeholder, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
         let frame = BackgroundFrame(
@@ -175,6 +195,99 @@ final class BenchBackground {
     /// Gives free textures back to Metal while the bench is not visible.
     func trim() {
         pool.trim()
+        textTexture = nil
+    }
+
+    /// The short lines of the text page: original sentences, none longer than
+    /// about forty characters, so a panel covers parts of many lines.
+    private static let textLines = [
+        "The lamp on the stair was never lit.",
+        "She counted eleven windows, then twelve.",
+        "Rain kept time on the zinc awning.",
+        "Nobody had swept the platform since May.",
+        "A kettle ticked as it cooled.",
+        "The map folded wrong along every crease.",
+        "He wrote the number on his sleeve.",
+        "Small boats leaned against the harbor wall.",
+        "The clock in the hall ran four minutes late.",
+        "Salt had dulled the brass of the rail.",
+        "At noon the street went quiet all at once.",
+        "She kept the receipt, just in case.",
+        "Pigeons argued over a paper bag.",
+        "The ferry sounded twice and left.",
+        "A radio somewhere played the same song.",
+        "Frost came early to the upper fields.",
+        "Every drawer in the desk stuck a little.",
+        "The baker opened before the light did.",
+        "Someone had chalked a door on the wall.",
+        "They agreed to meet where the tram turns.",
+        "The ink pooled in the corner of the page.",
+        "Thin smoke rose from three chimneys.",
+        "A bicycle bell rang down the lane.",
+        "The orchard gate swung open by itself.",
+        "Moths gathered at the porch light.",
+        "He read the label twice and put it back.",
+        "The river kept its own slow schedule.",
+        "Letters piled up behind the front door.",
+        "A page turned, though no one was near.",
+        "The tide left a line of dark glass.",
+        "She hummed while she sorted the screws.",
+        "Wind moved the curtains and the dust.",
+        "The last train carried only two coats.",
+        "A pencil rolled to the edge and stopped.",
+        "Lemons sat in a bowl by the window.",
+        "The ladder leaned where it was left.",
+        "Bells from the next town came faintly.",
+        "He counted the steps down to the cellar.",
+        "The paint on the shutters had gone pale.",
+        "Footprints led to the water and no further.",
+        "A coin spun on the counter, then lay flat.",
+        "The garden smelled of cut grass and rain.",
+    ]
+
+    /// Draws the text page at `width` x `height` pixels into a texture of
+    /// sRGB-encoded bytes (CoreGraphics, dark type on warm paper) and keeps it
+    /// for that size.
+    private func textPage(width: Int, height: Int, scale: Double) -> any MTLTexture {
+        if let textTexture, textTexture.width == width, textTexture.height == height { return textTexture.texture }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+        descriptor.usage = .shaderRead
+        descriptor.storageMode = .shared
+        guard width > 0, height > 0, let texture = device.makeTexture(descriptor: descriptor) else { return placeholder }
+        let bytesPerRow = width * 4
+        var bytes = [UInt8](repeating: 255, count: bytesPerRow * height)
+        let info = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        bytes.withUnsafeMutableBytes { raw in
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(
+                      data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                      bytesPerRow: bytesPerRow, space: space, bitmapInfo: info)
+            else { return }
+            // Points, y down, like UIKit.
+            context.translateBy(x: 0, y: CGFloat(height))
+            context.scaleBy(x: CGFloat(scale), y: CGFloat(-scale))
+            context.setFillColor(red: 0.965, green: 0.955, blue: 0.93, alpha: 1)
+            context.fill(CGRect(x: 0, y: 0, width: Double(width) / scale, height: Double(height) / scale))
+            UIGraphicsPushContext(context)
+            let font = UIFont.systemFont(ofSize: 15, weight: .regular)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font, .foregroundColor: UIColor(red: 0.11, green: 0.11, blue: 0.13, alpha: 1),
+            ]
+            let lineHeight = 21.0
+            var y = 14.0
+            var index = 0
+            while y < Double(height) / scale {
+                (Self.textLines[index % Self.textLines.count] as NSString).draw(
+                    at: CGPoint(x: 22, y: y), withAttributes: attributes)
+                y += lineHeight
+                index += 1
+            }
+            UIGraphicsPopContext()
+        }
+        texture.replace(
+            region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0, withBytes: bytes, bytesPerRow: bytesPerRow)
+        textTexture = (width, height, texture)
+        return texture
     }
 }
 
@@ -269,12 +382,12 @@ final class MaterialBenchViewController: UIViewController {
         self.mode = mode
         self.page = page
         switch mode {
-        case .bench: pages = BenchPage.allCases.filter { $0 != .chrome && $0 != .paperDesk && $0 != .prism && $0 != .stage }
+        case .bench: pages = BenchPage.allCases.filter { $0 != .chrome && $0 != .paperDesk && $0 != .prism && $0 != .stage && $0 != .text }
         case .lightFields: pages = [.charcoal, .ribbons, .paper]
         case .lens: pages = [.orbs, .dotGrid, .checkerboard, .ribbons]
         case .chrome: pages = [.chrome]
         case .paper: pages = [.paperDesk]
-        case .compare: pages = [.charcoal, .orbs, .paper]
+        case .compare: pages = [.charcoal, .orbs, .paper, .text]
         case .frost: pages = [.prism]
         }
         pageControl = UISegmentedControl(items: pages.map(\.title))

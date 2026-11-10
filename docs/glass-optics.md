@@ -1305,3 +1305,47 @@ mirror; no new test (fast pass); no device run; the 13 samples per pixel are mea
 no one yet (the M5 run is a later step). The paper-desk marble is a little milky at its
 lit upper left. The presence is not a substitute for frost: a sharp backdrop edge still
 shows sharp.
+
+## Clean pass: match the system glass's cleanliness (CLEAN)
+
+The user's feedback: "Apple's implementation is way cleaner than ours. Ours has some bands and streaks which I don't like. I want to match Apple's, but at the same time have those glow capabilities that Apple cannot do." This pass removes marks. It adds no edge detail, no hairline and no bend (no lens thickness, offset, dispersion or touch ring was raised; the chrome ring's dispersion went from 0.25 to 0.12). Everything is opt-in and experimental: `GlassLighting.clean` (0...1, default 0, refined look) and `GlassParameters.dither` (`.ordered` by default, `.triangular`; it also smooths the glow and light palettes between their stops). With both at their defaults the shader draws the same bytes as before (the frozen-baseline suites prove it).
+
+**How it was compared.** A real `UIGlassEffect` twin and the refined panels on the same backdrops (the Apple vs GlassWeave page on charcoal, orbs and paper; the pill, pearl, shelf and vessel studies; lens, chrome, paper desk, shapes, merge, touch, frost, light fields), iPhone 18 Pro simulator at full 3x resolution, cropped at 2x to 8x with a small PNG tool and, to expose bands, with the contrast stretched five times about the crop's mean.
+
+**What ours had and Apple's did not, and the cause.**
+
+| # | Mark | Where | Cause | Change under `clean` |
+| --- | --- | --- | --- | --- |
+| 1 | A doubled line: a second bright ridge a few points inside the hairline | every refined panel (the circle and the capsule's left cap most) | `gw_refined_highlight` used a bump window of the surface tilt (a ring at the depth where the tilt equals its center), on top of the hairline and the soft Fresnel term | the window is one-sided (it rises smoothly with the tilt and stays up to the outline), so the highlight is one gradient that falls from the rim inward |
+| 2 | A dark crease just inside the glow | the far side of every panel with presence | `inner = smoothstep(0.4, 2.5, depth) * exp(...)` starts at zero and peaks a few pixels in | the shade starts at the outline and falls off from there |
+| 3 | A lighter notch inside the slab shade, and an inner light ring | enhanced panels (`edgeDepth`) | the wall window fell off again toward the outline, and the inner light was a bump | both are monotone in the tilt |
+| 4 | An ordered-dither cross-hatch (alternating 48/50 luminance, 100 direction reversals along a 150 px line) | every dithered body and gradient | the 4 x 4 Bayer matrix at most 0.47 of a step, applied only where a light term changed the pixel; the lab's own backdrops carried the same matrix and it showed through the glass | `GlassDither.triangular`: a static, isotropic triangular-PDF dither of one 8-bit step per channel, from an integer hash of the pixel, on every pixel inside the outline, in the halo and in the shadows and caustics (their multiplier or added light carries it, faded in over the first three steps so the quad's edge stays exact); the lab's bench and gallery backdrops use the same dither |
+| 5 | Thin chrome stripes and a hue notch | the pearl ring and the chrome page's ring | `gw_enhance_bands` used 10 periods per radian (about five thin stripes), the thin-film hue was a multiple of a wrapped angle (a jump of 0.4 turn at the seam, a visible notch), and the glint's hue swept 3.4 turns across the steep wall (a thin rainbow stripe) | about one and a quarter periods, soft-edged and 0.52...1.3 in level; a periodic hue (`0.5 - 0.5 cos`); the film confined to the soft band; the glint's hue turns 0.9 across the bevel at 0.7 saturation, the lobes twice as wide and 40 percent calmer |
+| 6 | Dashes where a bright backdrop edge meets the rim under Increase Contrast | the refined rounded rectangle at the cyan orb's edge | the contrasting hairline chose its polarity with a hard `luminance > 0.5` test per pixel | the polarity follows a smooth step of the glass's luminance mixed with a six-tap average of the backdrop around it (reach `0.6 * bezel`), with a floor on the strength where the two polarities meet |
+| 7 | Speckle in the frost | frosted panels | a white hash grain, about 4 percent of the color | scaled by `1 - clean`; the dither takes its place |
+| 8 | Contour sheets, veins and a hairline across the vessel's shell | the amber vessel | thin gaussian edges at the sheets, at the inset boundary (`wallLine`) and a faint secondary rim | the hairline and the secondary rim 2.5 times wider at 0.6 of the strength, the sheet edges about 1.5 times wider at half the strength, the grain and the veins 70 percent calmer |
+| 9 | Kinks in a color gradient | glow stops, pooled-light palettes | linear interpolation between stops has a corner at each stop | a smooth step between stops under either dither mode |
+
+**Not found.** Edge-depth rings and light-piping lines beyond item 3, a visible start of the bevel (the POLISH window already removes it), lens-window rings, antialiasing stair-steps on the curved rims (the outline coverage is a one-pixel linear ramp of an exact distance; the 3x crops show none), and ghosting or doubled copies under a refined panel on a text page (see below).
+
+**Text backdrop.** The lab has a bench page `text` (`-lab.compare YES -lab.compareBackdrop text`): 42 short original sentences of dark type on warm paper, drawn by the lab with CoreGraphics into the texture the bench background binds. Over it the refined panels show the type crisp, at about half contrast (the 0.2 white tint and the clear body), bent a little at the bevel, with no second copy and no halo; the native twins blur it. Nothing needed fixing; the presence's flatness gate (VERIFY-ROUND4) keeps the backdrop pickup at zero where the type is.
+
+**Objective check** (`scratchpad` script, not a test): luminance profiles, each the mean of nine parallel lines (which removes the dither noise), then smoothed over three pixels; "reversals" counts changes of direction of at least 0.3 levels, "d2" is the largest second difference (levels of 0...255).
+
+| Profile | before (reversals / d2) | after (reversals / d2) | native |
+| --- | --- | --- | --- |
+| rim, charcoal capsule left cap | 100 / 1.94 | 2 / 1.98 | 0 / 6.45 |
+| rim, charcoal rounded rectangle left | 2 / 2.81 | 0 / 2.82 | 0 / 15.73 |
+| rim, orbs capsule left cap | 2 / 1.38 | 0 / 1.44 | |
+| rim, orbs circle left | 13 / 3.26 | 3 / 3.35 | |
+| pooled light, vertical through the pill bottom | 65 / 0.98 | 1 / 0.63 | |
+
+The 100 and 65 reversals were the ordered dither's cross-hatch; the remaining ones on the circle are the backdrop's own orb edges. The pooled-light gradient's largest step drops by a third. The dither's isotropy on a flat body patch of the charcoal capsule (rms of the difference between neighbours: horizontal / vertical / diagonal / anti-diagonal, in luminance levels): before 0.87 / 0.99 / 0.59 / 0.58 (a cross-hatch), after 0.78 / 0.77 / 0.80 / 0.79; on the pooled-light patch before 0.74 / 0.83 / 0.53 / 0.53, after 0.66 / 0.66 / 0.65 / 0.66. The captures are `gw-clean-*-before-*` and `gw-clean-*-after-*` in `docs/evidence/captures` (the rim at 4x, also with the contrast stretched five times, the compare pages, the four studies, the chrome page, the pooled light, the text page and Increase Contrast).
+
+**Is the rim stronger?** No hairline, streak or frost was added. The one-sided highlight lies behind the hairline: on the charcoal capsule's left cap the outermost pixel's luminance is 98.5 against 95.2 before (3 percent), and the rim's total excess light over the body, summed over 40 pixels, is 527 against 563 (6 percent less); with the first version of the window (0.55 instead of 0.36) the totals were equal and the peak 99.9, so it was cut back.
+
+**Accessibility.** Reduce Transparency and Increase Contrast keep `clean` (it only removes marks and adds no transparency); Increase Contrast's contrasting hairline is the one that changes (item 6). Reduce Motion: nothing moves in this pass.
+
+**Packing.** `lighting.tint.w` is `1 + presence + 256 * clean` (two 8-bit levels in one exactly representable float); the dither mode rides in `GWGlassUniforms.padding0` (0 ordered, 1 triangular), which every earlier shader ignores. Sizes and offsets are unchanged.
+
+**Limits.** Tuned by eye in four rounds against the real glass. The clean rim is a little wider and softer than the native one (a gradient over about ten points where the native rim is a thin line); making it thinner would trade against the PRESENCE look and was not done. No CPU mirror; no new test beyond the existing frozen-baseline suites (fast pass); no device run.

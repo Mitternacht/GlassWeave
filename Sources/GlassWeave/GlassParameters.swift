@@ -110,6 +110,14 @@ public struct GlassParameters: Hashable, Sendable {
     /// while a touch that began inside the panel has something to show;
     /// ``GlassTouch/none`` for none. Experimental.
     public var touch: GlassTouch
+    /// How the 8-bit encode is dithered (CLEAN): ``GlassDither/ordered`` is the
+    /// 4 x 4 ordered dither the shader has always used, only where a light term
+    /// changed the pixel; ``GlassDither/triangular`` adds a static, isotropic
+    /// triangular-PDF dither of one 8-bit step to every pixel inside the outline
+    /// and in the halo and shadows, so smooth gradients (glow, halo, pooled
+    /// light, inner glow, shadows, bodies) show no banding and no pattern.
+    /// Experimental.
+    public var dither: GlassDither
 
     /// The most edge illumination can brighten the outline: this fraction of
     /// the way from the glass color to white, at ``edgeHighlight`` 1.
@@ -130,7 +138,8 @@ public struct GlassParameters: Hashable, Sendable {
         shape: GlassShape = .roundedRectangle,
         frost: GlassFrost = .none,
         fill: GlassFill = .none,
-        touch: GlassTouch = .none
+        touch: GlassTouch = .none,
+        dither: GlassDither = .ordered
     ) {
         self.cornerRadius = cornerRadius
         self.bezelWidth = bezelWidth
@@ -147,6 +156,7 @@ public struct GlassParameters: Hashable, Sendable {
         self.frost = frost
         self.fill = fill
         self.touch = touch
+        self.dither = dither
     }
 
     /// Whether a host must keep drawing new frames for this panel's glow
@@ -330,7 +340,8 @@ extension GlassParameters {
             shape: shape,
             frost: frost,
             fill: fill,
-            touch: touch
+            touch: touch,
+            dither: dither
         )
     }
 }

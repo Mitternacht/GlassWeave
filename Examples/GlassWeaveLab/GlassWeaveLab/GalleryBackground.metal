@@ -56,6 +56,24 @@ static float gallery_hash(float2 cell) {
     return fract(sin(dot(cell, float2(127.1, 311.7))) * 43758.5453);
 }
 
+/// CLEAN: a static, isotropic triangular-PDF dither of one 8-bit step per channel,
+/// from an integer hash of the pixel (the lab's backdrops used a 4 x 4 ordered
+/// dither, whose pattern showed through the glass as a faint cross-hatch).
+static uint lab_ihash(uint x) {
+    x ^= x >> 16u; x *= 0x7feb352du; x ^= x >> 15u; x *= 0x846ca68bu; x ^= x >> 16u;
+    return x;
+}
+
+static float3 lab_dither_triangular(uint2 cell) {
+    const uint seed = cell.x * 0x8da6b343u + cell.y * 0xd8163841u + 0x1b873593u;
+    const uint h0 = lab_ihash(seed);
+    const uint h1 = lab_ihash(h0 + 0x9e3779b9u);
+    const uint h2 = lab_ihash(h1 + 0x9e3779b9u);
+    const float3 a = float3(float(h0 & 0xFFFFu), float(h1 & 0xFFFFu), float(h2 & 0xFFFFu));
+    const float3 b = float3(float(h0 >> 16u), float(h1 >> 16u), float(h2 >> 16u));
+    return ((a + b) * (1.0 / 65536.0) - 1.0) * (1.0 / 255.0);
+}
+
 fragment float4 gallery_background_fragment(
     GalleryVertexOut in [[stage_in]],
     constant float4 *parameters [[buffer(0)]])
@@ -167,10 +185,8 @@ fragment float4 gallery_background_fragment(
         }
     }
 
-    // A 4 x 4 ordered dither of under half a step, so the soft gradients
-    // show no bands.
-    const float bayer[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
-    const uint2 c = uint2(in.position.xy) & 3u;
-    color = saturate(color + ((bayer[c.x + 4u * c.y] + 0.5) / 16.0 - 0.5) / 255.0);
+    // CLEAN: a triangular dither of one step (an ordered dither's pattern shows
+    // through the glass).
+    color = saturate(color + lab_dither_triangular(uint2(in.position.xy)));
     return float4(color, 1.0);
 }

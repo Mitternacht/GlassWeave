@@ -41,6 +41,9 @@ struct GlassPanelGeometry: Equatable {
     /// The light model in target pixels, or `nil` for the original highlight
     /// (GW-23; resolved in GlassLighting.swift).
     var lighting: Lighting?
+    /// How the 8-bit encode is dithered (CLEAN), carried in the uniform record's
+    /// first padding slot.
+    var dither: GlassDither = .ordered
     /// The grounding in target pixels, or `nil` for a panel drawn without it
     /// (GW-25; resolved in GlassGrounding.swift).
     var grounding: Grounding?
@@ -120,6 +123,7 @@ struct GlassPanelGeometry: Equatable {
         let frame = panel.frame
         let parameters = panel.parameters
         self.displayScale = displayScale
+        dither = parameters.dither
         frost = parameters.frost.isActive ? parameters.frost : nil
         let shapeModel = GlassShapeModel(parameters.shape, frame: frame, displayScale: displayScale, effectTime: effectTime)
         shape = shapeModel
@@ -403,7 +407,7 @@ struct GlassPanelGeometry: Equatable {
             normalRadius: Float(normalRadius),
             maxDisplacement: Float(maxDisplacement),
             edgeHighlight: Float(edgeHighlight),
-            padding0: 0, padding1: 0, padding2: 0,
+            padding0: dither == .triangular ? 1 : 0, padding1: 0, padding2: 0,
             tint: SIMD4<Float>(SIMD3<Float>(tintLinear), Float(tintStrength)),
             glowColor0: glowColorLane(0),
             glowColor1: glowColorLane(1),

@@ -19,10 +19,17 @@ enum RefinedLook {
     /// the far side is deeper. It bends nothing.
     static let presence = 0.85
 
+    /// CLEAN: the level every refined panel of the lab carries
+    /// (`GlassLighting.clean`): the rim is one smooth gradient, the polished
+    /// bands are wide and soft, and the panel is dithered with the triangular
+    /// dither. It removes marks and adds none.
+    static let clean = 1.0
+
     /// The refined light model for a dark or a light page.
     static func lighting(dark: Bool, finish: GlassLighting.Finish = .dielectric) -> GlassLighting {
         var lighting = GlassLighting.refined(azimuth: azimuth, environment: dark ? .studioDark : .studioLight, finish: finish)
         lighting.presence = presence
+        lighting.clean = clean
         return lighting
     }
 
@@ -56,7 +63,8 @@ enum RefinedLook {
     static func panel(corner: Double, bezel: Double = 16, dark: Bool) -> GlassParameters {
         GlassParameters(
             cornerRadius: corner, bezelWidth: bezel, refraction: 0.55, edgeHighlight: 0,
-            tint: tint(dark: dark), lighting: lighting(dark: dark), grounding: grounding(dark: dark)
+            tint: tint(dark: dark), lighting: lighting(dark: dark), grounding: grounding(dark: dark),
+            dither: .triangular
         )
     }
 
@@ -101,6 +109,7 @@ enum RefinedLook {
     static func enhancedLighting(dark: Bool, finish: GlassLighting.Finish = .dielectric) -> GlassLighting {
         var lighting = GlassLighting.enhanced(azimuth: azimuth, environment: dark ? .studioDark : .studioLight, finish: finish)
         lighting.presence = presence
+        lighting.clean = clean
         return lighting
     }
 
@@ -153,6 +162,8 @@ enum RefinedLook {
         let dark = p.lighting.environment == .studioDark
         p.lighting.edgeDepth = max(p.lighting.edgeDepth, p.lens.profile == .rim ? 0.6 : 0.75)
         p.lighting.presence = max(p.lighting.presence, presence)
+        p.lighting.clean = max(p.lighting.clean, clean)
+        p.dither = .triangular
         p.lighting.fresnel = max(p.lighting.fresnel, 0.7)
         p.lighting.specular = max(p.lighting.specular, 0.6)
         if case .dielectric = p.lighting.finish {} else {
@@ -182,7 +193,7 @@ enum RefinedLook {
         ring.tint = GlassTint(red: 1, green: 1, blue: 1, strength: 0.05)
         ring.lens = GlassLens(
             profile: .ring(center: width * 0.5, width: width * 0.84), thickness: width * 1.08, indexOfRefraction: 1.42,
-            maximumOffset: 9, allowsFold: false, dispersion: 0.25, dispersionTaps: .sixTap, softness: 1
+            maximumOffset: 9, allowsFold: false, dispersion: 0.12, dispersionTaps: .sixTap, softness: 1
         )
         ring.lighting = .enhanced(
             azimuth: azimuth, environment: .studioLight, finish: .prismatic(spread: 1.4, saturation: 0.42, phase: 0.06)
@@ -193,6 +204,21 @@ enum RefinedLook {
         ring.lighting.banding = 1
         ring.lighting.glints = 1
         ring.lighting.bandWidth = width
+        ring.lighting.clean = clean
         return ring
+    }
+}
+
+extension GlassParameters {
+    /// CLEAN: the same panel with the triangular dither and, when it is lit by
+    /// the refined look, the clean rim. Used by the lab pages that do not build
+    /// their panels with ``RefinedLook`` (the glow gallery, the Apple vs
+    /// GlassWeave rows), so their gradients (glow, halo, pooled light, shadows)
+    /// are dithered like the rest.
+    func cleaned() -> GlassParameters {
+        var p = self
+        p.dither = .triangular
+        if p.lighting.look == .refined { p.lighting.clean = max(p.lighting.clean, RefinedLook.clean) }
+        return p
     }
 }

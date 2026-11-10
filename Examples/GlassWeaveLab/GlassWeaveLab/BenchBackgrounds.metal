@@ -10,7 +10,7 @@ using namespace metal;
 // `bgra8Unorm_srgb` view of the same texture.
 //
 // Parameters (`constant float4 *`, one block):
-//   x pixels per point, y page (0...9), z width in points, w height in points
+//   x pixels per point, y page (0...10), z width in points, w height in points
 //
 // Pages: 0 dot grid, 1 checkerboard, 2 color ribbons, 3 charcoal stage,
 // 4 light paper, 5 orbs (GW-22: soft shaded spheres on a dusk gradient, an
@@ -230,9 +230,28 @@ static float3 bench_liquid_color(float2 p, float2 center, float pixel) {
     return color;
 }
 
+/// CLEAN: a static, isotropic triangular-PDF dither of one 8-bit step per channel,
+/// from an integer hash of the pixel (the lab's backdrops used a 4 x 4 ordered
+/// dither, whose pattern showed through the glass as a faint cross-hatch).
+static uint lab_ihash(uint x) {
+    x ^= x >> 16u; x *= 0x7feb352du; x ^= x >> 15u; x *= 0x846ca68bu; x ^= x >> 16u;
+    return x;
+}
+
+static float3 lab_dither_triangular(uint2 cell) {
+    const uint seed = cell.x * 0x8da6b343u + cell.y * 0xd8163841u + 0x1b873593u;
+    const uint h0 = lab_ihash(seed);
+    const uint h1 = lab_ihash(h0 + 0x9e3779b9u);
+    const uint h2 = lab_ihash(h1 + 0x9e3779b9u);
+    const float3 a = float3(float(h0 & 0xFFFFu), float(h1 & 0xFFFFu), float(h2 & 0xFFFFu));
+    const float3 b = float3(float(h0 >> 16u), float(h1 >> 16u), float(h2 >> 16u));
+    return ((a + b) * (1.0 / 65536.0) - 1.0) * (1.0 / 255.0);
+}
+
 fragment float4 bench_background_fragment(
     BenchVertexOut in [[stage_in]],
-    constant float4 *parameters [[buffer(0)]])
+    constant float4 *parameters [[buffer(0)]],
+    texture2d<float, access::read> textPage [[texture(0)]])
 {
     const float4 general = parameters[0];
     const float scale = general.x;
@@ -302,6 +321,16 @@ fragment float4 bench_background_fragment(
         color += float3(0.030, 0.031, 0.034) * bench_fill(length(local) - 0.9, pixel);
         break;
     }
+    case 10: {
+        // Text (CLEAN): real type on warm paper, drawn by the lab with
+        // CoreGraphics into the bound texture (sRGB-encoded bytes), so the
+        // page is exact: no dither, no grain.
+        const uint2 texel = uint2(in.position.xy);
+        if (texel.x < textPage.get_width() && texel.y < textPage.get_height()) {
+            return float4(textPage.read(texel).rgb, 1.0);
+        }
+        return float4(0.965, 0.955, 0.93, 1.0);
+    }
     case 6: {
         // Chrome: the pale studio (top 33 %), the orbs (next 33 %), and the
         // liquid (the rest). The lab places the ring button, the lens pill,
@@ -327,10 +356,8 @@ fragment float4 bench_background_fragment(
     }
     }
 
-    // A 4 x 4 ordered dither of under half a step, so the soft gradients
-    // show no bands; the dots, checkerboard, and ribbons are exact enough.
-    const float bayer[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
-    const uint2 c = uint2(in.position.xy) & 3u;
-    color = saturate(color + ((bayer[c.x + 4u * c.y] + 0.5) / 16.0 - 0.5) / 255.0);
+    // CLEAN: a triangular dither of one step (an ordered dither's pattern shows
+    // through the glass); the dots, checkerboard, and ribbons are exact enough.
+    color = saturate(color + lab_dither_triangular(uint2(in.position.xy)));
     return float4(color, 1.0);
 }
