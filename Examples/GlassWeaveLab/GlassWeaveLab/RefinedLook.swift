@@ -1,3 +1,4 @@
+import Foundation
 import GlassWeave
 
 /// The Apple-grade starting values the lab's pages share (REFINE).
@@ -25,11 +26,20 @@ enum RefinedLook {
     /// dither. It removes marks and adds none.
     static let clean = 1.0
 
+    /// CLEAN-2: how much of the wide, soft rim the clean look keeps
+    /// (`GlassLighting.softRim`). 0, the default, is the thin crisp hairline of
+    /// the system glass; the launch argument `-lab.softRim 1` brings back the
+    /// first clean pass's soft gradient (the explicit opt-in) on every page.
+    static var softRim: Double {
+        min(max(UserDefaults.standard.double(forKey: "lab.softRim"), 0), 1)
+    }
+
     /// The refined light model for a dark or a light page.
     static func lighting(dark: Bool, finish: GlassLighting.Finish = .dielectric) -> GlassLighting {
         var lighting = GlassLighting.refined(azimuth: azimuth, environment: dark ? .studioDark : .studioLight, finish: finish)
         lighting.presence = presence
         lighting.clean = clean
+        lighting.softRim = softRim
         return lighting
     }
 
@@ -110,6 +120,7 @@ enum RefinedLook {
         var lighting = GlassLighting.enhanced(azimuth: azimuth, environment: dark ? .studioDark : .studioLight, finish: finish)
         lighting.presence = presence
         lighting.clean = clean
+        lighting.softRim = softRim
         return lighting
     }
 
@@ -163,6 +174,7 @@ enum RefinedLook {
         p.lighting.edgeDepth = max(p.lighting.edgeDepth, p.lens.profile == .rim ? 0.6 : 0.75)
         p.lighting.presence = max(p.lighting.presence, presence)
         p.lighting.clean = max(p.lighting.clean, clean)
+        p.lighting.softRim = softRim
         p.dither = .triangular
         p.lighting.fresnel = max(p.lighting.fresnel, 0.7)
         p.lighting.specular = max(p.lighting.specular, 0.6)
@@ -205,6 +217,7 @@ enum RefinedLook {
         ring.lighting.glints = 1
         ring.lighting.bandWidth = width
         ring.lighting.clean = clean
+        ring.lighting.softRim = softRim
         return ring
     }
 }
@@ -218,7 +231,10 @@ extension GlassParameters {
     func cleaned() -> GlassParameters {
         var p = self
         p.dither = .triangular
-        if p.lighting.look == .refined { p.lighting.clean = max(p.lighting.clean, RefinedLook.clean) }
+        if p.lighting.look == .refined {
+            p.lighting.clean = max(p.lighting.clean, RefinedLook.clean)
+            p.lighting.softRim = RefinedLook.softRim
+        }
         return p
     }
 }

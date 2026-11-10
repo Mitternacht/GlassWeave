@@ -224,10 +224,13 @@ typedef enum GWLightingEnvironment {
 /// - `tint`: the chrome tint in linear light (`xyz`) and the look in `w`: 0
 ///   the GW-23 model, 1 the refined (Apple-grade) look, and with the refined
 ///   look 1 plus the presence level (an integer 0...255, 0 for none) plus 256
-///   times the clean level (an integer 0...255, 0 for none; CLEAN): the
-///   shader reads `w > 0.5` as refined, `(w - 1) mod 256` as the presence and
-///   `(w - 1) / 256` as the clean level. The layout is unchanged: `w` was zero
-///   padding that the GW-23 shader never reads.
+///   times the clean level (an integer 0...255, 0 for none; CLEAN) plus 65536
+///   times the soft-rim level (an integer 0...255, 0 for none, only with a
+///   clean level above 0; CLEAN-2; the sum is at most 2^24, exactly
+///   representable): the shader reads `w > 0.5` as refined, `(w - 1) mod 256`
+///   as the presence, `((w - 1) / 256) mod 256` as the clean level and
+///   `(w - 1) / 65536` as the soft-rim level. The layout is unchanged: `w` was
+///   zero padding that the GW-23 shader never reads.
 /// - `prism`: the prismatic finish's spread in turns of hue around the rim
 ///   (`x`), saturation 0...1 (`y`), phase in turns (`z`). `w` was zero padding
 ///   that no shader read; with the refined look (`tint.w` 1) it carries the
@@ -568,7 +571,9 @@ typedef struct GWShapeUniforms {
 /// Dither (CLEAN), in the slot that was zero padding: `padding0` is 0 for the
 /// ordered 4 x 4 dither the shader has always used (applied only where a light
 /// term changed the pixel) and 1 for a static triangular-PDF dither of one
-/// 8-bit step on every pixel inside the outline and in the halo. Every shader
+/// 8-bit step where the shader makes a smooth gradient (a glow, the halo, an
+/// inner light, a fill, the touch, a frosted body, a shadow; CLEAN-2: not on a
+/// flat body, which the system glass keeps flat). Every shader
 /// before CLEAN ignores the slot, so zero draws the old bytes. The refined look's
 /// `clean` level (`lighting.tint.w`) also selects the triangular dither.
 ///

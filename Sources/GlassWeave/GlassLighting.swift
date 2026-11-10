@@ -46,6 +46,7 @@ internal import GlassWeaveShaderTypes
 /// | ``glints`` | normalized | 0...1 | 0 | Small bright glints at fixed angles around a polished rim (one facing the light, a weaker opposite, two faint at the sides), colored by the thin film with the prismatic finish. 0 draws none. |
 /// | ``presence`` | normalized | 0...1 | 0 | The refined look's liveliness without any extra bend: the body picks up the colors behind it softly (a few wide samples of the backdrop), lifts a little in luminance, and the inner edge carries a soft glow that follows the backdrop's color, brighter on the lit side, with a deeper far side. 0 draws none. Ignored by ``Look/classic``. Experimental. |
 /// | ``clean`` | normalized | 0...1 | 0 | The refined look's clean rim (CLEAN, experimental): every term that draws the rim and the edge (the hairline, the soft highlight, the inner glow and the thick-slab shade) falls off smoothly from the outline inward, in one gradient with no ring, crease or doubled line; the polished finishes' bands become wide and soft and the glints broader and calmer; the contrasting hairline changes polarity smoothly; the frost grain gives way to a static triangular dither of one 8-bit step. It adds no edge detail and raises no bend. 0 draws the look as before, byte for byte. Ignored by ``Look/classic``. |
+/// | ``softRim`` | normalized | 0...1 | 0 | With ``clean`` above 0 (CLEAN-2, experimental): how much of the wide, soft rim the clean look keeps. 0, the default, is a thin crisp hairline about 0.7 points wide, like the system glass's rim, with one gentle light and shade variation around the outline; 1 is the first clean pass's soft gradient of about ten points (the soft highlight, the Fresnel body, the inner glow and shade and the slab shade at their wide reach), kept as an explicit opt-in for the glow look; values between mix the two. Ignored when ``clean`` is 0 and by ``Look/classic``. |
 ///
 /// **The model** (`docs/glass-optics.md`). With the viewer's direction
 /// `V = (0, 0, 1)` and the light's `L`, the reflected fraction is Schlick's
@@ -175,7 +176,7 @@ public struct GlassLighting: Hashable, Sendable {
         case indexOfRefraction, fresnel, specular, reflection, bloom, bloomWidth, bandWidth
         case chromeTintRed, chromeTintGreen, chromeTintBlue
         case prismaticSpread, prismaticSaturation, prismaticPhase
-        case edgeDepth, banding, glints, presence, clean
+        case edgeDepth, banding, glints, presence, clean, softRim
         /// The azimuth passed to ``GlassRenderer/setLightOffset(azimuth:elevation:)``.
         case lightOffsetAzimuth
         /// The elevation passed to ``GlassRenderer/setLightOffset(azimuth:elevation:)``.
@@ -250,6 +251,17 @@ public struct GlassLighting: Hashable, Sendable {
     /// byte. It stays on under Reduce Transparency, Increase Contrast and Reduce
     /// Motion, because it only removes marks.
     public var clean: Double
+    /// How much of the wide, soft rim the clean look keeps, 0...1
+    /// (CLEAN-2, experimental). With ``clean`` above 0 the default rim is a
+    /// thin crisp hairline (about 0.7 points wide) with one gentle light and
+    /// shade variation around the outline, like the system glass's rim; the
+    /// soft, wide gradient of the first clean pass (about ten points: the soft
+    /// highlight, the Fresnel body, the inner glow and shade and the slab
+    /// shade) is the opt-in at 1, and values between mix the two. The glow
+    /// capabilities (``GlassGlow``, the inner light, the interior, the fill)
+    /// are separate and unchanged. 0 is the default. Ignored when ``clean`` is
+    /// 0 and by ``Look/classic``.
+    public var softRim: Double
 
     /// The longest the bloom can reach: 24 points.
     public static let maximumBloomWidth = 24.0
@@ -276,9 +288,11 @@ public struct GlassLighting: Hashable, Sendable {
         banding: Double = 0,
         glints: Double = 0,
         presence: Double = 0,
-        clean: Double = 0
+        clean: Double = 0,
+        softRim: Double = 0
     ) {
         self.clean = clean
+        self.softRim = softRim
         self.presence = presence
         self.edgeDepth = edgeDepth
         self.banding = banding
@@ -370,6 +384,7 @@ public struct GlassLighting: Hashable, Sendable {
             (.indexOfRefraction, indexOfRefraction), (.fresnel, fresnel), (.specular, specular),
             (.reflection, reflection), (.bloom, bloom), (.bloomWidth, bloomWidth),
             (.edgeDepth, edgeDepth), (.banding, banding), (.glints, glints), (.presence, presence), (.clean, clean),
+            (.softRim, softRim),
         ]
         if let rim {
             checks += [
@@ -410,6 +425,7 @@ public struct GlassLighting: Hashable, Sendable {
         result.glints = unit(glints)
         result.presence = unit(presence)
         result.clean = unit(clean)
+        result.softRim = unit(softRim)
         result.bloomWidth = min(max(bloomWidth, 0), Self.maximumBloomWidth)
         result.bandWidth = bandWidth.map { min(max($0, 0), maximumLength) }
         switch finish {
@@ -509,7 +525,13 @@ extension GlassPanelGeometry {
             // CLEAN adds its own 8-bit level, 256 times, above the presence's.
             let cleanLevel: Float = lighting.look == .refined
                 ? Float((min(max(lighting.clean, 0), 1) * 255).rounded()) : 0
-            record.tint = SIMD4(tint, lighting.look == .refined ? 1 + presenceLevel + 256 * cleanLevel : 0)
+            // CLEAN-2: the soft-rim level rides above the clean level (65536
+            // times its 8-bit value; the sum stays an exactly representable
+            // integer, at most 2^24), and only when the clean look is on.
+            let softRimLevel: Float = lighting.look == .refined && cleanLevel > 0
+                ? Float((min(max(lighting.softRim, 0), 1) * 255).rounded()) : 0
+            record.tint = SIMD4(
+                tint, lighting.look == .refined ? 1 + presenceLevel + 256 * cleanLevel + 65536 * softRimLevel : 0)
             // The refined look's enhancements ride in `prism.w`, which was zero
             // padding: three 8-bit fields (depth, banding, glints), exactly
             // representable in a float; zero when none is on.
