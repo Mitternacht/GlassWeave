@@ -9,7 +9,7 @@ open; [the task checklist](tasks/todo.md) records what is verified. The rest
 of this page is the original handoff. The user deliberately reserved
 implementation for Claude.
 
-## Pick up here (2026-11-10, after the glass-beyond, interaction, polish, Metal 4 and presence rounds)
+## Pick up here (2026-11-10, after the glass-beyond, interaction, polish, Metal 4, presence and clean rounds)
 
 **Branches.** Nothing is merged into `main`, nothing is pushed, nothing is tagged.
 
@@ -257,6 +257,50 @@ pass unmodified). Notes: [glass-optics](docs/glass-optics.md#presence-a-livelier
 | All lab UI tests, iPhone 18 Pro simulator | 50 results: 49 passed, 0 failed, 1 skipped (the iPad-only two-scene test); the known gallery dark audit passed this time, unexplained, nothing changed for it |
 | Studies and versus smoke, iPad Pro 13-inch (M5) simulator | 2 passed, 0 failed |
 | `scripts/consumer_check.sh` at the committed fix `72d9e41`, My Mac | passed (one pin at that revision, the consumer test passed) |
+
+**Clean pass (CLEAN, then VERIFY-CLEAN; experimental, unreleased; iPhone 18 Pro simulator and My Mac
+only).** The user: "Apple's implementation is way cleaner than ours ... match Apple's, but keep the
+glow." `GlassLighting.clean` and `GlassParameters.dither` (both opt-in, both off by default and
+byte-identical when off) give the refined rim one smooth gradient from the outline (the doubled
+inner line, the dark crease and the slab notch are gone), soft wide chrome bands, a static
+triangular dither on every pixel and shadow (the ordered cross-hatch is gone), a smooth Increase
+Contrast polarity and smooth glow and light palettes; the lab uses both on every refined page
+and has a text-heavy backdrop page. Notes: [glass-optics](docs/glass-optics.md#clean-pass-match-the-system-glasss-cleanliness-clean),
+[studies](docs/studies.md#clean-pass-and-its-independent-check-clean-verify-clean-experimental-unreleased).
+
+- *The independent check* built the pass and its parent (`9070250`) fresh and captured 28 pages
+  (plus checkerboard, dots, Increase Contrast and Reduce Transparency pages) with the same
+  arguments, then cropped at 2x to 16x beside the real `UIGlassEffect` twin. Verdicts: the compare
+  pages, pill, shelf, lens, shapes, merge, touch, glow gallery and versus are clean; the pearl and
+  chrome rings, the vessel, the paper desk, frost and light fields are mostly clean (see the next
+  bullet). The doubled rim line, the cross-hatch and the thin chrome stripes are gone on every page
+  (before and after crops: `gw-verify-clean-*`); Increase Contrast's dashes at the cyan orb's edge
+  are gone; the glows (gallery, light fields, the pill's pooled glow, the vessel's liquid, merge,
+  touch, the versus gradient) still show their hues, with no banding at 3x to 4x contrast.
+- *Bends: unchanged.* The displacement code is not in the pass's shader diff, and on a checkerboard
+  the squares' edges inside the glass are pixel-identical before and after. The bend is still
+  visible as a bend on a checkerboard at the bevel, and the paper desk's lens pill still turns small
+  dots into eggs; those are the lens values, not this pass.
+- *Still open.* (1) The Light fields page's four-corner field has a diagonal crease at each inner
+  corner (the distance-to-outline medial axis; the same before the pass; not fixed, a smoothed
+  distance in `gw_light_emitter` behind `clean` would do it). (2) The chrome and pearl rings have a
+  hard one-pixel step between the dark outer band and a bright lip (a staircase at 8x to 16x, not
+  visible at 1x to 3x; same before). (3) Our body carries a static grain of about one 8-bit step
+  (native 0.1 to 0.2 levels of neighbour difference, ours 0.8 to 1.2), invisible below about 4x,
+  and the rim is a gradient about ten points wide where the native one is a thin line. (4) Under
+  Reduce Transparency the opaque panel lost its soft gray inner edge shade (it is a flat panel
+  with a crisp edge; on paper the hairline stays). (5) The fine ring detail and the glints are
+  opt-in finishes the native glass does not have.
+- *One retune in this check:* the frost page's capsule (dispersion 1 to 0.3, soft window): two
+  background stars at its rim were squeezed and fringed into rainbow dashes.
+
+| Destination (final tree, `xcresulttool`) | Result |
+| --- | --- |
+| Package scheme, My Mac | 211 passed, 0 failed, 0 skipped |
+| Package scheme, iPhone 18 Pro simulator | 292 passed, 0 failed, 2 skipped (the two Metal 4 tests) |
+| All lab UI tests, iPhone 18 Pro simulator | 50 results: 48 passed, 1 failed, 1 skipped (the iPad-only two-scene test). The failure, `PresentationUITests.testHeldDrawablesNeverStallTheMainThreadAndTheRequestDrawsOnRelease`, timed out once while `scripts/consumer_check.sh` ran on the same Mac; it passed 3 of 3 alone. The known gallery dark audit passed again (unexplained, nothing changed for it). |
+| Studies and versus smoke, iPad Pro 13-inch (M5) simulator | 2 passed, 0 failed |
+| `scripts/consumer_check.sh` at `71ee228`, My Mac | passed (one pin at that revision, the consumer test passed) |
 
 **How to build and run here.** The Xcode MCP bridge times out when it opens a workspace
 on this Mac (`XcodeOpenWorkspace` after 10 s, on every path), so the whole round used

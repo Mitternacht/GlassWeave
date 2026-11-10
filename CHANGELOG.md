@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH, PRESENCE)
+## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH, PRESENCE, CLEAN)
 
 Requested by the user on 2026-11-09, on the branch `implement/glass-beyond`
 (nothing merged into `main`, nothing tagged). Every API is experimental, every
@@ -61,6 +61,20 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   The lab applies it through `RefinedLook` (level 0.85, a lighter tint), the amber
   vessel's sheets are softer (two instead of three, no contour-line look), and the
   paper desk's captions no longer overlap.
+- Clean pass (CLEAN, after the review "Apple's implementation is way cleaner than
+  ours"): `GlassLighting.clean` (0...1, default 0, refined look, experimental) gives
+  the rim one smooth gradient from the outline inward (no doubled line, no dark
+  crease, no notch in the slab shade), soft wide chrome bands, a periodic thin-film
+  hue and calmer glints, a smooth Increase Contrast polarity and no frost speckle;
+  `GlassParameters.dither` (`GlassDither`, `.ordered` default, `.triangular`) adds a
+  static isotropic triangular dither of one 8-bit step to every pixel, shadow and
+  caustic, and smooths the glow and light palettes between their stops. `clean` rides
+  in `tint.w` as `1 + presence + 256 * clean` and the dither mode in
+  `GWGlassUniforms.padding0` (sizes and offsets unchanged); non-finite `clean` is
+  rejected with `nonFiniteLighting(.clean)`, finite is clamped. Both at their
+  defaults draw the previous bytes (the nine frozen-baseline suites pass). The lab
+  uses both on every refined page and has a text-heavy bench page
+  (`-lab.compare YES -lab.compareBackdrop text`). No bend, hairline or streak was added.
 - The Metal 4 submission experiment (GW-11), package level and without public
   API: `Metal4Renderer` (`MTL4CommandQueue`, per-slot command allocators,
   argument tables, a residency set, commit feedback), `ConventionalPlanRenderer`
@@ -131,6 +145,17 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   is unchanged or smaller; the same bend shows with about 19 percent more contrast
   on a black and white pattern because the old tint's haze is gone.
 - GW-04 item 3 (the drawable stall) is closed by the GW-27 heartbeat test.
+- Clean pass check (VERIFY-CLEAN): the pass and the commit before it were built
+  fresh and captured on 28 pages with the same arguments. The doubled rim line, the
+  ordered-dither cross-hatch and the thin chrome stripes are gone on every refined
+  page, the glows and pooled lights are as smooth or smoother, and the displacement
+  code was not touched (on a checkerboard the squares' edges inside the glass are
+  pixel-identical). One lab retune: the frost page's capsule uses dispersion 0.3 and
+  the soft window, because full dispersion turned two background stars at its rim into
+  rainbow dashes. Per-page verdicts and what is still open (the four-corner light
+  field's diagonal crease at its inner corners, a hard one-pixel band step on the
+  chrome and pearl rings, a fine grain of about one 8-bit step, a rim wider and
+  softer than the native line) are in `docs/studies.md`, "Clean pass".
 - The `EnhancedNativeGlassViewTests` check "The pulse resumes where it stopped" measures how long the pulse ran instead of assuming 0.3 s, so a busy main actor no longer fails it.
 
 ### Known issues
@@ -144,6 +169,13 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   configuration..." and `FrameLifecycleTests` "100 hide and show cycles...",
   a race in the test itself) fail now and then. `GlassRenderer` now builds 16 pipeline
   variants at creation (about 6 to 15 ms, 1 to 4 ms before); see HANDOFF.md.
+- Clean pass check (VERIFY-CLEAN) open items: the Light fields page's four-corner
+  field has a diagonal crease at each inner corner (same before the pass); the chrome
+  and pearl rings have a hard one-pixel step between their dark outer band and a bright
+  lip; the body carries a static grain of about one 8-bit step; under Reduce
+  Transparency the opaque panel lost its soft inner edge shade.
+  `PresentationUITests.testHeldDrawablesNeverStallTheMainThreadAndTheRequestDrawsOnRelease`
+  timed out once in a full run while another job used the Mac and passed 3 of 3 alone.
 - The touch response draws no ring on frost and fill panels (those pipeline
   variants carry no touch code), and the observer was never driven by a real
   finger. Merging was captured without frost, fill or touch on the merged panel.
