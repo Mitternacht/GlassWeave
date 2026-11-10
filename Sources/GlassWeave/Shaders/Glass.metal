@@ -1780,7 +1780,9 @@ static float3 gw_light_model(
 // runs only for a refined panel whose level is above zero, so a panel without
 // it is the shader above, byte for byte (the baseline tests prove it). Nothing
 // moves a sample: the body is colored by a soft average of the backdrop around
-// the pixel, never by an offset. The one change to the picture's geometry is
+// the pixel, never by an offset, and only where that backdrop is flat (a few
+// taps of an edge, a dot or a character would show as ghost copies: the
+// flatness gate, VERIFY-ROUND4). The one change to the picture's geometry is
 // the opposite of a bend: a plain rim refraction is feathered to nothing at the
 // outline, so the backdrop joins the glass without a step (docs/glass-optics.md,
 // "Presence").
@@ -1802,19 +1804,36 @@ static float gw_presence_level(constant GWLightingUniforms &lighting) {
     return saturate((lighting.tint.w - 1.0) * (1.0 / 255.0));
 }
 
-/// A soft average of the backdrop around `pixel`, in linear light: thirteen
-/// bilinear samples (the center, six on a ring at half the radius, six on a
-/// ring at the radius). No fixed pattern shows at 15 to 28 percent weight and
-/// there is no per-pixel noise.
-static float3 gw_presence_ambient(
-    float2 pixel, float radius, constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
+/// A soft average of the backdrop around `pixel`, in linear light (`xyz`), and
+/// how flat the backdrop is around it (`w`, 1 flat, 0 an edge, a dot or a
+/// character): thirteen bilinear samples (the center, six on a ring at half the
+/// radius, six on a ring at the radius). Thirteen taps are a faithful average
+/// only where the backdrop is smooth; across a hard edge or a small colored
+/// feature they would show as faint ghost copies and as a halo that washes the
+/// feature out, so the caller scales the pickup by `w`. The measure is the
+/// largest distance of any one sample, and of the backdrop the glass shows
+/// (`seen`, which a lens may have taken from somewhere else), from the average,
+/// relative to the local light level: grain and slow shading stay below it, a single
+/// sample that hits an edge or a dot, or a bent view that no longer matches the
+/// undisturbed surroundings, is far above it.
+static float4 gw_presence_ambient(
+    float2 pixel, float radius, float3 seen, constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
 {
-    float3 sum = 2.0 * gw_glass_sample(pixel, uniforms, source);
+    const float3 center = gw_glass_sample(pixel, uniforms, source);
+    float3 taps[12];
+    float3 sum = 2.0 * center;
     for (uint i = 0u; i < 6u; ++i) {
-        sum += gw_glass_sample(pixel + (0.5 * radius) * gw_presence_inner[i], uniforms, source);
-        sum += 0.7 * gw_glass_sample(pixel + radius * gw_presence_outer[i], uniforms, source);
+        taps[i] = gw_glass_sample(pixel + (0.5 * radius) * gw_presence_inner[i], uniforms, source);
+        taps[6u + i] = gw_glass_sample(pixel + radius * gw_presence_outer[i], uniforms, source);
+        sum += taps[i] + 0.7 * taps[6u + i];
     }
-    return sum * (1.0 / 12.2);
+    const float3 average = sum * (1.0 / 12.2);
+    float spread = max(length(center - average), length(seen - average));
+    for (uint i = 0u; i < 12u; ++i) {
+        spread = max(spread, length(taps[i] - average));
+    }
+    const float scale = 0.06 + dot(average, gw_presence_luma);
+    return float4(average, 1.0 - smoothstep(0.10, 0.32, spread / scale));
 }
 
 /// A lens inlay's shade: the dome's side away from the light darkens a little
@@ -1852,15 +1871,18 @@ static float3 gw_presence_inlays(float3 glass, float2 q, float level, float3 sky
 /// The presence of a panel at one pixel: the body, the inner edge, the inlays.
 ///
 /// Body: a gentle pickup of the backdrop's own color (14 percent in the middle,
-/// 28 percent at the rim, of a slightly more vivid soft average of the backdrop),
-/// a small saturation lift (14 percent), and a luminance gain that keeps the hue (12 percent on dark pages), a little more
-/// toward the light. Inner edge: a thin glow that falls
+/// 28 percent at the rim, of a slightly more vivid soft average of the backdrop,
+/// times the flatness of the backdrop around the pixel, so it vanishes at an
+/// edge or a dot), a small saturation lift (14 percent), and a luminance gain
+/// that keeps the hue (12 percent on dark pages), a little more toward the
+/// light. `shown` is what the glass shows of the backdrop before the tint and
+/// the fill. Inner edge: a thin glow that falls
 /// off within an eighth of the bevel, in the backdrop's hue brightened (a dark
 /// backdrop has no hue to pick up, so it is the sky's), brighter on the side
 /// toward the light, and a deeper far side: a soft shade just inside the
 /// hairline. All proportional to `level`.
 static float3 gw_presence_apply(
-    float3 glass, float2 pixel, float2 q, float depth, float2 normal, float level,
+    float3 glass, float3 shown, float2 pixel, float2 q, float depth, float2 normal, float level,
     constant GWGlassUniforms &uniforms, texture2d<float, access::sample> source)
 {
     constant GWLightingUniforms &lighting = uniforms.lighting;
@@ -1868,14 +1890,18 @@ static float3 gw_presence_apply(
     const float bevel = max(lighting.bevel, 1.0);
     const float inscribed = max(gw_panel_inscribed(uniforms), 1.0);
     const float radius = clamp(0.7 * bevel, 8.0, max(0.5 * inscribed, 8.0));
-    const float3 ambient = gw_presence_ambient(pixel, radius, uniforms, source);
+    const float4 soft = gw_presence_ambient(pixel, radius, shown, uniforms, source);
+    // Where the backdrop is flat the soft average; where it is not, what the
+    // glass shows itself, so the glow's color and strength never follow the
+    // taps' ghost pattern.
+    const float3 ambient = mix(shown, soft.xyz, soft.w);
     const float ambientLuma = dot(ambient, gw_presence_luma);
     const float3 vivid = max(mix(float3(ambientLuma), ambient, 1.3), 0.0);
     const float3 sky = dark ? float3(0.62, 0.66, 0.78) : float3(0.97, 0.975, 1.0);
 
     // Body.
     const float rimness = 1.0 - smoothstep(0.0, 1.6 * bevel, depth);
-    glass = mix(glass, vivid, level * mix(0.14, 0.28, rimness));
+    glass = mix(glass, vivid, level * mix(0.14, 0.28, rimness) * soft.w);
     const float luma = dot(glass, gw_presence_luma);
     glass = max(mix(float3(luma), glass, 1.0 + 0.14 * level), 0.0);
     const float across = clamp(dot(q, lighting.edgeDirection) / max(length(uniforms.panelHalfSize), 1.0), -1.0, 1.0);
@@ -2721,6 +2747,9 @@ fragment float4 gw_glass_fragment(
     } else {
         glass = gw_glass_sample(samplePixel - normal * displacement, uniforms, source);
     }
+    // What the glass shows of the backdrop, before the tint and the fill: the
+    // presence compares it with the undisturbed surroundings.
+    const float3 shown = glass;
 
     glass = mix(glass, uniforms.tint.xyz, uniforms.tint.w);
     if (grounded && (uniforms.grounding.flags & GWGroundingFlagInner) != 0u) {
@@ -2740,7 +2769,7 @@ fragment float4 gw_glass_fragment(
     // Presence (refined look): the body's backdrop pickup, the inner edge glow
     // and the inlays' shade, under the edge lights that follow.
     if (presenceLevel > 0.0) {
-        glass = gw_presence_apply(glass, pixel, q, depth, normal, presenceLevel, uniforms, source);
+        glass = gw_presence_apply(glass, shown, pixel, q, depth, normal, presenceLevel, uniforms, source);
     }
     // The edge light: the upper left, or the key light with the light model.
     const float2 edgeLight = (gw_lighting && uniforms.lighting.finish != GWLightingFinishNone)

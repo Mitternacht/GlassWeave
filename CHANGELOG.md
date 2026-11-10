@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH)
+## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH, PRESENCE)
 
 Requested by the user on 2026-11-09, on the branch `implement/glass-beyond`
 (nothing merged into `main`, nothing tagged). Every API is experimental, every
@@ -46,6 +46,21 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   or a smear; `GlassFill.richness` (0...1, default 0) adds a restrained surface
   window, warm sheet edges and a long soft reflection to a translucent liquid.
   Neither changes a record's size.
+- Presence pass (PRESENCE, after the review "the restraint costs presence"):
+  `GlassLighting.presence` (0...1, default 0, refined look only, experimental)
+  makes the glass livelier through color and light, with no extra bend: the body
+  picks up the backdrop's colors softly (a few wide samples, never a lens offset,
+  scaled by a flatness gate so an edge, a dot or a character leaves no ghost), gains
+  a hue-keeping luminance lift, and the inner edge carries a thin glow in the
+  backdrop's hue, brighter on the lit side, with a deeper far side; a lens inlay gets
+  a soft shade. It rides in `tint.w` as `1 + level` (the record keeps its 160
+  bytes); non-finite is rejected with `nonFiniteLighting(.presence)`, finite is
+  clamped; Reduce Transparency and Increase Contrast set it to 0. At 0 the shader
+  draws the previous bytes. With it on, a plain rim refraction is feathered to 0 at the
+  outline (never above its old value), which removes the step at a capsule's end caps.
+  The lab applies it through `RefinedLook` (level 0.85, a lighter tint), the amber
+  vessel's sheets are softer (two instead of three, no contour-line look), and the
+  paper desk's captions no longer overlap.
 - The Metal 4 submission experiment (GW-11), package level and without public
   API: `Metal4Renderer` (`MTL4CommandQueue`, per-slot command allocators,
   argument tables, a residency set, commit feedback), `ConventionalPlanRenderer`
@@ -109,14 +124,22 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   chrome ring (98 points), a scrim that keeps its chroma as it darkens, and a
   merged pill that matches the buttons' brightness. These are opt-in values;
   a panel that sets none of them draws the previous bytes.
+- Presence pass check (VERIFY-ROUND4): the first presence build left a faint
+  lattice of ghost copies over a dot grid and a checkerboard and a pale second
+  image of small colored dots under a thick lens; the pickup and the glow now
+  follow the flatness gate (see `docs/glass-optics.md`, "Presence"). Bend geometry
+  is unchanged or smaller; the same bend shows with about 19 percent more contrast
+  on a black and white pattern because the old tint's haze is gone.
 - GW-04 item 3 (the drawable stall) is closed by the GW-27 heartbeat test.
 - The `EnhancedNativeGlassViewTests` check "The pulse resumes where it stopped" measures how long the pulse ran instead of assuming 0.3 s, so a busy main actor no longer fails it.
 
 ### Known issues
 
-- `GlowGalleryUITests.testAccessibilityAuditPassesInLightAndDark` fails in the
-  dark audit (the Energy orb header) on this simulator, identically on the
-  shipped glow tip: the system appearance does not reach the app. Two more
+- `GlowGalleryUITests.testAccessibilityAuditPassesInLightAndDark` failed in the
+  dark audit (the Energy orb header) on this simulator in earlier rounds,
+  identically on the shipped glow tip (the system appearance does not reach the
+  app); it passed in the one run of the presence check, and nothing was changed
+  for it, so it is not fixed. Two more
   timing-sensitive package tests (`EnhancedNativeGlassViewTests` "A new corner
   configuration..." and `FrameLifecycleTests` "100 hide and show cycles...",
   a race in the test itself) fail now and then. `GlassRenderer` now builds 16 pipeline

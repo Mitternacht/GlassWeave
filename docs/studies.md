@@ -56,7 +56,7 @@ A frosted capsule holds a large native title and three native buttons, over a bl
 
 An original composition around the GW-28 liquid fill: two vessels, each one panel, on a near-black stage (`study_vessel_fragment`: a cool wall that warms toward the table, one very faint far soft box at the upper left, the warm light each vessel throws on the table, a soft vignette).
 
-- The large vessel is a rounded rectangle with a refined thick lens (squircle bevel, dispersion 0.10, the thin lit-side rim) and a smoky tint, so the glass is nearly clear and dark. It holds a **gel**: a smooth rounded body low in the glass, one warm ramp (deep amber, orange, pale gold), one contour sheet at low brightness, a thin line in the glass wall, five tiny bubbles.
+- The large vessel is a rounded rectangle with a refined thick lens (squircle bevel, dispersion 0.10, the thin lit-side rim) and a smoky tint, so the glass is nearly clear and dark. It holds a **gel**: a smooth rounded body low in the glass, one warm ramp (deep amber, orange, pale gold), two soft sheets (PRESENCE: 24 points apart, edge 0.34, wobble 0.85, so they read as folds in one gel and not as contour lines), a thin line in the glass wall, six tiny bubbles.
 - The small vessel is a tall rounded rectangle holding a **level** liquid (surface waves 0.5 pt, meniscus 3 pt). A native "Liquid level" slider fills it and a native "Nudge" button starts a damped slosh (`GlassFillSlosh`) that the 30 Hz script tick steps until it settles; Nudge is disabled under Reduce Motion. The level also lights the table under the small vessel a little more.
 - The surface's effect clock moves the bubbles and the gel's slow wobble (the other studies pause it; a pinned `-lab.studyTime` pauses it here too, so a capture is repeatable). The stage is a still picture, drawn again only when the layout or the level changes.
 - POLISH (`GlassFill.richness` 1 and 0.8): a restrained specular window on the liquid's own curved surface, brighter warm sheet edges, fine internal structure in the gel, and a long soft reflection along the lit outer wall.
@@ -83,6 +83,10 @@ An original composition around the GW-28 liquid fill: two vessels, each one pane
 The "Animate interiors" switch also holds the light's flow, a blob's wobble, and the fill's bubbles and waves. The hierarchy check (native half: `UIGlassEffect` views, no GlassWeave surface; weave half: one surface) and the divider clipping are unchanged.
 
 `NativeGlassView.Configuration.style` (`.regular` default, `.clear`) maps to `UIGlassEffect.Style`. Its doc comment carries Apple's advice for clear glass: over bright content add a dark dimming layer of about 35% opacity behind it; none is drawn by the view.
+
+## Presence pass (PRESENCE and its check, experimental, unreleased)
+
+The refined panels of the studies and of the lab pages now carry `GlassLighting.presence` (0.85 through `RefinedLook`): the body picks up the colors behind it, lifts a little without graying, and the inner edge glows softly in the backdrop's hue on the lit side, with a deeper far side. Nothing is bent further: the plain rim refraction is only feathered toward the outline, and every lens, offset, dispersion and touch value is as before. Beside the real `UIGlassEffect` twin the gap is narrowed, not closed: our body is still clearer (the native one is frosted and carries a stronger hairline), and on the paper page a refined panel reads as a soft cushion more than as glass. The independent check (VERIFY-ROUND4) recaptured every page from a fresh build beside the previous build and found one defect, a ghost lattice and a pale double image of small dots over high-frequency backdrops, which a flatness gate removed (`docs/glass-optics.md`, "Presence"; captures `gw-presence-verify-*`). The amber study is one clean gel; the paper desk's captions no longer overlap. Simulator only; nobody has looked at it on a device.
 
 ## Not done in this pass
 

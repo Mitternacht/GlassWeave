@@ -9,7 +9,7 @@ open; [the task checklist](tasks/todo.md) records what is verified. The rest
 of this page is the original handoff. The user deliberately reserved
 implementation for Claude.
 
-## Pick up here (2026-11-09, after the glass-beyond, interaction, polish and Metal 4 rounds)
+## Pick up here (2026-11-10, after the glass-beyond, interaction, polish, Metal 4 and presence rounds)
 
 **Branches.** Nothing is merged into `main`, nothing is pushed, nothing is tagged.
 
@@ -70,7 +70,7 @@ and for how to open every lab page with its launch argument, and
   mirror, an M5 run or a device is unchecked in [the checklist](tasks/todo.md) with a
   reason (fast pass: not tested, device only, ...).
 
-**Latest verification run (VERIFY-ROUND3, one batch on the merged tree `59750fa`, `xcresulttool` counts).**
+**Previous verification run (VERIFY-ROUND3, one batch on the merged tree `59750fa`, `xcresulttool` counts; the latest is under "Presence pass" below).**
 
 Xcode MCP could not open a workspace here, so everything used `xcodebuild`; counts are from
 `xcresulttool`.
@@ -126,14 +126,14 @@ soft pool. Still short: see the verdict below.
    Xcode preview, and the CPU-mirror and controlled-clock tests the fast pass skipped.
 7. Visual gaps against the references: see [the plan](tasks/plan.md).
 
-Checklist counts, ticked/open per section of `tasks/todo.md` at VERIFY-ROUND3 (127 ticked, 142 open
-in all; every unticked task box has a reason on its line, while the 13 open lines under the six
+Checklist counts, ticked/open per section of `tasks/todo.md` after the Presence round (140 ticked, 145 open
+in all, counted as lines starting `- [x]` and `- [ ]`; every unticked task box has a reason on its line, while the 13 open lines under the six
 Checkpoint headings are the plan's original gates, which wait on the physical-device qualification
 and carry no reason of their own): GW-01 2/1; GW-02 2/1; GW-03 3/0; Checkpoint A
 0/2; GW-04 3/0; GW-05 3/0; GW-06 2/1; Checkpoint B 0/2; GW-07 3/0; GW-08 2/1; GW-09 0/3; Checkpoint C
 0/3; GW-10 2/1; Checkpoint D 1/1; GW-11 7/2; GW-12 4/5; GW-13 8/3; Checkpoint E 0/2; GW-14 6/1; GW-15
 2/1; GW-16 0/3; Checkpoint F 0/3; GW-17 5/0; GW-18 3/0; GW-19 3/0; GW-20 3/0; GW-21 2/11; GW-22 1/16;
-GW-23 1/10; GW-24 4/16; GW-25 1/7; GW-26 1/7; REFINE 6/3; ENHANCE-LOOK 6/3; POLISH 9/3; GW-27 3/5;
+GW-23 1/10; GW-24 4/16; GW-25 1/7; GW-26 1/7; REFINE 6/3; ENHANCE-LOOK 6/3; POLISH 9/3; PRESENCE 13/3; GW-27 3/5;
 GW-28 1/10; GW-29 2/7; Merge 4/1; VERIFY-FINAL 7/2; VERIFY-ROUND2 7/2; VERIFY-ROUND3 8/3.
 
 **The two known failures.**
@@ -209,7 +209,54 @@ looked at beside a real `UIGlassEffect` where the page has one).**
   4 points inward inside the bevel and leaves a small gray wedge (faint at normal size, plain when
   zoomed). The liquid vessel's contour sheets read as topographic rings rather than one clean gel.
   On the paper desk page two lab captions overlap (a lab layout flaw, not the glass). Nothing
-  here was felt with a finger or seen on a device.
+  here was felt with a finger or seen on a device. (The Presence pass below fixed the cap wedge,
+  the vessel rings and the captions, and narrowed, but did not close, the presence gap.)
+
+**Presence pass (PRESENCE, then VERIFY-ROUND4; experimental, unreleased; iPhone 18 Pro simulator
+and My Mac only).** `GlassLighting.presence` (0...1, default 0, refined look only) makes the
+glass livelier through color and light and adds no bend: the body picks up the backdrop softly
+(scaled by a flatness gate), lifts without graying, the inner edge glows in the backdrop's hue
+on the lit side, the far side is deeper, an inlaid dome gets a shade; a plain rim refraction is
+feathered to 0 at the outline (never above its old value), which removed the cap wedge. The lab
+applies it through `RefinedLook` (0.85, a lighter tint: the gray cast came from a gray tint
+mixed in linear light), the amber vessel is one clean gel (two soft sheets), the paper desk
+captions no longer overlap. Reduce Transparency and Increase Contrast set it to 0 in
+`GlassAccessibilityPolicy`; presence 0 draws the previous bytes (the frozen-baseline suites
+pass unmodified). Notes: [glass-optics](docs/glass-optics.md#presence-a-livelier-body-and-edge-with-no-extra-bend-presence),
+[studies](docs/studies.md#presence-pass-presence-and-its-check-experimental-unreleased).
+
+- *The independent check found a defect and fixed it.* Both builds (`67bf9cb` and `1915c8b`)
+  were built fresh and captured on 23 pages with the same arguments, and on the dot grid,
+  checkerboard and ribbons backdrops. The first presence build left a lattice of ghost copies
+  over a dot grid and a checkerboard (13 sparse samples are not an average across an edge), and
+  a pale second image of small colored dots under the thick lens (the paper desk marble: the
+  pickup pulled in the undisturbed backdrop). A flatness gate on the pickup, and on the glow's
+  color and strength, removed both (`Glass.metal`; captures `gw-presence-verify-ghost-*`). The
+  committed captures of the nine changed pages were replaced.
+- *Bends: not more visible in geometry.* No lens, offset, dispersion or touch value was
+  changed; the only refraction edit is a factor of at most 1. On a checkerboard the checker
+  edges inside the glass agree with the previous build within 0.3 px and the rim shapes look
+  alike (`gw-presence-verify-bend-checker-*`). The same bend reads with about 19 percent more
+  contrast on a black and white pattern (50 to 230 against 64 to 215 levels of luma), because
+  the old gray haze is gone; on smooth backdrops, where the lab's pages sit, it is not visible.
+- *Presence next to native glass: narrowed, not closed.* Over the orbs the refined capsule,
+  circle and rounded rectangle keep their colors (a red orb stays a saturated red), carry a
+  thin lit rim and a deeper far side, and the thick-lens capsule reads as thick glass with a
+  visible dome; the Focus pill and the amber vessel are the best pages. The native body is
+  still more present as a material (frosted, with a stronger hairline); ours stays clear. On
+  the paper page a refined panel reads as a soft cushion more than as glass, and on the
+  charcoal page the body is darker than the native one. Not tested: text-heavy backdrops (a dot
+  grid, a checkerboard and colored dots on paper stood in), a device.
+- *Increase Contrast, pre-existing:* a few faint bright dashes sit on the top edge of the
+  refined rounded rectangle where the cyan orb meets it (they are in the previous build too).
+
+| Destination (final tree, `xcresulttool`) | Result |
+| --- | --- |
+| Package scheme, My Mac | 211 passed, 0 failed, 0 skipped |
+| Package scheme, iPhone 18 Pro simulator | 292 passed, 0 failed, 2 skipped (the two Metal 4 tests) |
+| All lab UI tests, iPhone 18 Pro simulator | 50 results: 49 passed, 0 failed, 1 skipped (the iPad-only two-scene test); the known gallery dark audit passed this time, unexplained, nothing changed for it |
+| Studies and versus smoke, iPad Pro 13-inch (M5) simulator | 2 passed, 0 failed |
+| `scripts/consumer_check.sh` at the committed fix, My Mac | see the final report in the checklist Evidence |
 
 **How to build and run here.** The Xcode MCP bridge times out when it opens a workspace
 on this Mac (`XcodeOpenWorkspace` after 10 s, on every path), so the whole round used

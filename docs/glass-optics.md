@@ -1221,13 +1221,43 @@ suites check this). Shader: `Glass.metal`, "Presence (refined look)".
 
 | Term | What it does | Values (at level 1) |
 | --- | --- | --- |
-| Backdrop pickup | The body mixes toward a soft, slightly more vivid average of the backdrop around the pixel (13 bilinear samples on two rings, radius 0.7 of the bevel, at most half the inscribed radius). No sample is moved: it only colors the body. | 14 % in the middle, 28 % at the rim; the average is 1.3 times more saturated than the backdrop |
+| Backdrop pickup | The body mixes toward a soft, slightly more vivid average of the backdrop around the pixel (13 bilinear samples on two rings, radius 0.7 of the bevel, at most half the inscribed radius), times a flatness gate (below). No sample is moved: it only colors the body. | 14 % in the middle, 28 % at the rim, times the gate; the average is 1.3 times more saturated than the backdrop |
 | Saturation | The body's own color. | + 14 % |
 | Luminance gain | A gain, so the hue is kept; a little more toward the light. | + 12 % on dark pages (+ 4 % on light), times 1 +- 0.5 across the panel, and a trace (1.2 %) of the sky |
 | Inner edge glow | A thin glow just inside the outline in the backdrop's own hue, brightened (the sky's color where the backdrop is nearly black), brighter toward the light. | falls off over an eighth of the bevel plus 1.5 px; 6 % all round and 38 % more on the lit side (half on light pages; half over a nearly black backdrop) |
 | Deeper far side | A soft shade just inside the hairline on the side away from the light. | up to 30 %, from 0.4 px in, over 0.3 of the bevel plus 2 px |
 | Inlay shade | A lens inlay (the dome button) gets a shade on its far side that grows toward its base, a lift on its lit side, and a faint contact shade on the glass beside it, away from the light. Its rim light is the existing `rimLine` (0.3 in the lab, was 0.25). | far side 32 %, lit side 22 % of the sky, contact 22 % |
 | Feathered rim refraction | A plain rim refraction (no lens) is multiplied by `smoothstep(0, 0.22 bezel, depth)`. It is never above the plain value. | see the cap below |
+
+**The flatness gate (VERIFY-ROUND4).** The independent check put the panels over a
+dot grid, a checkerboard and small colored dots on paper, and found a defect the smooth
+backdrops hide: thirteen taps are an average only where the backdrop is smooth. Across
+an edge, a dot or a character they leave faint ghost copies (a lattice of dim dots
+between the real dots, small dark rectangles at the checker corners), they wash a small
+colored dot out toward the paper, and under a thick lens they pull in the *undisturbed*
+backdrop, which shows as a second, paler copy of a dot beside its bent image (the
+marble on the paper desk). The pickup and the glow's color and strength now follow a
+gate `w` (0...1) that is 1 where the backdrop is flat and 0 where it is not: the
+largest distance of any one of the thirteen samples, and of what the glass itself shows
+of the backdrop (before the tint and the fill), from the average, relative to
+`0.06 + luma(average)`, through `1 - smoothstep(0.10, 0.32, .)`. Grain and slow shading
+stay below 0.10; one sample on an edge or a dot is far above 0.32. Where the gate is 0
+the body gets no pickup and the glow uses what the glass shows, so no tap pattern can
+appear. The cost is a trace of the pickup beside orb edges (against the first presence
+build the lab pages changed in at most 6.4 percent of their pixels, by at most 63 of 255). Captures:
+`gw-presence-verify-ghost-dots-*` (the old build, the presence before the gate, the
+presence with it) and `gw-presence-verify-ghost-marble-*` (same three, 2 times zoom).
+
+**Bends, measured (VERIFY-ROUND4).** The geometry of every bend is unchanged or smaller:
+no lens, offset, dispersion or touch term was edited, the plain rim refraction is only
+multiplied by a factor of at most 1 (and a lens panel, which ignores it, is untouched);
+on the checkerboard the positions of the checker edges inside the glass agree with the
+previous build within 0.3 px, and the rim shapes look alike
+(`gw-presence-verify-bend-checker-*`, the previous build on the left). What changed is
+how much the same bend shows on a hard-edged pattern: the old tint's gray haze is gone,
+so black and white seen through the circle now span 180 levels of luma (50 to 230)
+where they spanned 151 (64 to 215), 19 percent more contrast on the same bend. On smooth
+backdrops the difference is not visible.
 
 **The cap artifact (item 4).** The plain rim refraction moves the sample by
 `maxDisplacement x (1 - depth / bezel)^2`, which is its largest, about 5 points on the
