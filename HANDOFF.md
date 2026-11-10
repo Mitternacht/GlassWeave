@@ -9,7 +9,7 @@ open; [the task checklist](tasks/todo.md) records what is verified. The rest
 of this page is the original handoff. The user deliberately reserved
 implementation for Claude.
 
-## Pick up here (2026-11-10, after the glass-beyond, interaction, polish, Metal 4, presence and clean rounds)
+## Pick up here (2026-11-10, after the glass-beyond, interaction, polish, Metal 4, presence and two clean rounds)
 
 **Branches.** Nothing is merged into `main`, nothing is pushed, nothing is tagged.
 
@@ -281,7 +281,7 @@ and has a text-heavy backdrop page. Notes: [glass-optics](docs/glass-optics.md#c
   the squares' edges inside the glass are pixel-identical before and after. The bend is still
   visible as a bend on a checkerboard at the bevel, and the paper desk's lens pill still turns small
   dots into eggs; those are the lens values, not this pass.
-- *Still open.* (1) The Light fields page's four-corner field has a diagonal crease at each inner
+- *Still open (first pass; items 1, 2 and 4 and most of item 3 were fixed by clean pass 2 below).* (1) The Light fields page's four-corner field has a diagonal crease at each inner
   corner (the distance-to-outline medial axis; the same before the pass; not fixed, a smoothed
   distance in `gw_light_emitter` behind `clean` would do it). (2) The chrome and pearl rings have a
   hard one-pixel step between the dark outer band and a bright lip (a staircase at 8x to 16x, not
@@ -301,6 +301,44 @@ and has a text-heavy backdrop page. Notes: [glass-optics](docs/glass-optics.md#c
 | All lab UI tests, iPhone 18 Pro simulator | 50 results: 48 passed, 1 failed, 1 skipped (the iPad-only two-scene test). The failure, `PresentationUITests.testHeldDrawablesNeverStallTheMainThreadAndTheRequestDrawsOnRelease`, timed out once while `scripts/consumer_check.sh` ran on the same Mac; it passed 3 of 3 alone. The known gallery dark audit passed again (unexplained, nothing changed for it). |
 | Studies and versus smoke, iPad Pro 13-inch (M5) simulator | 2 passed, 0 failed |
 | `scripts/consumer_check.sh` at `71ee228`, My Mac | passed (one pin at that revision, the consumer test passed) |
+
+**Clean pass 2 (CLEAN-2, then VERIFY-CLEAN-2; experimental, unreleased; iPhone 18 Pro simulator and My Mac
+only).** The user: "I want to match Apple's, but at the same time have those glow capabilities that Apple
+cannot do." The default clean rim is now a thin crisp hairline (a Gaussian of the exact distance to the
+outline, about 0.5 pt wide at half maximum, down to 10 percent of its peak 1.3 pt in); the wide soft rim of the
+first pass is the opt-in `GlassLighting.softRim` (0...1, default 0, packed above the clean level in
+`lighting.tint.w`; the lab's `-lab.softRim 1`). The same pass smoothed the four-corner light field's
+diagonal crease, the ring lens's hard step, the grain of a flat body (the triangular dither now goes only
+where the shader draws a gradient) and the opaque panel's edge shade under Reduce Transparency. Notes:
+[glass-optics](docs/glass-optics.md#clean-pass-second-round-a-thin-crisp-rim-five-fixes-clean-2),
+[studies](docs/studies.md#clean-pass-2-and-its-independent-check-clean-2-verify-clean-2-experimental-unreleased).
+
+- *The independent check (VERIFY-CLEAN-2)* built the pass and its parent (`887103b`, from `git archive`)
+  fresh and captured 38 pages with the same launch arguments at 3x, then cropped at 2x to 24x beside the real
+  `UIGlassEffect` twin (`gw-verify-clean2-*`). Every page is clean: no streak, stripe, band, step, doubled
+  line, dash or crease that the native twin does not also show, and the native body shows 8-bit contour
+  terraces at 6x to 24x contrast where ours shows a smooth gradient. Rim, charcoal top edge: native peak +50
+  over the body, half maximum 2.8 px, 10 percent at 4 px; ours before +57, 2.7 px, 8 px; ours after +53,
+  2.5 px, 4 px (the same definition for both). On the light page the dark line is 26 levels deep and 1 px wide at
+  the top (native 25, 2 px).
+- *Bends: not raised.* Every dark/light edge of a checkerboard inside the glass sits within 0.5 px (almost all
+  under 0.1 px) of where it was before the pass, on the lens page and on the compare page; the glow
+  capabilities (the gallery, light fields, the pill's pooled glow, the vessel's liquid, frost, merge, touch)
+  are smooth at 3x to 4x contrast, and `-lab.softRim 1` reproduces the first pass's rim within 2 to 4 levels.
+- *Still open.* (1) On mid-tone backdrops (orbs) the lip is fainter than the native one (+20 against +50 levels). (2) The
+  native side lines (near black on charcoal, 82 levels on paper) are not matched, and ours is darker on
+  charcoal (body 48 against 62). (3) The grain on a flat body is two times the native level (rms 0.34 and 0.49
+  against 0.17 and 0.25). (4) The dome button's outline has a one-pixel staircase at 12x. (5) No tests for the
+  new terms, no CPU mirror, no device, no M5 cost of the thirteen extra distance evaluations. The first pass's
+  other open items (the ring step, the crease, the opaque panel's edge shade) are fixed.
+
+| Destination (clean pass 2, `xcresulttool`) | Result |
+| --- | --- |
+| Package scheme, My Mac | 211 passed, 0 failed, 0 skipped |
+| Package scheme, iPhone 18 Pro simulator | 292 passed, 0 failed, 2 skipped (the two Metal 4 tests) |
+| All lab UI tests, iPhone 18 Pro simulator | 50 results: 49 passed, 0 failed, 1 skipped (the iPad-only two-scene test); the known gallery dark audit, the frame-lifecycle cycles and the held-drawables test all passed, nothing was rerun |
+| Studies and versus smoke, iPad Pro 13-inch (M5) simulator | 2 passed, 0 failed |
+| `scripts/consumer_check.sh` at `7517cfb`, My Mac | passed (one pin at that revision, the consumer test passed) |
 
 **How to build and run here.** The Xcode MCP bridge times out when it opens a workspace
 on this Mac (`XcodeOpenWorkspace` after 10 s, on every path), so the whole round used

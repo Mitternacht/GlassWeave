@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH, PRESENCE, CLEAN)
+## Unreleased: glass beyond native (experimental, GW-21 to GW-29, GW-12, GW-13, GW-15, GW-11, POLISH, PRESENCE, CLEAN, CLEAN-2)
 
 Requested by the user on 2026-11-09, on the branch `implement/glass-beyond`
 (nothing merged into `main`, nothing tagged). Every API is experimental, every
@@ -156,6 +156,25 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   field's diagonal crease at its inner corners, a hard one-pixel band step on the
   chrome and pearl rings, a fine grain of about one 8-bit step, a rim wider and
   softer than the native line) are in `docs/studies.md`, "Clean pass".
+- Clean pass 2 (CLEAN-2, after "I want to match Apple's, but at the same time have those
+  glow capabilities that Apple cannot do"): with `GlassLighting.clean` on, the default rim
+  is a thin crisp hairline (a Gaussian of the exact distance to the outline: about 0.5 pt
+  wide at half maximum, 10 percent of its peak 1.3 pt in, one light and one shade around
+  the outline), and the first pass's wide soft rim is the opt-in
+  `GlassLighting.softRim` (0...1, default 0; non-finite rejected with `.softRim`, finite
+  clamped; packed at 65536 times its 8-bit level in `lighting.tint.w`, sizes and offsets
+  unchanged). Also under the clean look or the triangular dither: the four-corner light
+  field's diagonal crease is smoothed (a 13-tap signed distance), a ring lens's profile
+  turns up over its first four pixels at each end (the hard one-pixel step of the chrome
+  and pearl rings is gone; the first four pixels of a ring are gentler, no bend is
+  raised), the triangular dither goes only where the shader makes a gradient (a flat body
+  has about a third of the grain), and the opaque panel under Reduce Transparency has its
+  soft gray inner edge shade again. The independent check (VERIFY-CLEAN-2: both builds,
+  38 pages, 3x, crops at 2x to 24x) found every page clean next to the native twin, the
+  rim as thin as the native one on charcoal (half maximum 2.5 against 2.8 px, 10 percent
+  at 4 px in both; before 8 px), every checkerboard edge inside the glass where it was
+  (0.0 to 0.5 px), the glows smooth at 3x to 4x contrast and `-lab.softRim 1` equal to the
+  first pass within 2 to 4 levels (`docs/studies.md`, "Clean pass 2").
 - The `EnhancedNativeGlassViewTests` check "The pulse resumes where it stopped" measures how long the pulse ran instead of assuming 0.3 s, so a busy main actor no longer fails it.
 
 ### Known issues
@@ -169,11 +188,12 @@ only. Design notes: [glass optics](docs/glass-optics.md),
   configuration..." and `FrameLifecycleTests` "100 hide and show cycles...",
   a race in the test itself) fail now and then. `GlassRenderer` now builds 16 pipeline
   variants at creation (about 6 to 15 ms, 1 to 4 ms before); see HANDOFF.md.
-- Clean pass check (VERIFY-CLEAN) open items: the Light fields page's four-corner
-  field has a diagonal crease at each inner corner (same before the pass); the chrome
-  and pearl rings have a hard one-pixel step between their dark outer band and a bright
-  lip; the body carries a static grain of about one 8-bit step; under Reduce
-  Transparency the opaque panel lost its soft inner edge shade.
+- Clean pass check (VERIFY-CLEAN) open items, fixed by clean pass 2 (the four-corner light
+  field's crease, the rings' hard step, the opaque panel's edge shade; the grain is a third of
+  what it was but still two times the native level).
+- Clean pass 2 open items: the rim's lip on mid-tone backdrops is fainter than the native one
+  (+20 against +50 levels on orbs), the native glass's near-black side lines are not matched,
+  the dome button's outline has a one-pixel staircase at 12x, and no test covers the new terms.
   `PresentationUITests.testHeldDrawablesNeverStallTheMainThreadAndTheRequestDrawsOnRelease`
   timed out once in a full run while another job used the Mac and passed 3 of 3 alone.
 - The touch response draws no ring on frost and fill panels (those pipeline
