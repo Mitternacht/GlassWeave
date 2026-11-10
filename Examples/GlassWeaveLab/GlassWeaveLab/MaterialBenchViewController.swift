@@ -502,7 +502,7 @@ final class MaterialBenchViewController: UIViewController {
             var capsule = RefinedLook.panel(corner: 999, bezel: 30, dark: true)
             capsule.refraction = 1
             capsule.tint = GlassTint(red: 0.85, green: 0.88, blue: 1, strength: 0.05)
-            capsule.lens = GlassLens(profile: .rim, dispersion: 1, dispersionTaps: .sixTap)
+            capsule.lens = GlassLens(profile: .rim, dispersion: 0.3, dispersionTaps: .sixTap, softness: 1)
             capsule.lighting.fresnel = 0.9
             capsule.frost = GlassFrost(profile: .clearRim, sigma: 7, transition: 24, grain: 0.35, saturation: 1.15, brightness: 1.03)
             return capsule
