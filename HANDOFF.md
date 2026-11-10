@@ -9,9 +9,63 @@ open; [the task checklist](tasks/todo.md) records what is verified. The rest
 of this page is the original handoff. The user deliberately reserved
 implementation for Claude.
 
-## Pick up here (2026-11-10, after the glass-beyond, interaction, polish, Metal 4, presence and two clean rounds)
+## Pick up here (2026-11-10, after the glass-beyond, interaction, polish, Metal 4, presence, two clean rounds and the capability round GW-30 to GW-34)
 
-**Branches.** Nothing is merged into `main`, nothing is pushed, nothing is tagged.
+**Capability round (VERIFY-ROUND5, 2026-11-10): GW-30 to GW-34 are built, merged and checked.** Read this block first;
+the older blocks below it still describe the earlier rounds.
+
+- *Branches.* `implement/glass-beyond` holds everything: GW-30 (`ebdb1cc`, overlay mode), GW-34
+  (`0a8dd3d`, touch on frost and fill) and the real merge commit `0bd1123` of `implement/glass-host`
+  (GW-32 `da82d7b` springs and proximity merge, GW-33 `e8334aa` tilt, GW-31 `b67b519` snapshot source). The one
+  conflict was `docs/interaction.md` (both titles kept). `GlassWeave-host` (the worktree folder) still exists;
+  remove it after review. The branch was pushed to `origin` (`implement/glass-beyond`, fast-forward, nothing else: not `main`, no tag, not `implement/glass-host`) at the end of VERIFY-ROUND5 because the user said so in chat; the commit that carries this note is the pushed tip.
+- *What exists (experimental, unreleased, off by default).* **Overlay mode** (`GlassRenderer.Mode.overlay`, a separate
+  overlay shader): a transparent surface that tints, lights, glows and shades live UIKit content; it cannot bend or frost
+  it. **`UIKitSnapshotSource`**: a pooled snapshot of a UIKit region as a background frame, so the custom glass can bend and
+  frost real, static UI (refreshed on demand). **`PanelSpring`** and **`GlassProximityMerge`**: an interruptible frame spring
+  and merging by proximity with hysteresis, pairs and clusters. **`GlassMotionSource`** (injected and Core Motion) and
+  **`GlassTiltLight`**: a small low-passed tilt of the light. **Touch on frost and fill**: two new pipeline variants
+  (`touchedFrosted`, `touchedFilled`). Design notes: [overlay](docs/overlay.md), [snapshot](docs/snapshot.md),
+  [interaction](docs/interaction.md). Lab pages and launch arguments: the README's table (`-lab.overlay`, `-lab.snapshot`,
+  `-lab.drag`, `-lab.tilt`, `-lab.touch.kind`).
+- *Verification (merged tree, `xcresulttool` counts, one job after the other; Xcode MCP could not open a workspace, so `xcodebuild`).*
+
+| Destination | Result |
+| --- | --- |
+| Package scheme, My Mac | 214 passed, 0 failed, 0 skipped (`xcresulttool`: 211 plus 3 tests in the two Swift Testing runs) |
+| Package scheme, iPhone 18 Pro simulator (iOS 27.2) | 297 passed, 0 failed, 2 skipped of 299 (the two Metal 4 comparison tests) |
+| All lab UI tests, iPhone 18 Pro simulator | 50 results, 49 passed, 0 failed, 1 skipped (the iPad-only two-scene test); the gallery dark audit passed again, unexplained |
+| Studies and versus smoke, iPad Pro 13-inch (M5) simulator | 2 passed, 0 failed |
+| `scripts/consumer_check.sh` at `f0c6604`, My Mac | passed (one pin at that revision, the consumer test passed) |
+
+  All eleven frozen-baseline suites (`GlassBaselineGW12`, `GW13`, `GW20` to `GW25`, `GW28`, `GW30`, `GW34`) pass on both package
+  destinations. The old pages were pixel-compared with a build of the parent `87dda27`: compare (three backdrops), lens, chrome,
+  merge, three studies, the paper desk, the versus screen and the paused main screen are identical; the animated shapes, vessel and amber
+  pages and the frost page differ only within the clock's own noise (parent against parent differs as much); the Touch page's
+  glass is identical. One small lab fix was made here: the Drag, Tilt and Touch pages drew
+  their own button labels in white, unreadable on the opaque Reduce Transparency sheet in light mode (the Touch page had it since
+  GW-12); they now use the system label color under that setting (not covered by a test).
+- *Visual verdict per page, simulator at 3x beside the real `UIGlassEffect` twin (crops: `docs/evidence/captures/gw-verify5-*`).*
+  **Overlay:** works and is clean (thin rim, soft shadow, no streak, band or grain), and the pooled light along the capsule is
+  calm and something native cannot show; but the list's text stays crisp under it and runs through the capsule's label on the dark
+  page, where native frosts it, and the light bar reads as a milky veil. **Over real UI:** works; an even frost and a thin
+  rim over a snapshot of real rows; native is lighter, keeps faint text shapes and has a brighter rim; a white glyph under the dark
+  page's left end leaves a pale smudge with a faint inner arc at 5x; static, a full-screen refresh took about 41 ms against a 33 ms
+  bound. **Drag:** works; a smooth neck and no seam, close to Apple's container merge, clear with a thin rim where Apple's merged
+  body is a flat gray plate on black. **Tilt:** works; the light moves the rim and the shadow (clock off once settled); the pill and
+  the round button shift only faintly, and the chrome ring shows the light but its pearly double bands read as the soap-bubble ring the
+  user does not want (an opt-in look from before). **Touch on frost and fill:** works; a soft pool on the frost, a pale light on the
+  glass above the liquid (the liquid unchanged), no ring, smear or ghost; the round vessel (an earlier look) reads as an orange lamp in
+  a gray ring. No new bend is noticeable as a bend at normal size. Native's twin is idle in the simulator.
+- *Still open from this round.* A scrim or legibility control for text under an overlay panel; the snapshot capsule's smudge and
+  arc; `PanelSpring`'s velocity carry-over has no trace test; the snapshot's full-screen refresh is over its bound; every device
+  item (the Core Motion source, feel, battery, cost, a finger on frost and vessels, live VoiceOver); the skipped test groups; the one
+  combined M5 characterization run; CI has never run on GitHub; the three known flaky tests below. The 60 MB of captures
+  that the build agents committed for these tasks are in history; do not add more full-page captures.
+
+**Earlier state (before the capability round).** Where the text below says nothing is pushed, that was true then: the remote then held `implement/glass-beyond` at `46d6758`.
+
+**Branches.** Nothing is merged into `main` and nothing is tagged; see the capability-round block above for what was pushed.
 
 - `implement/milestone-1`: the v0.1 candidate, GW-01 to GW-10.
 - `implement/glow`: that candidate plus the glow work, GW-14 and GW-17 to GW-20.
@@ -20,8 +74,8 @@ implementation for Claude.
   GW-13 (merging), GW-15 (the SwiftUI adapter), the POLISH pass (subtle, blended bends)
   and GW-11 (the Metal 4 submission experiment and its decision). The vessel work, GW-15
   and GW-11 were built on `implement/glass-host` and joined with real merge commits.
-- `implement/glass-host`: fully merged into `glass-beyond` (GW-11 is its last commit, merged
-  by `59750fa`). Its sibling worktree folder (`GlassWeave-host`) still exists next to the main
+- `implement/glass-host`: fully merged into `glass-beyond` twice (GW-11 is the last commit of the first
+  round, merged by `59750fa`; GW-31, GW-32 and GW-33 by `0bd1123`). Its sibling worktree folder (`GlassWeave-host`) still exists next to the main
   checkout and was not removed; remove it after review.
 
 **The user's goal.** GlassWeave's own Metal glass must be far more capable and more
@@ -120,7 +174,7 @@ soft pool. Still short: see the verdict below.
    harness is open (device only), as are Metal 4 encodings of frost, grounding, shapes, fills and
    touch, which exist only if a device run ever reopens it. GW-12, GW-13 and GW-15 are built with their one safety
    test each; open for them: a finger on a device (tap, drag and cancel through the observer),
-   their cost, frost and fill panels under touch (they carry no touch code), two simultaneous
+   their cost, frost and fill panels under touch (built in GW-34, simulator only), two simultaneous
    touches (implemented, only looked at pinned), merging with frost, fill or touch on the
    merged panel, a real-scene visibility test and a live VoiceOver pass through the adapter, an
    Xcode preview, and the CPU-mirror and controlled-clock tests the fast pass skipped.
@@ -135,6 +189,8 @@ and carry no reason of their own): GW-01 2/1; GW-02 2/1; GW-03 3/0; Checkpoint A
 2/1; GW-16 0/3; Checkpoint F 0/3; GW-17 5/0; GW-18 3/0; GW-19 3/0; GW-20 3/0; GW-21 2/11; GW-22 1/16;
 GW-23 1/10; GW-24 4/16; GW-25 1/7; GW-26 1/7; REFINE 6/3; ENHANCE-LOOK 6/3; POLISH 9/3; PRESENCE 13/3; GW-27 3/5;
 GW-28 1/10; GW-29 2/7; Merge 4/1; VERIFY-FINAL 7/2; VERIFY-ROUND2 7/2; VERIFY-ROUND3 8/3.
+After the capability round (191 ticked, 166 open in all, counted the same way): GW-30 3/1; GW-31 2/1; GW-32 3/1;
+GW-33 2/1; GW-34 2/1; VERIFY-ROUND5 7/4 (every unticked line has its reason).
 
 **The two known failures.**
 

@@ -70,6 +70,10 @@ The user explicitly asked for glass that can take tints and glows at its edges i
 
 The user approved building GW-21 to GW-29 ([the proposal](../docs/proposals/glass-beyond-native.md)) as a fast pass, to make GlassWeave's own Metal glass more capable and more interesting than Apple's `UIGlassEffect`, in Apple's own restraint (a mostly clear body, one light, a thin rim, calm shadows). They are built, merged on `implement/glass-beyond`, and unreleased: light fields, thick lens with dispersion, one light with chrome and prismatic finishes, frost, shadows, freeform shapes, a liquid fill, non-blocking presentation with quality tiers, four studies and an Apple vs GlassWeave screen. The design notes are [glass-optics](../docs/glass-optics.md), [frost](../docs/frost.md), [presentation](../docs/presentation.md) and [studies](../docs/studies.md); the evidence is in [the checklist](todo.md).
 
+## Round summary (2026-11-10): the capability round, GW-30 to GW-34
+
+The user asked to build what was left. GW-30 (overlay mode), GW-31 (a snapshot source), GW-32 (a panel spring and merging by proximity), GW-33 (a tilt-driven light) and GW-34 (touch on frost and liquid panels) were built as a fast pass, merged on `implement/glass-beyond` and checked in VERIFY-ROUND5 (simulator and My Mac only; [the verdict per page](../HANDOFF.md)). Still open from the round: a legibility control for text under an overlay panel, the snapshot's full-screen refresh time, the Core Motion source and every device item, the skipped test groups, one combined M5 characterization run, and CI.
+
 Proposed next round, in this order:
 
 1. **Measure.** One combined M5 characterization run (every effect's cost, per tier), then a physical baseline device: the cost and shimmer sign-offs, the GW-27 120 Hz trace, and a live VoiceOver pass. No performance claim exists until then.
